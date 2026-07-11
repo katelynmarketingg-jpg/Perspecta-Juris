@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: perspecta-juris
+    env: node
+    plan: starter
+    buildCommand: npm install && npm run build
+    startCommand: node server/index.mjs
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "8788"
+      - key: DATABASE_URL
+        sync: false           # set manually in Render dashboard (Neon.tech URL)
+      - key: JWT_SECRET
+        generateValue: true
+      - key: FILES_DIR
+        value: /var/data/files
+      - key: HUB_URL
+        value: https://perspecta-hub.onrender.com
+    disk:
+      name: juris-data
+      mountPath: /var/data
+      sizeGB: 2

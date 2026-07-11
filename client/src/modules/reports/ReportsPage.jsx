@@ -1,0 +1,304 @@
+import { useState } from 'react'
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
+  ResponsiveContainer, Legend, PieChart, Pie, Cell,
+} from 'recharts'
+import { IconBarChart2, IconPieChart, IconUsers2, IconTrendingUp, IconDollar, CustomSelect } from '../../components/ui'
+
+const fmt = n => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(n)
+
+const BY_AREA = [
+  { area: 'Cível',      receita: 42000, processos: 18, conversao: 74 },
+  { area: 'Trabalhista',receita: 31500, processos: 14, conversao: 68 },
+  { area: 'Tributário', receita: 28000, processos: 9,  conversao: 81 },
+  { area: 'Família',    receita: 19200, processos: 12, conversao: 60 },
+  { area: 'Empresarial',receita: 15800, processos: 5,  conversao: 90 },
+  { area: 'Imobiliário',receita: 9500,  processos: 4,  conversao: 55 },
+]
+
+const BY_LAWYER = [
+  { name: 'Ana Souza',     processos: 14, receita: 58000, taxa: 82 },
+  { name: 'Bruno Lima',    processos: 11, receita: 44500, taxa: 73 },
+  { name: 'Carla Mendes',  processos: 9,  receita: 32000, taxa: 67 },
+  { name: 'Diego Santos',  processos: 7,  receita: 22500, taxa: 71 },
+  { name: 'Erica Duarte',  processos: 6,  receita: 18000, taxa: 78 },
+]
+
+const MONTHLY = [
+  { month: 'Dez', honorarios: 14800, custas: 2100, liquido: 12700 },
+  { month: 'Jan', honorarios: 18500, custas: 3200, liquido: 15300 },
+  { month: 'Fev', honorarios: 22000, custas: 2800, liquido: 19200 },
+  { month: 'Mar', honorarios: 19200, custas: 3500, liquido: 15700 },
+  { month: 'Abr', honorarios: 28500, custas: 4100, liquido: 24400 },
+  { month: 'Mai', honorarios: 25000, custas: 3800, liquido: 21200 },
+]
+
+const PIE_COLORS = ['#c2410c', '#fb923c', '#fbbf24', '#34d399', '#60a5fa', '#a78bfa']
+
+const CustomTooltip = ({ active, payload, label }) => {
+  if (!active || !payload?.length) return null
+  return (
+    <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg p-3 text-xs shadow-modal">
+      <p className="font-semibold text-white mb-1">{label}</p>
+      {payload.map(p => (
+        <p key={p.dataKey} style={{ color: p.color }}>
+          {p.name}: {typeof p.value === 'number' && p.value > 999 ? fmt(p.value) : `${p.value}${p.dataKey === 'taxa' ? '%' : ''}`}
+        </p>
+      ))}
+    </div>
+  )
+}
+
+const PERIOD_OPTIONS = [
+  { value: '30d',  label: 'Últimos 30 dias' },
+  { value: '90d',  label: 'Últimos 90 dias' },
+  { value: '6m',   label: 'Últimos 6 meses' },
+  { value: '12m',  label: 'Últimos 12 meses' },
+]
+
+export default function ReportsPage() {
+  const [period, setPeriod] = useState('6m')
+  const [tab, setTab]       = useState('commercial')
+
+  const totalReceita  = BY_AREA.reduce((s, a) => s + a.receita, 0)
+  const totalProcessos = BY_AREA.reduce((s, a) => s + a.processos, 0)
+  const avgConversao  = Math.round(BY_AREA.reduce((s, a) => s + a.conversao, 0) / BY_AREA.length)
+  const melhorArea    = [...BY_AREA].sort((a, b) => b.receita - a.receita)[0]
+
+  return (
+    <div className="p-6 space-y-5 page-enter">
+      {/* Header */}
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <h1 className="text-lg font-semibold text-white">Relatórios Comerciais</h1>
+        <CustomSelect
+          value={period}
+          onChange={setPeriod}
+          options={PERIOD_OPTIONS}
+          className="w-44"
+        />
+      </div>
+
+      {/* KPIs */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {[
+          { label: 'Receita Total',     value: fmt(totalReceita),   icon: <IconDollar size={16} />,       color: 'text-emerald-400', bg: 'bg-emerald-900/30' },
+          { label: 'Processos Ativos',  value: totalProcessos,      icon: <IconBarChart2 size={16} />,    color: 'text-blue-400',    bg: 'bg-blue-900/30' },
+          { label: 'Taxa de Conversão', value: `${avgConversao}%`,  icon: <IconTrendingUp size={16} />,   color: 'text-amber-400',   bg: 'bg-amber-900/30' },
+          { label: 'Melhor Área',       value: melhorArea.area,     icon: <IconPieChart size={16} />,     color: 'text-brand-500',   bg: 'bg-brand-500/20' },
+        ].map(k => (
+          <div key={k.label} className="card p-4">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-[11px] text-[var(--text-muted)] uppercase tracking-wider">{k.label}</p>
+              <div className={`w-7 h-7 rounded-lg ${k.bg} flex items-center justify-center ${k.color}`}>{k.icon}</div>
+            </div>
+            <p className={`text-xl font-bold ${k.color} truncate`}>{k.value}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* Tabs */}
+      <div className="flex gap-1 border-b border-[var(--border)]">
+        {[
+          { key: 'commercial', label: 'Por Área Jurídica' },
+          { key: 'lawyers',    label: 'Por Advogado' },
+          { key: 'monthly',    label: 'Evolução Mensal' },
+        ].map(t => (
+          <button key={t.key} onClick={() => setTab(t.key)}
+            className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px ${
+              tab === t.key
+                ? 'border-brand-500 text-accent-400'
+                : 'border-transparent text-[var(--text-muted)] hover:text-[var(--text-secondary)]'
+            }`}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Por Área Jurídica */}
+      {tab === 'commercial' && (
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {/* Bar chart receita */}
+            <div className="card p-5">
+              <h3 className="text-sm font-semibold text-white mb-4">Receita por Área</h3>
+              <ResponsiveContainer width="100%" height={220}>
+                <BarChart data={BY_AREA} barSize={20}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#1f1f1f" vertical={false} />
+                  <XAxis dataKey="area" tick={{ fill: '#4a4a4a', fontSize: 10 }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fill: '#4a4a4a', fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={v => `R$${(v/1000).toFixed(0)}k`} />
+                  <Tooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(255,255,255,0.03)' }} />
+                  <Bar dataKey="receita" name="Receita" fill="#c2410c" radius={[3,3,0,0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+
+            {/* Pie chart distribuição */}
+            <div className="card p-5">
+              <h3 className="text-sm font-semibold text-white mb-4">Distribuição de Processos</h3>
+              <div className="flex items-center gap-4">
+                <ResponsiveContainer width="100%" height={200}>
+                  <PieChart>
+                    <Pie
+                      data={BY_AREA}
+                      dataKey="processos"
+                      nameKey="area"
+                      cx="50%"
+                      cy="50%"
+                      outerRadius={80}
+                      innerRadius={48}
+                    >
+                      {BY_AREA.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
+                    </Pie>
+                    <Tooltip formatter={(v, n) => [v, n]} contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 11 }} />
+                  </PieChart>
+                </ResponsiveContainer>
+                <div className="space-y-1.5 flex-shrink-0">
+                  {BY_AREA.map((a, i) => (
+                    <div key={a.area} className="flex items-center gap-2 text-xs">
+                      <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: PIE_COLORS[i % PIE_COLORS.length] }} />
+                      <span className="text-[var(--text-muted)]">{a.area}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Table */}
+          <div className="card overflow-hidden">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-[var(--border)]">
+                  <th className="px-4 py-3 text-left text-[11px] text-[var(--text-muted)] uppercase tracking-wider">Área</th>
+                  <th className="px-4 py-3 text-right text-[11px] text-[var(--text-muted)] uppercase tracking-wider">Processos</th>
+                  <th className="px-4 py-3 text-right text-[11px] text-[var(--text-muted)] uppercase tracking-wider">Receita</th>
+                  <th className="px-4 py-3 text-right text-[11px] text-[var(--text-muted)] uppercase tracking-wider">Conversão</th>
+                </tr>
+              </thead>
+              <tbody>
+                {[...BY_AREA].sort((a, b) => b.receita - a.receita).map((a, i) => (
+                  <tr key={a.area} className={`border-b border-[var(--border)] last:border-0 ${i === 0 ? 'bg-brand-500/5' : ''}`}>
+                    <td className="px-4 py-3 text-white font-medium">{a.area}</td>
+                    <td className="px-4 py-3 text-right text-[var(--text-secondary)]">{a.processos}</td>
+                    <td className="px-4 py-3 text-right font-semibold text-emerald-400">{fmt(a.receita)}</td>
+                    <td className="px-4 py-3 text-right">
+                      <div className="flex items-center justify-end gap-2">
+                        <div className="w-16 h-1.5 rounded-full bg-[var(--bg-app)] overflow-hidden">
+                          <div className="h-full rounded-full bg-amber-500" style={{ width: `${a.conversao}%` }} />
+                        </div>
+                        <span className="text-amber-400 text-xs w-8 text-right">{a.conversao}%</span>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Por Advogado */}
+      {tab === 'lawyers' && (
+        <div className="space-y-4">
+          <div className="card p-5">
+            <h3 className="text-sm font-semibold text-white mb-4">Receita por Advogado</h3>
+            <ResponsiveContainer width="100%" height={220}>
+              <BarChart data={BY_LAWYER} layout="vertical" barSize={16}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#1f1f1f" horizontal={false} />
+                <XAxis type="number" tick={{ fill: '#4a4a4a', fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={v => `R$${(v/1000).toFixed(0)}k`} />
+                <YAxis type="category" dataKey="name" tick={{ fill: '#9a9a9a', fontSize: 11 }} axisLine={false} tickLine={false} width={90} />
+                <Tooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(255,255,255,0.03)' }} />
+                <Bar dataKey="receita" name="Receita" fill="#fb923c" radius={[0,3,3,0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+
+          <div className="card overflow-hidden">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-[var(--border)]">
+                  <th className="px-4 py-3 text-left text-[11px] text-[var(--text-muted)] uppercase tracking-wider">Advogado</th>
+                  <th className="px-4 py-3 text-right text-[11px] text-[var(--text-muted)] uppercase tracking-wider">Processos</th>
+                  <th className="px-4 py-3 text-right text-[11px] text-[var(--text-muted)] uppercase tracking-wider">Receita</th>
+                  <th className="px-4 py-3 text-right text-[11px] text-[var(--text-muted)] uppercase tracking-wider">Sucesso</th>
+                </tr>
+              </thead>
+              <tbody>
+                {BY_LAWYER.map((l, i) => (
+                  <tr key={l.name} className="border-b border-[var(--border)] last:border-0">
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-7 h-7 rounded-full bg-brand-500 flex items-center justify-center text-[11px] font-bold text-white">
+                          {l.name.charAt(0)}
+                        </div>
+                        <span className="text-white font-medium">{l.name}</span>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 text-right text-[var(--text-secondary)]">{l.processos}</td>
+                    <td className="px-4 py-3 text-right font-semibold text-emerald-400">{fmt(l.receita)}</td>
+                    <td className="px-4 py-3 text-right">
+                      <span className={`text-xs font-semibold ${l.taxa >= 75 ? 'text-emerald-400' : l.taxa >= 65 ? 'text-amber-400' : 'text-red-400'}`}>
+                        {l.taxa}%
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Evolução Mensal */}
+      {tab === 'monthly' && (
+        <div className="space-y-4">
+          <div className="card p-5">
+            <h3 className="text-sm font-semibold text-white mb-4">Honorários vs Despesas — Últimos 6 Meses</h3>
+            <ResponsiveContainer width="100%" height={260}>
+              <BarChart data={MONTHLY} barGap={4} barSize={18}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#1f1f1f" vertical={false} />
+                <XAxis dataKey="month" tick={{ fill: '#4a4a4a', fontSize: 11 }} axisLine={false} tickLine={false} />
+                <YAxis tick={{ fill: '#4a4a4a', fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={v => `R$${(v/1000).toFixed(0)}k`} />
+                <Tooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(255,255,255,0.03)' }} />
+                <Legend wrapperStyle={{ fontSize: 11, color: '#9a9a9a' }} />
+                <Bar dataKey="honorarios" name="Honorários"  fill="#c2410c" radius={[3,3,0,0]} />
+                <Bar dataKey="custas"     name="Custas/Desp" fill="#7c3aed" radius={[3,3,0,0]} />
+                <Bar dataKey="liquido"    name="Líquido"     fill="#22c55e" radius={[3,3,0,0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+
+          {/* Summary table */}
+          <div className="card overflow-hidden">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-[var(--border)]">
+                  <th className="px-4 py-3 text-left text-[11px] text-[var(--text-muted)] uppercase tracking-wider">Mês</th>
+                  <th className="px-4 py-3 text-right text-[11px] text-[var(--text-muted)] uppercase tracking-wider">Honorários</th>
+                  <th className="px-4 py-3 text-right text-[11px] text-[var(--text-muted)] uppercase tracking-wider">Custas</th>
+                  <th className="px-4 py-3 text-right text-[11px] text-[var(--text-muted)] uppercase tracking-wider">Líquido</th>
+                </tr>
+              </thead>
+              <tbody>
+                {MONTHLY.map((m, i) => (
+                  <tr key={m.month} className={`border-b border-[var(--border)] last:border-0 ${i === MONTHLY.length - 1 ? 'bg-brand-500/5 font-semibold' : ''}`}>
+                    <td className="px-4 py-3 text-white">{m.month}{i === MONTHLY.length - 1 ? ' (atual)' : ''}</td>
+                    <td className="px-4 py-3 text-right text-accent-400">{fmt(m.honorarios)}</td>
+                    <td className="px-4 py-3 text-right text-red-400">{fmt(m.custas)}</td>
+                    <td className="px-4 py-3 text-right text-emerald-400">{fmt(m.liquido)}</td>
+                  </tr>
+                ))}
+                <tr className="border-t-2 border-[var(--border-strong)] bg-[var(--bg-app)]">
+                  <td className="px-4 py-3 text-white font-bold">Total</td>
+                  <td className="px-4 py-3 text-right text-accent-400 font-bold">{fmt(MONTHLY.reduce((s,m) => s + m.honorarios, 0))}</td>
+                  <td className="px-4 py-3 text-right text-red-400 font-bold">{fmt(MONTHLY.reduce((s,m) => s + m.custas, 0))}</td>
+                  <td className="px-4 py-3 text-right text-emerald-400 font-bold">{fmt(MONTHLY.reduce((s,m) => s + m.liquido, 0))}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}

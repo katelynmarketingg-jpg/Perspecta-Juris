@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "perspecta-juris",
+      "runtimeExecutable": "/Users/goplace/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node",
+      "runtimeArgs": ["node_modules/.bin/vite", "client", "--port", "3001"],
+      "port": 3001
+    }
+  ]
+}

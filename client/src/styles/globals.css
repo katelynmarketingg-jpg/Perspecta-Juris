@@ -1,0 +1,193 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── PERSPECTA JURIS — Preto + Laranja Escuro (fixo, independente da empresa) ── */
+:root {
+  --bg-app:        #0a0a0a;
+  --bg-sidebar:    #060606;
+  --bg-card:       #111111;
+  --bg-input:      #1a1a1a;
+  --bg-hover:      #1a1a1a;
+  --bg-active:     #1f0c04;
+
+  --text-primary:   #f0f0f0;
+  --text-secondary: #9a9a9a;
+  --text-muted:     #4a4a4a;
+  --text-sidebar:   #d0d0d0;
+  --text-sidebar-muted: #4a4a4a;
+
+  --border:        #1f1f1f;
+  --border-strong: #2a2a2a;
+  --border-focus:  #c2410c;
+
+  --brand:         #c2410c;
+  --brand-dark:    #9a3412;
+  --brand-light:   #fb923c;
+
+  --danger:        #ef4444;
+  --warning:       #f59e0b;
+  --success:       #22c55e;
+  --info:          #3b82f6;
+
+  --shadow-card:   0 1px 4px rgba(0,0,0,0.6);
+  --shadow-modal:  0 25px 80px rgba(0,0,0,0.85);
+
+  --radius:        0.5rem;
+  --radius-lg:     0.875rem;
+  --radius-xl:     1.25rem;
+}
+
+/* Tema escuro (padrão) */
+.dark {
+  --bg-app:        #0a0a0a;
+  --bg-sidebar:    #060606;
+  --bg-card:       #111111;
+  --bg-input:      #1a1a1a;
+  --bg-hover:      #1a1a1a;
+  --bg-active:     #1f0c04;
+
+  --text-primary:   #f0f0f0;
+  --text-secondary: #9a9a9a;
+  --text-muted:     #4a4a4a;
+  --text-sidebar:   #d0d0d0;
+  --text-sidebar-muted: #4a4a4a;
+
+  --border:        #1f1f1f;
+  --border-strong: #2a2a2a;
+  --border-focus:  #c2410c;
+
+  --brand:         #c2410c;
+  --brand-dark:    #9a3412;
+  --brand-light:   #fb923c;
+
+  --shadow-card:   0 1px 4px rgba(0,0,0,0.6);
+  --shadow-modal:  0 25px 80px rgba(0,0,0,0.85);
+}
+
+/* Tema claro (visão clara) */
+.light {
+  --bg-app:        #f6f6f7;
+  --bg-sidebar:    #ffffff;
+  --bg-card:       #ffffff;
+  --bg-input:      #f1f1f4;
+  --bg-hover:      #eeeef1;
+  --bg-active:     #fdece1;
+
+  --text-primary:   #18181b;
+  --text-secondary: #52525b;
+  --text-muted:     #9ca3af;
+  --text-sidebar:   #3f3f46;
+  --text-sidebar-muted: #9ca3af;
+
+  --border:        #e4e4e7;
+  --border-strong: #d4d4d8;
+  --border-focus:  #c2410c;
+
+  --brand:         #c2410c;
+  --brand-dark:    #9a3412;
+  --brand-light:   #fb923c;
+
+  --shadow-card:   0 1px 3px rgba(0,0,0,0.08);
+  --shadow-modal:  0 24px 70px rgba(0,0,0,0.18);
+}
+/* No tema claro, textos forçados a branco ficariam invisíveis → mapeia p/ escuro
+   (mantém branco apenas sobre botões/badges coloridos, que têm fundo próprio). */
+.light .text-white:not([class*="bg-"]):not(.btn-primary) { color: var(--text-primary); }
+
+/* ── Base ───────────────────────────────────────────────────── */
+* { box-sizing: border-box; }
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  background: var(--bg-app);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ── Scrollbar ──────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #2a2a2a; border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: #3a3a3a; }
+
+/* ── Utility classes ────────────────────────────────────────── */
+@layer components {
+  .card {
+    @apply rounded-xl bg-[var(--bg-card)] border border-[var(--border)] shadow-[var(--shadow-card)];
+  }
+
+  .card-hover {
+    @apply card transition-all duration-150 hover:border-[var(--border-strong)] hover:shadow-card-hover;
+  }
+
+  .btn {
+    @apply inline-flex items-center gap-2 rounded-lg font-medium transition-all duration-150 cursor-pointer select-none;
+  }
+
+  .btn-primary {
+    @apply btn bg-brand-500 text-white hover:bg-brand-600 active:bg-brand-700 px-4 py-2 text-sm shadow-orange;
+  }
+
+  .btn-secondary {
+    @apply btn bg-[var(--bg-hover)] text-[var(--text-primary)] border border-[var(--border)] hover:border-[var(--border-strong)] hover:text-white px-4 py-2 text-sm;
+  }
+
+  .btn-ghost {
+    @apply btn text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] px-3 py-2 text-sm;
+  }
+
+  .btn-danger {
+    @apply btn bg-red-600 text-white hover:bg-red-700 active:bg-red-800 px-4 py-2 text-sm;
+  }
+
+  .input {
+    @apply w-full rounded-lg border border-[var(--border)] bg-[var(--bg-input)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] transition-colors focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500/30;
+  }
+
+  .label {
+    @apply block text-xs font-medium text-[var(--text-secondary)] mb-1.5;
+  }
+
+  .badge {
+    @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium;
+  }
+
+  .badge-orange { @apply badge bg-orange-900/40 text-orange-400 border border-orange-800/30; }
+  .badge-blue   { @apply badge bg-blue-900/40 text-blue-400 border border-blue-800/30; }
+  .badge-green  { @apply badge bg-emerald-900/40 text-emerald-400 border border-emerald-800/30; }
+  .badge-yellow { @apply badge bg-amber-900/40 text-amber-400 border border-amber-800/30; }
+  .badge-red    { @apply badge bg-red-900/40 text-red-400 border border-red-800/30; }
+  .badge-gray   { @apply badge bg-neutral-800 text-neutral-400 border border-neutral-700/50; }
+  .badge-purple { @apply badge bg-purple-900/40 text-purple-400 border border-purple-800/30; }
+}
+
+/* ── Animações ──────────────────────────────────────────────── */
+.page-enter { animation: fadeIn 0.15s ease-out; }
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Status badges ──────────────────────────────────────────── */
+.status-active   { @apply badge-blue; }
+.status-won      { @apply badge-green; }
+.status-lost     { @apply badge-red; }
+.status-archived { @apply badge-gray; }
+.status-settled  { @apply badge-purple; }
+
+/* ── Priority ───────────────────────────────────────────────── */
+.priority-urgent { color: #ef4444; }
+.priority-high   { color: #f97316; }
+.priority-normal { color: var(--brand-light); }
+.priority-low    { color: var(--text-muted); }
