@@ -34,13 +34,13 @@ export default function DeadlinesPage() {
   const [loading, setLoading] = useState(true)
   const [month, setMonth] = useState(new Date())
   const [filter, setFilter] = useState('all')
+  const [showNew, setShowNew] = useState(false)
 
-  useEffect(() => {
-    api.deadlines.list()
-      .then(d => setDeadlines(d))
-      .catch(() => setDeadlines(MOCK))
-      .finally(() => setLoading(false))
-  }, [])
+  const load = () => api.deadlines.list()
+    .then(d => setDeadlines(Array.isArray(d) ? d : (d?.data ?? [])))
+    .catch(() => setDeadlines(MOCK))
+    .finally(() => setLoading(false))
+  useEffect(() => { load() }, [])
 
   const days = eachDayOfInterval({
     start: startOfWeek(startOfMonth(month), { weekStartsOn: 0 }),
@@ -76,7 +76,7 @@ export default function DeadlinesPage() {
             {counts.pending} pendente{counts.pending !== 1 ? 's' : ''}
           </p>
         </div>
-        <button className="btn-primary flex items-center gap-2">
+        <button className="btn-primary flex items-center gap-2" onClick={() => setShowNew(true)}>
           <IconPlus size={15} />
           Novo Prazo
         </button>
@@ -168,6 +168,56 @@ export default function DeadlinesPage() {
               </div>
             )
           })}
+        </div>
+      </div>
+
+      {showNew && <NovoPrazoModal onClose={() => setShowNew(false)} onSaved={() => { setShowNew(false); load() }} />}
+    </div>
+  )
+}
+
+// ── Novo prazo ────────────────────────────────────────────────────
+function NovoPrazoModal({ onClose, onSaved }) {
+  const [form, setForm] = useState({ title: '', dueDate: '', processTitle: '', status: 'pending' })
+  const [saving, setSaving] = useState(false)
+  const set = (k) => (e) => setForm(d => ({ ...d, [k]: e.target.value }))
+  const salvar = async () => {
+    if (!form.title.trim() || !form.dueDate) return
+    setSaving(true)
+    try { await api.deadlines.create({ ...form, dueDate: new Date(form.dueDate + 'T12:00:00').toISOString() }) } catch {}
+    setSaving(false); onSaved()
+  }
+  const inputCls = 'w-full px-3 py-2 rounded-lg bg-[var(--bg-input)] border border-[var(--border)] text-sm text-white focus:border-brand-500 focus:outline-none'
+  const lbl = 'text-xs font-medium text-[var(--text-secondary)] mb-1 block'
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/70 overflow-y-auto py-8 px-4" onClick={onClose}>
+      <div className="card w-full max-w-md" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--border)]">
+          <p className="text-sm font-semibold text-white">Novo prazo</p>
+          <button onClick={onClose} className="text-[var(--text-muted)] hover:text-white">✕</button>
+        </div>
+        <div className="p-5 space-y-3">
+          <div><label className={lbl}>Descrição *</label>
+            <input value={form.title} onChange={set('title')} placeholder="Ex.: Contestação — Fulano x Beltrano" className={inputCls} />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div><label className={lbl}>Data *</label>
+              <input type="date" value={form.dueDate} onChange={set('dueDate')} className={inputCls} />
+            </div>
+            <div><label className={lbl}>Status</label>
+              <select value={form.status} onChange={set('status')} className={inputCls}>
+                <option value="pending">Pendente</option>
+                <option value="done">Concluído</option>
+              </select>
+            </div>
+          </div>
+          <div><label className={lbl}>Processo (opcional)</label>
+            <input value={form.processTitle} onChange={set('processTitle')} placeholder="Nº ou título do processo" className={inputCls} />
+          </div>
+        </div>
+        <div className="px-5 py-3 border-t border-[var(--border)] flex justify-end gap-2">
+          <button onClick={onClose} className="px-3 py-2 rounded-lg text-sm text-[var(--text-muted)] hover:text-white">Cancelar</button>
+          <button onClick={salvar} disabled={saving || !form.title.trim() || !form.dueDate} className="btn-primary text-sm disabled:opacity-60">{saving ? 'Salvando…' : 'Salvar'}</button>
         </div>
       </div>
     </div>

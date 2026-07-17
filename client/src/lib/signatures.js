@@ -34,8 +34,9 @@ export async function getRequest(id) {
   catch { return null }
 }
 
-export async function saveSignature(id, { signer, signatureImg, photoImg }) {
-  return api.signatures.sign(id, { signer, signatureImg, photoImg })
+export async function saveSignature(id, payload) {
+  // payload: { signer, signatureImg, photoImg, consent, consentText, documentHash, evidencias }
+  return api.signatures.sign(id, payload)
 }
 
 // ── Helpers síncronos ───────────────────────────────────────────────────────

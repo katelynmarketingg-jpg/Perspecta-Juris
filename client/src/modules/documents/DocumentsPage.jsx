@@ -1,4 +1,5 @@
 import { useState, useRef } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import {
@@ -159,6 +160,7 @@ function SignatureModal({ doc, onClose, onSend }) {
 }
 
 function TemplateModal({ template, onClose }) {
+  const navigate = useNavigate()
   return (
     <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={onClose}>
       <div className="bg-[var(--bg-card)] border border-[var(--border)] rounded-2xl p-6 w-full max-w-lg shadow-modal" onClick={e => e.stopPropagation()}>
@@ -200,13 +202,13 @@ function TemplateModal({ template, onClose }) {
           </div>
 
           <div className="flex gap-2 pt-1">
-            <button className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl border border-[var(--border)] text-sm text-[var(--text-secondary)] hover:text-white hover:border-[var(--border-strong)] transition-colors">
+            <button onClick={onClose} className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl border border-[var(--border)] text-sm text-[var(--text-secondary)] hover:text-white hover:border-[var(--border-strong)] transition-colors">
               <IconEye size={14} />
-              Visualizar
+              Fechar prévia
             </button>
-            <button className="flex-1 btn-primary flex items-center justify-center gap-1.5 py-2.5">
+            <button onClick={() => { onClose(); navigate('/app/clients') }} className="flex-1 btn-primary flex items-center justify-center gap-1.5 py-2.5">
               <IconDownload size={14} />
-              Gerar Documento
+              Gerar no cliente
             </button>
           </div>
         </div>
@@ -216,11 +218,12 @@ function TemplateModal({ template, onClose }) {
 }
 
 export default function DocumentsPage() {
+  const navigate = useNavigate()
   const [tab, setTab] = useState('documents')
   const [search, setSearch] = useState('')
   const [activeTags, setActiveTags] = useState([])
-  const [docs, setDocs] = useState(() => lsGet('pj_local_documents', MOCK_DOCS))
-  const [signatures, setSignatures] = useState(() => lsGet('pj_local_signatures', MOCK_SIGNATURES))
+  const [docs, setDocs] = useState(() => lsGet('pj_local_documents', []))
+  const [signatures, setSignatures] = useState(() => lsGet('pj_local_signatures', []))
   const [signatureDoc, setSignatureDoc] = useState(null)
   const [templateModal, setTemplateModal] = useState(null)
 
@@ -294,7 +297,7 @@ export default function DocumentsPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <h1 className="text-lg font-semibold text-white">Documentos</h1>
-        <button className="btn-primary flex items-center gap-2" onClick={() => {}}>
+        <button className="btn-primary flex items-center gap-2" onClick={() => navigate('/app/clients')} title="Gere documentos no cadastro do cliente">
           <IconPlus size={15} />
           Novo Documento
         </button>

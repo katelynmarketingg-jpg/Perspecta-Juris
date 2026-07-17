@@ -50,16 +50,33 @@ export default function FinancialPage() {
   const [entries, setEntries] = useState([])
   const [cashflow, setCashflow] = useState([])
   const [loading, setLoading] = useState(true)
+  const [clients, setClients] = useState([])
+  const [showNew, setShowNew] = useState(false)
 
-  useEffect(() => {
+  const load = () => {
     Promise.all([
       api.financial.entries().catch(() => MOCK_ENTRIES),
       api.financial.cashflow().catch(() => MOCK_CASHFLOW),
-    ]).then(([e, c]) => {
-      setEntries(e)
+      api.clients.list?.().catch(() => []) ?? Promise.resolve([]),
+    ]).then(([e, c, cl]) => {
+      const clients = Array.isArray(cl) ? cl : (cl?.data ?? [])
+      setClients(clients)
+      const nomePorId = Object.fromEntries(clients.map(x => [x.id, x.name]))
+      // Honorários de êxito são estimativas (não caixa) — ficam fora do Financeiro/relatórios.
+      // Normaliza o vocabulário: a aba do cliente usa receivable/payable; aqui usamos income/expense.
+      const norm = (Array.isArray(e) ? e : [])
+        .filter(x => x.feeKind !== 'exito' && x.status !== 'exito')
+        .map(x => ({
+          ...x,
+          type: (x.type === 'income' || x.type === 'receivable') ? 'income' : 'expense',
+          amount: Number(x.amount) || 0,
+          client: x.client ?? nomePorId[x.clientId] ?? null,
+        }))
+      setEntries(norm)
       setCashflow(c)
     }).finally(() => setLoading(false))
-  }, [])
+  }
+  useEffect(() => { load() }, [])
 
   const income   = entries.filter(e => e.type === 'income')
   const expenses = entries.filter(e => e.type === 'expense')
@@ -87,7 +104,7 @@ export default function FinancialPage() {
         )}
         <p className="text-xs text-[var(--text-secondary)] mt-1 flex items-center gap-1">
           <IconClock size={11} />
-          Vence {format(new Date(e.dueDate), "dd/MM/yyyy", { locale: ptBR })}
+          {e.dueDate ? `Vence ${format(new Date(e.dueDate), "dd/MM/yyyy", { locale: ptBR })}` : 'Sem vencimento'}
         </p>
       </div>
       <div className="flex items-center gap-3">
@@ -108,7 +125,7 @@ export default function FinancialPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <h1 className="text-lg font-semibold text-white">Financeiro</h1>
-        <button className="btn-primary flex items-center gap-2">
+        <button className="btn-primary flex items-center gap-2" onClick={() => setShowNew(true)}>
           <IconPlus size={15} />
           Novo Lançamento
         </button>
@@ -205,6 +222,125 @@ export default function FinancialPage() {
           </div>
         </div>
       )}
+
+      {showNew && <NovoLancamentoModal clients={clients} onClose={() => setShowNew(false)} onSaved={() => { setShowNew(false); load() }} />}
+    </div>
+  )
+}
+
+// ── Novo lançamento (receita/despesa) ─────────────────────────────
+const FREQS = {
+  unica:      { label: 'Única (não repete)', inc: null },
+  diaria:     { label: 'Todo dia',           inc: { dias: 1 } },
+  semanal:    { label: 'Toda semana',        inc: { dias: 7 } },
+  quinzenal:  { label: 'A cada 15 dias',     inc: { dias: 14 } },
+  mensal:     { label: 'Todo mês (dia X)',   inc: { meses: 1 } },
+  bimestral:  { label: 'A cada 2 meses',     inc: { meses: 2 } },
+  trimestral: { label: 'A cada 3 meses',     inc: { meses: 3 } },
+  semestral:  { label: 'A cada 6 meses',     inc: { meses: 6 } },
+  anual:      { label: 'Todo ano',           inc: { meses: 12 } },
+}
+
+function NovoLancamentoModal({ clients, onClose, onSaved }) {
+  const [form, setForm] = useState({ type: 'receivable', description: '', amount: '', dueDate: '', clientId: '', status: 'pending', freq: 'unica', repeticoes: 12 })
+  const [saving, setSaving] = useState(false)
+  const set = (k) => (e) => setForm(d => ({ ...d, [k]: e.target.value }))
+  const recorrente = form.freq !== 'unica'
+
+  const salvar = async () => {
+    if (!form.description.trim() || !form.amount) return
+    setSaving(true)
+    const base = {
+      type: form.type, description: form.description, status: form.status,
+      amount: parseFloat(String(form.amount).replace(',', '.')) || 0,
+      clientId: form.clientId || null,
+    }
+    try {
+      const inc = FREQS[form.freq]?.inc
+      if (!recorrente || !inc) {
+        await api.financial.create({ ...base, dueDate: form.dueDate || null })
+      } else {
+        const n = Math.min(60, Math.max(1, parseInt(form.repeticoes) || 1))
+        const grupo = 'rec_' + Math.random().toString(36).slice(2, 8)
+        const start = form.dueDate ? new Date(form.dueDate + 'T00:00:00') : new Date()
+        for (let i = 0; i < n; i++) {
+          const d = new Date(start)
+          if (inc.dias)  d.setDate(d.getDate() + inc.dias * i)
+          if (inc.meses) d.setMonth(d.getMonth() + inc.meses * i)
+          await api.financial.create({
+            ...base, description: `${form.description} (${i + 1}/${n})`,
+            dueDate: d.toISOString().slice(0, 10),
+            recorrenciaId: grupo, frequencia: form.freq,
+          })
+        }
+      }
+    } catch {}
+    setSaving(false)
+    onSaved()
+  }
+  const inputCls = 'w-full px-3 py-2 rounded-lg bg-[var(--bg-input)] border border-[var(--border)] text-sm text-white focus:border-brand-500 focus:outline-none'
+  const lbl = 'text-xs font-medium text-[var(--text-secondary)] mb-1 block'
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/70 overflow-y-auto py-8 px-4" onClick={onClose}>
+      <div className="card w-full max-w-md" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--border)]">
+          <p className="text-sm font-semibold text-white">Novo lançamento</p>
+          <button onClick={onClose} className="text-[var(--text-muted)] hover:text-white">✕</button>
+        </div>
+        <div className="p-5 space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div><label className={lbl}>Tipo</label>
+              <select value={form.type} onChange={set('type')} className={inputCls}>
+                <option value="receivable">A receber</option>
+                <option value="payable">A pagar</option>
+              </select>
+            </div>
+            <div><label className={lbl}>Status</label>
+              <select value={form.status} onChange={set('status')} className={inputCls}>
+                <option value="pending">Pendente</option>
+                <option value="paid">Pago</option>
+                <option value="overdue">Vencido</option>
+              </select>
+            </div>
+          </div>
+          <div><label className={lbl}>Descrição *</label>
+            <input value={form.description} onChange={set('description')} placeholder="Ex.: Honorários — Fulano" className={inputCls} />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div><label className={lbl}>Valor (R$) *</label>
+              <input type="number" step="0.01" value={form.amount} onChange={set('amount')} placeholder="0,00" className={inputCls} />
+            </div>
+            <div><label className={lbl}>Vencimento</label>
+              <input type="date" value={form.dueDate} onChange={set('dueDate')} className={inputCls} />
+            </div>
+          </div>
+          <div><label className={lbl}>Cliente (opcional)</label>
+            <select value={form.clientId} onChange={set('clientId')} className={inputCls}>
+              <option value="">Nenhum</option>
+              {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          </div>
+          {/* Frequência / recorrência */}
+          <div className="grid grid-cols-2 gap-3">
+            <div><label className={lbl}>Frequência</label>
+              <select value={form.freq} onChange={set('freq')} className={inputCls}>
+                {Object.entries(FREQS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+              </select>
+            </div>
+            {recorrente && (
+              <div><label className={lbl}>Quantas vezes</label>
+                <input type="number" min="1" max="60" value={form.repeticoes} onChange={set('repeticoes')} className={inputCls} />
+              </div>
+            )}
+          </div>
+          {recorrente && <p className="text-[11px] text-[var(--text-muted)]">Serão criados <b>{Math.min(60, Math.max(1, parseInt(form.repeticoes) || 1))}</b> lançamentos ({FREQS[form.freq].label.toLowerCase()}), a partir do vencimento.</p>}
+        </div>
+        <div className="px-5 py-3 border-t border-[var(--border)] flex justify-end gap-2">
+          <button onClick={onClose} className="px-3 py-2 rounded-lg text-sm text-[var(--text-muted)] hover:text-white">Cancelar</button>
+          <button onClick={salvar} disabled={saving || !form.description.trim() || !form.amount} className="btn-primary text-sm disabled:opacity-60">{saving ? 'Salvando…' : 'Salvar'}</button>
+        </div>
+      </div>
     </div>
   )
 }

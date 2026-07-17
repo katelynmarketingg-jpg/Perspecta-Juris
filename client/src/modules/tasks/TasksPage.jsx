@@ -31,8 +31,8 @@ function urgencia(t) {
 }
 const URG = {
   hoje:    { bar: 'border-l-red-500',     chip: 'bg-red-500/15 text-red-400',       label: 'Hoje / atrasada' },
-  semana:  { bar: 'border-l-amber-400',   chip: 'bg-amber-500/15 text-amber-400',   label: 'Próximos 7 dias' },
-  depois:  { bar: 'border-l-orange-300',  chip: 'bg-orange-400/15 text-orange-300', label: '8 dias ou mais' },
+  semana:  { bar: 'border-l-orange-500',  chip: 'bg-orange-500/15 text-orange-400', label: 'Próximos 7 dias' },
+  depois:  { bar: 'border-l-amber-400',   chip: 'bg-amber-400/15 text-amber-300',   label: '8 dias ou mais' },
   semdata: { bar: 'border-l-[var(--border)]', chip: 'bg-[var(--bg-hover)] text-[var(--text-muted)]', label: 'Sem data' },
   done:    { bar: 'border-l-emerald-500', chip: 'bg-emerald-500/15 text-emerald-400', label: 'Finalizadas' },
 }
@@ -166,7 +166,9 @@ export default function TasksPage() {
     if (filtro === 'enviadas') return t.createdBy === currentUser?.id
     return true
   })
-  const visiveis = urgFilter ? escopo.filter(t => urgencia(t) === urgFilter) : escopo
+  const visiveis = urgFilter === 'respondida'
+    ? escopo.filter(t => t.status === 'done' && t.createdBy === currentUser?.id && !t.acknowledged)
+    : urgFilter ? escopo.filter(t => urgencia(t) === urgFilter) : escopo
 
   const abertas = escopo.filter(t => t.status !== 'done')
   const cont = {
@@ -174,8 +176,15 @@ export default function TasksPage() {
     semana: abertas.filter(t => urgencia(t) === 'semana').length,
     depois: abertas.filter(t => urgencia(t) === 'depois').length,
   }
-  const aguardandoCiencia = tasks.filter(t => t.status === 'done' && t.createdBy === currentUser?.id && !t.acknowledged).length
-  const cols = COLUMNS.map(c => ({ ...c, tasks: visiveis.filter(t => t.status === c.key) }))
+  const respondidasTasks = tasks.filter(t => t.status === 'done' && t.createdBy === currentUser?.id && !t.acknowledged)
+  const aguardandoCiencia = respondidasTasks.length
+  // Colunas do quadro = 4 categorias (urgência + respondidas)
+  const cols = [
+    { key: 'hoje',       label: 'Hoje / atrasada', dot: 'bg-red-500',    bar: 'border-l-red-500',    tasks: abertas.filter(t => urgencia(t) === 'hoje') },
+    { key: 'semana',     label: 'Próximos 7 dias', dot: 'bg-orange-500', bar: 'border-l-orange-500', tasks: abertas.filter(t => urgencia(t) === 'semana') },
+    { key: 'depois',     label: '8 dias ou mais',  dot: 'bg-amber-400',  bar: 'border-l-amber-400',  tasks: abertas.filter(t => urgencia(t) === 'depois') },
+    { key: 'respondida', label: 'Respondidas',     dot: 'bg-blue-500',   bar: 'border-l-blue-500',   tasks: respondidasTasks },
+  ]
 
   return (
     <div className="p-6 space-y-4 h-full flex flex-col">
@@ -198,25 +207,11 @@ export default function TasksPage() {
         ))}
       </div>
 
-      {/* Discriminação por urgência */}
-      <div className="grid grid-cols-3 gap-3 flex-shrink-0">
-        {[['hoje', cont.hoje], ['semana', cont.semana], ['depois', cont.depois]].map(([k, n]) => (
-          <button key={k} onClick={() => setUrgFilter(urgFilter === k ? null : k)}
-            className={`rounded-xl border px-4 py-3 text-left transition-all ${urgFilter === k ? 'border-brand-500 ring-1 ring-brand-500/30' : 'border-[var(--border)]'} ${k === 'hoje' ? 'bg-red-500/5' : k === 'semana' ? 'bg-amber-500/5' : 'bg-orange-400/5'}`}>
-            <div className="flex items-center gap-2">
-              <span className={`w-2.5 h-2.5 rounded-full ${k === 'hoje' ? 'bg-red-500' : k === 'semana' ? 'bg-amber-400' : 'bg-orange-300'}`} />
-              <span className="text-2xl font-bold text-[var(--text-primary)]">{n}</span>
-            </div>
-            <p className="text-xs text-[var(--text-muted)] mt-1">{URG[k].label}</p>
-          </button>
-        ))}
-      </div>
-
-      {/* Colunas */}
+      {/* Colunas por categoria (urgência + respondidas) */}
       {loading ? (
         <div className="flex-1 flex items-center justify-center"><div className="w-5 h-5 border-2 border-brand-500 border-t-transparent rounded-full animate-spin" /></div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 flex-1 min-h-0 overflow-auto pb-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3 flex-1 min-h-0 overflow-auto pb-4">
           {cols.map(col => (
             <div key={col.key} className="flex flex-col min-h-0">
               <div className="flex items-center justify-between px-1 mb-2">
@@ -253,11 +248,10 @@ export default function TasksPage() {
                           <span className="text-[10px] text-[var(--text-muted)] truncate">{filtro === 'enviadas' ? `→ ${t.assignedToName}` : t.assignedToName}</span>
                         </div>
                         <div className="flex gap-1 flex-shrink-0" onClick={e => e.stopPropagation()}>
-                          {col.key !== 'todo' && (
-                            <button onClick={() => moveTask(t, col.key === 'done' ? 'doing' : 'todo')} className="text-[10px] px-2 py-0.5 rounded bg-[var(--bg-hover)] text-[var(--text-muted)] hover:text-[var(--text-primary)]">←</button>
-                          )}
-                          {col.key !== 'done' && (
-                            <button onClick={() => moveTask(t, col.key === 'todo' ? 'doing' : 'done')} className="text-[10px] px-2 py-0.5 rounded bg-brand-500/20 text-accent-400 hover:bg-brand-500/40">→</button>
+                          {col.key === 'respondida' ? (
+                            <button onClick={() => ack(t.id)} className="text-[10px] px-2 py-0.5 rounded bg-blue-500/20 text-blue-300 hover:bg-blue-500/40">👁 Ciência</button>
+                          ) : (
+                            <button onClick={() => moveTask(t, 'done')} className="text-[10px] px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25">✓ Concluir</button>
                           )}
                         </div>
                       </div>

@@ -30,6 +30,8 @@ const ReportsPage     = lazy(() => import('./modules/reports/ReportsPage'))
 const SettingsPage    = lazy(() => import('./modules/settings/SettingsPage'))
 const SuportePage     = lazy(() => import('./modules/suporte/SuportePage'))
 const RegistrosPage   = lazy(() => import('./modules/registros/RegistrosPage'))
+const PesquisasPage   = lazy(() => import('./modules/pesquisas/PesquisasPage'))
+const FilaAtendimentoPage = lazy(() => import('./modules/atendimento/FilaAtendimentoPage'))
 
 const SignPage         = lazy(() => import('./modules/sign/SignPage'))
 const PortalLogin      = lazy(() => import('./modules/portal/PortalLogin'))
@@ -109,6 +111,8 @@ const router = createBrowserRouter([
       { path: 'automations',        element: <W Page={AutomationsPage} /> },
       { path: 'reports',            element: <W Page={ReportsPage} /> },
       { path: 'registros',          element: <W Page={RegistrosPage} /> },
+      { path: 'pesquisas',          element: <W Page={PesquisasPage} /> },
+      { path: 'atendimento',        element: <W Page={FilaAtendimentoPage} /> },
       { path: 'settings',           element: <W Page={SettingsPage} /> },
       { path: 'suporte',            element: <W Page={SuportePage} /> },
     ],

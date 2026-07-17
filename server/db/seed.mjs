@@ -38,13 +38,19 @@ async function seed() {
   const [existingUser] = await db.select().from(users).where(eq(users.id, userId)).limit(1)
 
   if (!existingUser) {
-    const passwordHash = await bcrypt.hash('001', 12)
+    // Senha do master vem do ambiente em produção; '001' só para dev local.
+    const senhaMaster = process.env.MASTER_PASSWORD ?? '001'
+    if (process.env.NODE_ENV === 'production' && (!process.env.MASTER_PASSWORD || process.env.MASTER_PASSWORD.length < 8)) {
+      console.error('❌ Defina MASTER_PASSWORD (≥8 caracteres) para criar o administrador em produção.')
+      process.exit(1)
+    }
+    const passwordHash = await bcrypt.hash(senhaMaster, 12)
     await db.insert(users).values({
       id:           userId,
       tenantId:     tenantId,
       name:         'Katelyn',
-      loginName:    'katelyn',
-      email:        null,
+      loginName:    process.env.MASTER_LOGIN ?? 'katelyn',
+      email:        process.env.MASTER_EMAIL ?? null,
       passwordHash,
       role:         'master',
       isActive:     true,
@@ -53,8 +59,8 @@ async function seed() {
     })
     console.log('✓ Usuário master "Katelyn" criado.')
     console.log('  Empresa: Perspecta Juris')
-    console.log('  Nome: katelyn')
-    console.log('  Senha: 001')
+    console.log('  Login: ' + (process.env.MASTER_LOGIN ?? 'katelyn'))
+    console.log('  Senha: ' + (process.env.MASTER_PASSWORD ? '(definida via MASTER_PASSWORD)' : '001 (troque em produção!)'))
   } else {
     console.log('— Usuário "Katelyn" já existe.')
   }

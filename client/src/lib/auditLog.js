@@ -18,6 +18,7 @@ export const TIPOS_ATIVIDADE = [
   { value: 'processo',     label: 'Processos',     icone: '⚖️', cor: '#6366f1' },
   { value: 'documento',    label: 'Documentos',    icone: '📄', cor: '#06b6d4' },
   { value: 'assinatura',   label: 'Assinaturas',   icone: '✍️', cor: '#ec4899' },
+  { value: 'atendimento',  label: 'Atendimentos',  icone: '📞', cor: '#14b8a6' },
   { value: 'movimentacao', label: 'Movimentações', icone: '📰', cor: '#0ea5e9' },
   { value: 'config',       label: 'Configurações', icone: '⚙️', cor: '#64748b' },
 ]

@@ -17,6 +17,21 @@ const FILES_DIR = process.env.FILES_DIR ?? join(ROOT, 'data', 'files')
 // Ensure dirs exist
 ;[join(ROOT, 'data'), FILES_DIR].forEach(d => !existsSync(d) && mkdirSync(d, { recursive: true }))
 
+// ── Fail-fast de segurança (produção) ─────────────────────────
+// Grandes sistemas se recusam a subir com segredos padrão/ausentes.
+const IS_PROD = process.env.NODE_ENV === 'production'
+if (IS_PROD) {
+  const secret = process.env.JWT_SECRET
+  const fatal = []
+  if (!secret || secret === 'dev-secret-change-in-production' || secret.length < 32)
+    fatal.push('JWT_SECRET ausente, padrão ou curto demais (use ≥32 caracteres aleatórios).')
+  if (!process.env.DATABASE_URL) fatal.push('DATABASE_URL ausente.')
+  if (fatal.length) {
+    console.error('❌ Configuração insegura — abortando:\n  - ' + fatal.join('\n  - '))
+    process.exit(1)
+  }
+}
+
 const app = Fastify({
   logger: process.env.NODE_ENV !== 'production',
   trustProxy: true,
@@ -42,6 +57,16 @@ await app.register(fastifyRateLimit, {
 
 await app.register(fastifyMultipart, {
   limits: { fileSize: 50 * 1024 * 1024, files: 10 }, // 50 MB max
+})
+
+// ── Cabeçalhos de segurança (helmet-equivalente, sem dependência) ──
+app.addHook('onSend', async (req, reply, payload) => {
+  reply.header('X-Content-Type-Options', 'nosniff')
+  reply.header('X-Frame-Options', 'DENY')
+  reply.header('Referrer-Policy', 'strict-origin-when-cross-origin')
+  reply.header('X-XSS-Protection', '0')
+  if (IS_PROD) reply.header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')
+  return payload
 })
 
 // ── Auth decorator ────────────────────────────────────────────

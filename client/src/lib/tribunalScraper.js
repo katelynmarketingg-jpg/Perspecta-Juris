@@ -4,6 +4,7 @@
 // ─────────────────────────────────────────────────────────────────
 
 import api from './api.js'
+import { currentTenantId } from './tenant'
 
 const lsGet = (k, fb) => { try { return JSON.parse(localStorage.getItem(k) ?? 'null') ?? fb } catch { return fb } }
 const lsSet = (k, v)  => localStorage.setItem(k, JSON.stringify(v))
@@ -121,7 +122,7 @@ export function importTribunalProcesses(processes) {
   const toAdd = processes.filter(p => p.judicialNumber && !existingNums.has(p.judicialNumber))
     .map(p => ({
       id: 'proc_' + uid(),
-      tenantId: 'tenant_demo',
+      tenantId: currentTenantId(),
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       ...p,

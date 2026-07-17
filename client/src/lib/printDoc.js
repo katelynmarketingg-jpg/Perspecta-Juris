@@ -3,6 +3,7 @@
 //  Lê o logo e o papel timbrado das Configurações → Escritório e aplica
 //  em TODOS os documentos gerados.
 // ─────────────────────────────────────────────────────────────────────────
+import { getOffice } from './tenant'
 const lsGet = (k, fb) => { try { return JSON.parse(localStorage.getItem(k) ?? 'null') ?? fb } catch { return fb } }
 const esc = (s) => String(s ?? '').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 
@@ -29,7 +30,7 @@ function cabecalhoHTML(office) {
  */
 export function printDocumentos(corpos, { titulo = 'Documento' } = {}) {
   const bodies = Array.isArray(corpos) ? corpos : [corpos]
-  const office = lsGet('pj_local_office', {})
+  const office = getOffice()
   const usarTimbradoImg = office.usarTimbrado && office.timbradoDataUrl
   const temCabecalho = !usarTimbradoImg && (office.logoDataUrl || office.name) && office.usarTimbrado !== false
 
@@ -38,8 +39,10 @@ export function printDocumentos(corpos, { titulo = 'Documento' } = {}) {
     : ''
   const padTop = usarTimbradoImg ? '45mm' : '30mm'   // espaço p/ o timbrado da imagem
 
+  // Marcador de assinatura (definido no cadastro) vira uma linha de assinatura ao imprimir.
+  const limparMarcador = (t) => String(t ?? '').replace(/\[ASSINATURA(?:S|_CLIENTE|_EMPRESA| DO CLIENTE)?\]/gi, '\n_________________________________________\n')
   const header = temCabecalho ? cabecalhoHTML(office) : ''
-  const pages = bodies.map(b => `<div class="page" style="${pageBg}">${header}<pre>${esc(b)}</pre></div>`).join('')
+  const pages = bodies.map(b => `<div class="page" style="${pageBg}">${header}<pre>${esc(limparMarcador(b))}</pre></div>`).join('')
 
   const win = window.open('', '_blank')
   win.document.write(`<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><title>${esc(titulo)}</title>

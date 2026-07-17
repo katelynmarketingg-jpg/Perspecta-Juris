@@ -8,7 +8,10 @@ import { useAuthStore } from '../../stores/authStore'
 import { Button, Input, Select, Textarea, Card, Spinner } from '../../components/ui'
 import { getTemplates, buildVars, renderTemplate } from '../../lib/templateEngine'
 import { getPeticoes } from '../../lib/peticoesModels'
-import { whatsappLink } from '../../lib/signatures'
+import { whatsappLink, createRequest, signLink, deleteRequest } from '../../lib/signatures'
+import { imprimirComprovante } from '../../lib/signatureProof'
+import { currentTenantId, getOffice, tkey } from '../../lib/tenant'
+import { addToFila, registrarAtendimento, getAtendimentosCliente, esperaMin, tipoAtend } from '../../lib/atendimentos'
 import { printDocumentos } from '../../lib/printDoc'
 import { registrar } from '../../lib/auditLog'
 
@@ -38,6 +41,7 @@ const empty = {
   companyName: '', fantasyName: '', representativeName: '', representativeCpf: '', representativePhone: '',
   bankName: '', bankAgency: '', bankAccount: '', bankPixKey: '',
   source: '', notes: '', isActive: true,
+  portalEnabled: false, portalPassword: '',   // acesso do cliente ao Portal
 }
 
 const AREA_LABEL  = (a) => LEGAL_AREAS.find(x => x.value === a)?.label ?? a
@@ -74,35 +78,48 @@ function PrintPreview({ text, templateName, onClose }) {
 }
 
 // ── Document print modal ──────────────────────────────────────────
-function PrintDocModal({ client, processes, onClose }) {
+function PrintDocModal({ client, processes, onGenerated, onClose, processIdInicial = '' }) {
   // Junta TODOS os modelos: documentos (templateEngine) + petições (banco de Modelos)
   const modelos = [
-    ...getTemplates().map(t => ({ id: 'tpl:' + t.id, name: t.name, body: t.body, group: 'Documentos', category: t.category })),
-    ...getPeticoes().map(p => ({ id: 'pet:' + p.id, name: p.titulo, body: p.corpo, group: 'Petições', category: p.categoria })),
+    ...getTemplates().map(t => ({ id: 'tpl:' + t.id, rawId: t.id, name: t.name, body: t.body, group: 'Documentos', area: 'geral' })),
+    ...getPeticoes().map(p => ({ id: 'pet:' + p.id, rawId: p.id, name: p.titulo, body: p.corpo, group: 'Petições', area: p.area || 'geral' })),
   ]
   const grupos = ['Documentos', 'Petições']
   const [selected, setSelected] = useState({})   // { [id]: true }
-  const [processId, setProcessId] = useState('')
+  const [processId, setProcessId] = useState(processIdInicial)
   const [busca, setBusca] = useState('')
+  const [docTab, setDocTab] = useState(processIdInicial ? 'processo' : 'todos')
   const [preview, setPreview] = useState(null)
   const storedUser   = lsGet('pj_auth', {})?.state?.user ?? lsGet('pj_user', null)
   const storedTenant = lsGet('pj_auth', {})?.state?.tenant ?? lsGet('pj_tenant', null)
 
+  // Documentos marcados como necessários nas Configurações (por serviço)
+  const linkedIds = new Set(lsGet('pj_local_services', []).flatMap(s => (s.documentos ?? []).map(d => d.id)))
+  const procArea = processes.find(p => p.id === processId)?.area || ''
+
   const toggle = (mid) => setSelected(s => ({ ...s, [mid]: !s[mid] }))
   const escolhidos = modelos.filter(m => selected[m.id])
   const filtro = busca.trim().toLowerCase()
-  const listaFiltrada = (g) => modelos.filter(m => m.group === g && (!filtro || m.name.toLowerCase().includes(filtro)))
+  const matchBusca = (m) => !filtro || m.name.toLowerCase().includes(filtro)
+  const isSugerido = (m) => (procArea && m.area === procArea) || linkedIds.has(m.rawId)
+  const listaFiltrada = (g) => modelos.filter(m => m.group === g && matchBusca(m))
+  const sugeridos = modelos.filter(m => isSugerido(m) && matchBusca(m))
+  const gerais    = modelos.filter(m => m.area === 'geral' && matchBusca(m))
+  const escolherProcesso = (id) => { setProcessId(id); if (id) setDocTab('processo') }
 
   const generate = () => {
     if (!escolhidos.length) return
     const proc = processes.find(p => p.id === processId) ?? null
     const vars = buildVars(client, proc, storedUser, storedTenant)
-    if (escolhidos.length === 1) {
-      setPreview({ text: renderTemplate(escolhidos[0].body, vars), name: escolhidos[0].name })
+    const rendered = escolhidos.map(m => ({ titulo: m.name, corpo: renderTemplate(m.body, vars) }))
+    onGenerated?.(rendered, processId)   // salva COM o marcador (para a assinatura saber onde vai)
+    if (rendered.length === 1) {
+      // Na prévia/impressão o marcador vira linha de assinatura; na assinatura ele é honrado.
+      setPreview({ text: rendered[0].corpo.replace(RE_MARCADOR_ASSIN_G, '\n_________________________________________\n'), name: rendered[0].titulo })
       return
     }
     // vários → imprime juntos (uma página cada) com logo/timbrado
-    printDocumentos(escolhidos.map(m => renderTemplate(m.body, vars)), { titulo: 'Documentos' })
+    printDocumentos(rendered.map(r => r.corpo), { titulo: 'Documentos' })
     onClose()
   }
 
@@ -117,36 +134,71 @@ function PrintDocModal({ client, processes, onClose }) {
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
           </button>
         </div>
-        <div className="p-5 space-y-4">
-          <input value={busca} onChange={e => setBusca(e.target.value)} placeholder="🔍 Buscar modelo..."
-            className="w-full px-3 py-2 rounded-lg bg-[var(--bg-input)] border border-[var(--border)] text-sm text-[var(--text-primary)] focus:border-brand-500 focus:outline-none" />
-
-          <div className="max-h-64 overflow-y-auto space-y-3 -mr-1 pr-1">
-            {grupos.map(g => listaFiltrada(g).length > 0 && (
-              <div key={g}>
-                <p className="text-[10px] font-semibold text-[var(--text-muted)] uppercase tracking-wide mb-1">{g}</p>
-                <div className="space-y-1">
-                  {listaFiltrada(g).map(m => (
-                    <label key={m.id} className="flex items-center gap-2.5 p-2 rounded-lg hover:bg-[var(--bg-hover)] cursor-pointer">
-                      <input type="checkbox" checked={!!selected[m.id]} onChange={() => toggle(m.id)} className="accent-brand-500" />
-                      <span className="text-sm text-[var(--text-primary)]">{m.name}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-            ))}
-            {modelos.length === 0 && <p className="text-sm text-[var(--text-muted)] text-center py-4">Nenhum modelo cadastrado.</p>}
-          </div>
-
+        <div className="p-5 space-y-3">
+          {/* Processo — define os documentos sugeridos */}
           <div>
-            <p className="text-xs font-medium text-[var(--text-secondary)] mb-1.5">Processo <span className="text-[var(--text-muted)]">(opcional)</span></p>
-            <select value={processId} onChange={e => setProcessId(e.target.value)}
+            <p className="text-xs font-medium text-[var(--text-secondary)] mb-1.5">Processo <span className="text-[var(--text-muted)]">(sugere os documentos deste tipo)</span></p>
+            <select value={processId} onChange={e => escolherProcesso(e.target.value)}
               className="w-full px-3 py-2 rounded-lg bg-[var(--bg-input)] border border-[var(--border)] text-sm text-[var(--text-primary)] focus:border-brand-500 focus:outline-none">
               <option value="">Nenhum processo</option>
               {processes.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}
             </select>
           </div>
-          <p className="text-xs text-[var(--text-muted)]">{escolhidos.length} selecionado(s) · dados de {client.name || 'cliente'} preenchidos automaticamente.</p>
+
+          {/* Abas: para este processo · gerais · ver todos */}
+          <div className="flex gap-1 p-0.5 rounded-lg bg-[var(--bg-input)]">
+            {[
+              { k: 'processo', label: 'Para este processo', n: sugeridos.length },
+              { k: 'gerais',   label: 'Gerais',             n: gerais.length },
+              { k: 'todos',    label: 'Ver todos',          n: modelos.length },
+            ].map(t => (
+              <button key={t.k} onClick={() => setDocTab(t.k)}
+                className={`flex-1 text-[11px] px-2 py-1.5 rounded-md font-medium transition-colors ${docTab === t.k ? 'bg-brand-500 text-white' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)]'}`}>
+                {t.label} <span className="opacity-70">{t.n}</span>
+              </button>
+            ))}
+          </div>
+
+          <input value={busca} onChange={e => setBusca(e.target.value)} placeholder="🔍 Buscar modelo..."
+            className="w-full px-3 py-2 rounded-lg bg-[var(--bg-input)] border border-[var(--border)] text-sm text-[var(--text-primary)] focus:border-brand-500 focus:outline-none" />
+
+          <div className="max-h-64 overflow-y-auto space-y-3 -mr-1 pr-1">
+            {docTab === 'todos' ? (
+              grupos.map(g => listaFiltrada(g).length > 0 && (
+                <div key={g}>
+                  <p className="text-[10px] font-semibold text-[var(--text-muted)] uppercase tracking-wide mb-1">{g}</p>
+                  <div className="space-y-1">
+                    {listaFiltrada(g).map(m => (
+                      <label key={m.id} className="flex items-center gap-2.5 p-2 rounded-lg hover:bg-[var(--bg-hover)] cursor-pointer">
+                        <input type="checkbox" checked={!!selected[m.id]} onChange={() => toggle(m.id)} className="accent-brand-500" />
+                        <span className="text-sm text-[var(--text-primary)] flex-1">{m.name}</span>
+                        {isSugerido(m) && <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-brand-500/15 text-accent-400">sugerido</span>}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="space-y-1">
+                {(docTab === 'processo' ? sugeridos : gerais).map(m => (
+                  <label key={m.id} className="flex items-center gap-2.5 p-2 rounded-lg hover:bg-[var(--bg-hover)] cursor-pointer">
+                    <input type="checkbox" checked={!!selected[m.id]} onChange={() => toggle(m.id)} className="accent-brand-500" />
+                    <span className="text-sm text-[var(--text-primary)] flex-1">{m.name}</span>
+                    {linkedIds.has(m.rawId) && <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400">config.</span>}
+                  </label>
+                ))}
+                {docTab === 'processo' && !sugeridos.length && (
+                  <p className="text-xs text-[var(--text-muted)] text-center py-6">
+                    {processId ? 'Nenhum documento sugerido para esta área. Marque os necessários em Configurações → Serviços e Honorários, ou use "Ver todos".' : 'Selecione um processo acima para ver os documentos sugeridos.'}
+                  </p>
+                )}
+                {docTab === 'gerais' && !gerais.length && <p className="text-xs text-[var(--text-muted)] text-center py-6">Nenhum documento geral.</p>}
+              </div>
+            )}
+            {modelos.length === 0 && <p className="text-sm text-[var(--text-muted)] text-center py-4">Nenhum modelo cadastrado.</p>}
+          </div>
+
+          <p className="text-xs text-[var(--text-muted)]">{escolhidos.length} selecionado(s) · dados de {client.name || 'cliente'} e timbrado do escritório preenchidos automaticamente. Ficam salvos na lista para imprimir ou preparar assinatura.</p>
         </div>
         <div className="px-5 py-3 border-t border-[var(--border)] flex justify-end gap-2">
           <Button variant="secondary" size="sm" onClick={onClose}>Cancelar</Button>
@@ -157,10 +209,297 @@ function PrintDocModal({ client, processes, onClose }) {
   )
 }
 
+// ── Assinatura eletrônica: monta o bloco de assinaturas no documento ──
+const PAPEIS_SIGN = ['Contratante (cliente)', 'Contratada (escritório)', 'Advogado(a)', 'Testemunha', 'Representante legal', 'Outorgante', 'Outorgado(a)']
+const novoSignatario = (patch = {}) => ({ id: uid(), nome: '', cpf: '', email: '', whatsapp: '', papel: 'Contratante (cliente)', ...patch })
+const ehLadoCliente = (papel) => /contratante|cliente|testemunha|outorgante|representante/i.test(papel || '')
+
+function linhasBloco(signatarios) {
+  return signatarios.filter(s => (s.nome || '').trim()).map(s => {
+    const partes = ['', '_________________________________________', s.nome.trim()]
+    if (s.cpf) partes.push(`CPF: ${s.cpf}`)
+    if (s.papel) partes.push(s.papel)
+    return partes.join('\n')
+  })
+}
+function montarBlocoAssinaturas(signatarios) {
+  const linhas = linhasBloco(signatarios)
+  if (!linhas.length) return ''
+  return '\n\n\nE, por estarem assim justos e acordados, firmam o presente:\n' + linhas.join('\n\n')
+}
+function blocoSimples(signatarios) {
+  const linhas = linhasBloco(signatarios)
+  return linhas.length ? '\n' + linhas.join('\n\n') : ''
+}
+// Marcadores definidos UMA VEZ no cadastro (estilo ZapSign): cliente e/ou empresa.
+const RE_MARCADOR_ASSIN   = /\[ASSINATURA(?:S|_CLIENTE|_EMPRESA| DO CLIENTE)?\]/i
+const RE_MARCADOR_ASSIN_G = /\[ASSINATURA(?:S|_CLIENTE|_EMPRESA| DO CLIENTE)?\]/gi
+const temMarcadorAssinatura = (s) => RE_MARCADOR_ASSIN.test(s || '')
+
+// Aplica as assinaturas: se houver marcadores separados de cliente e empresa,
+// coloca cada lado no seu lugar; senão, tudo junto no marcador ou ao final.
+function aplicarAssinaturas(base, signatarios, usarMarcador) {
+  const temCli = /\[ASSINATURA_CLIENTE\]/i.test(base)
+  const temEmp = /\[ASSINATURA_EMPRESA\]/i.test(base)
+  if (usarMarcador && temCli && temEmp) {
+    const cli = signatarios.filter(s => ehLadoCliente(s.papel))
+    const emp = signatarios.filter(s => !ehLadoCliente(s.papel))
+    return base
+      .replace(/\[ASSINATURA_CLIENTE\]/gi, blocoSimples(cli.length ? cli : signatarios).trimStart())
+      .replace(/\[ASSINATURA_EMPRESA\]/gi, blocoSimples(emp).trimStart())
+      .replace(RE_MARCADOR_ASSIN_G, '')
+  }
+  const bloco = montarBlocoAssinaturas(signatarios)
+  if (usarMarcador && RE_MARCADOR_ASSIN.test(base)) return base.replace(RE_MARCADOR_ASSIN_G, bloco.trimStart())
+  return base.replace(RE_MARCADOR_ASSIN_G, '').replace(/\s+$/, '') + bloco
+}
+
+// ── Preparar documento para assinatura (fluxo tipo ZapSign) ────────
+function PrepareSignModal({ clientId, client, processes, docInicial, onCreated, onClose }) {
+  const { showToast } = useUiStore()
+  const office = getOffice()
+  const storedUser   = lsGet('pj_auth', {})?.state?.user ?? lsGet('pj_user', null)
+  const storedTenant = lsGet('pj_auth', {})?.state?.tenant ?? lsGet('pj_tenant', null)
+  const modelos = [
+    ...getTemplates().map(t => ({ id: 'tpl:' + t.id, name: t.name, body: t.body, group: 'Documentos' })),
+    ...getPeticoes().map(p => ({ id: 'pet:' + p.id, name: p.titulo, body: p.corpo, group: 'Petições' })),
+  ]
+  const sigCliente = () => novoSignatario({ nome: client.name || '', cpf: client.cpfCnpj || '', email: client.email || '', whatsapp: client.phone || '', papel: 'Contratante (cliente)' })
+  const [step, setStep]       = useState(docInicial ? 2 : 1)
+  const [selected, setSelected] = useState({})            // { [modelId]: true } — multi-seleção
+  const [docs, setDocs]       = useState(docInicial ? [{ id: 'ini', titulo: docInicial.name, corpo: docInicial.corpo }] : [])
+  const [processId, setProcessId] = useState(docInicial?.processId ?? '')
+  const [busca, setBusca]     = useState('')
+  const [ondeAssinar, setOndeAssinar] = useState(docInicial && temMarcadorAssinatura(docInicial.corpo) ? 'marcador' : 'fim')
+  const [signatarios, setSignatarios] = useState(docInicial ? [sigCliente()] : [])
+  const [enviando, setEnviando] = useState(false)
+  const [resultado, setResultado] = useState(null)
+
+  const filtro = busca.trim().toLowerCase()
+  const modelosFiltrados = modelos.filter(m => !filtro || m.name.toLowerCase().includes(filtro))
+  const nSel = Object.values(selected).filter(Boolean).length
+  const toggle = (id) => setSelected(s => ({ ...s, [id]: !s[id] }))
+  const unico = docs.length === 1
+  const temMarcador = docs.some(d => temMarcadorAssinatura(d.corpo))
+  const bloco = montarBlocoAssinaturas(signatarios)
+  const previewCorpo = docs.map(d => aplicarAssinaturas(d.corpo, signatarios, ondeAssinar === 'marcador' && temMarcadorAssinatura(d.corpo))).join('\n\n———\n\n')
+  const tituloEnvio = docs.length === 1 ? (docs[0]?.titulo ?? 'documento') : `${docs.length} documentos`
+
+  const gerar = () => {
+    const escolhidos = modelos.filter(m => selected[m.id])
+    if (!escolhidos.length) { showToast('Selecione ao menos um documento.', 'error'); return }
+    const proc = processes.find(p => p.id === processId) ?? null
+    const vars = buildVars(client, proc, storedUser, storedTenant)
+    const novos = escolhidos.map(m => ({ id: m.id, titulo: m.name, corpo: renderTemplate(m.body, vars) }))
+    setDocs(novos)
+    setOndeAssinar(novos.some(d => temMarcadorAssinatura(d.corpo)) ? 'marcador' : 'fim')
+    setSignatarios([sigCliente()])
+    setStep(2)
+  }
+
+  const updDoc = (id, patch) => setDocs(list => list.map(d => d.id === id ? { ...d, ...patch } : d))
+  const upSig = (id, campo, val) => setSignatarios(list => list.map(s => s.id === id ? { ...s, [campo]: val } : s))
+  const addSig = () => setSignatarios(list => [...list, novoSignatario({ papel: 'Testemunha' })])
+  const addEscritorio = () => setSignatarios(list => [...list, novoSignatario({ nome: office.name || storedTenant?.name || '', papel: 'Contratada (escritório)', email: office.email || '', whatsapp: office.phone || '' })])
+  const rmSig  = (id) => setSignatarios(list => list.filter(s => s.id !== id))
+
+  const enviar = async () => {
+    if (!signatarios.some(s => (s.nome || '').trim())) { showToast('Adicione ao menos um signatário com nome.', 'error'); return }
+    if (!docs.length) { showToast('Nenhum documento selecionado.', 'error'); return }
+    setEnviando(true)
+    try {
+      const principal = signatarios.find(s => (s.nome || '').trim()) ?? signatarios[0]
+      const documentos = docs.map(d => ({ titulo: d.titulo, corpo: aplicarAssinaturas(d.corpo, signatarios, ondeAssinar === 'marcador' && temMarcadorAssinatura(d.corpo)) }))
+      const req = await createRequest({
+        processId: processId || null, clientId: clientId ?? null,
+        clientName: client.name || '', clientPhone: principal.whatsapp || '',
+        documentos, modo: 'link', signatarios,
+      })
+      registrar('assinatura', `preparou ${docs.length > 1 ? `${docs.length} documentos` : `"${tituloEnvio}"`} para assinatura (${signatarios.filter(s=>s.nome?.trim()).length} signatário(s))`, { cliente: client.name })
+      setResultado({ id: req.id, link: signLink(req.id), validationCode: req.validationCode })
+      onCreated?.()
+      setStep(3)
+    } catch (e) { showToast(e.message || 'Erro ao criar a assinatura.', 'error') }
+    finally { setEnviando(false) }
+  }
+
+  const msgWhats = (s, link) => `Olá ${(s.nome || '').split(' ')[0]}! Segue ${docs.length > 1 ? `${docs.length} documentos` : `o documento "${tituloEnvio}"`} para sua assinatura eletrônica.\n\nAssine pelo link (leva 1 minuto, direto do celular):\n${link}\n\nQualquer dúvida, estamos à disposição.`
+  const mailto = (s, link) => `mailto:${s.email}?subject=${encodeURIComponent('Assinatura: ' + tituloEnvio)}&body=${encodeURIComponent(msgWhats(s, link))}`
+
+  const inputCls = 'w-full px-3 py-2 rounded-lg bg-[var(--bg-input)] border border-[var(--border)] text-sm text-[var(--text-primary)] focus:border-brand-500 focus:outline-none'
+  const lbl = 'text-[11px] font-medium text-[var(--text-secondary)] mb-1 block'
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 overflow-y-auto py-8 px-4" onClick={onClose}>
+      <div className="bg-[var(--bg-card)] rounded-2xl shadow-2xl w-full max-w-2xl my-4" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--border)]">
+          <div>
+            <p className="text-sm font-semibold text-[var(--text-primary)]">✍️ Preparar documento(s) para assinatura</p>
+            <p className="text-[11px] text-[var(--text-muted)]">Passo {step === 3 ? '3' : step} de 3 · {step === 1 ? 'Documentos' : step === 2 ? 'Signatários e onde assinar' : 'Enviar'}</p>
+          </div>
+          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-[var(--bg-hover)] text-[var(--text-muted)]">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+
+        {/* Passo 1 — escolher modelos (vários no mesmo link) */}
+        {step === 1 && (
+          <div className="p-5 space-y-4">
+            <input value={busca} onChange={e => setBusca(e.target.value)} placeholder="🔍 Buscar modelo..." className={inputCls} />
+            <p className="text-[11px] text-[var(--text-muted)]">Selecione <b>um ou mais</b> documentos — todos vão no <b>mesmo link</b> de assinatura.</p>
+            <div className="max-h-72 overflow-y-auto space-y-1 -mr-1 pr-1">
+              {modelosFiltrados.map(m => (
+                <label key={m.id} className="flex items-center gap-2.5 p-2 rounded-lg hover:bg-[var(--bg-hover)] cursor-pointer">
+                  <input type="checkbox" checked={!!selected[m.id]} onChange={() => toggle(m.id)} className="accent-brand-500" />
+                  <span className="text-sm text-[var(--text-primary)]">{m.name}</span>
+                  <span className="text-[10px] text-[var(--text-muted)] ml-auto">{m.group}</span>
+                </label>
+              ))}
+              {!modelosFiltrados.length && <p className="text-sm text-[var(--text-muted)] text-center py-4">Nenhum modelo encontrado.</p>}
+            </div>
+            <div>
+              <label className={lbl}>Processo vinculado (opcional)</label>
+              <select value={processId} onChange={e => setProcessId(e.target.value)} className={inputCls}>
+                <option value="">Nenhum</option>
+                {processes.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}
+              </select>
+            </div>
+            <p className="text-xs text-[var(--text-muted)]">{nSel} selecionado(s) · dados de <b>{client.name || 'cliente'}</b> preenchidos automaticamente.</p>
+            <div className="flex justify-end gap-2">
+              <Button variant="secondary" size="sm" onClick={onClose}>Cancelar</Button>
+              <Button variant="primary" size="sm" onClick={gerar} disabled={!nSel}>Gerar {nSel > 1 ? `${nSel} documentos` : 'documento'} →</Button>
+            </div>
+          </div>
+        )}
+
+        {/* Passo 2 — signatários + onde assinar + preview */}
+        {step === 2 && (
+          <div className="p-5 space-y-4">
+            {unico ? (
+              <div>
+                <label className={lbl}>Título do documento</label>
+                <input value={docs[0]?.titulo ?? ''} onChange={e => updDoc(docs[0].id, { titulo: e.target.value })} className={inputCls} />
+              </div>
+            ) : (
+              <div>
+                <label className={lbl}>Documentos neste link ({docs.length})</label>
+                <div className="space-y-1">
+                  {docs.map(d => (
+                    <div key={d.id} className="flex items-center gap-2 text-sm text-[var(--text-secondary)] px-3 py-2 rounded-lg bg-[var(--bg-input)] border border-[var(--border)]">
+                      📄 <span className="flex-1 truncate">{d.titulo}</span>
+                      {docs.length > 1 && <button onClick={() => setDocs(list => list.filter(x => x.id !== d.id))} className="text-[11px] text-red-400 hover:underline">remover</button>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Signatários */}
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <p className="text-xs font-semibold text-[var(--text-secondary)]">Quem vai assinar</p>
+                <div className="flex gap-1.5">
+                  <button onClick={addEscritorio} className="text-[11px] px-2 py-1 rounded-md bg-[var(--bg-hover)] text-[var(--text-secondary)] hover:bg-[var(--bg-input)]">+ Escritório (Contratada)</button>
+                  <button onClick={addSig} className="text-[11px] px-2 py-1 rounded-md bg-brand-500/15 text-accent-400 hover:bg-brand-500/25">+ Signatário</button>
+                </div>
+              </div>
+              <div className="space-y-2">
+                {signatarios.map((s, i) => (
+                  <div key={s.id} className="rounded-xl border border-[var(--border)] p-3 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-medium text-[var(--text-muted)]">Signatário {i + 1}</span>
+                      {signatarios.length > 1 && <button onClick={() => rmSig(s.id)} className="text-[11px] text-red-400 hover:underline">Remover</button>}
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <input value={s.nome} onChange={e => upSig(s.id, 'nome', e.target.value)} placeholder="Nome completo" className={inputCls} />
+                      <select value={s.papel} onChange={e => upSig(s.id, 'papel', e.target.value)} className={inputCls}>
+                        {PAPEIS_SIGN.map(p => <option key={p} value={p}>{p}</option>)}
+                      </select>
+                      <input value={s.cpf} onChange={e => upSig(s.id, 'cpf', formatCpf(e.target.value.replace(/\D/g, '')))} placeholder="CPF" className={inputCls} />
+                      <input value={s.whatsapp} onChange={e => upSig(s.id, 'whatsapp', formatPhone(e.target.value))} placeholder="WhatsApp" className={inputCls} />
+                      <input value={s.email} onChange={e => upSig(s.id, 'email', e.target.value)} placeholder="E-mail (opcional)" className={`${inputCls} col-span-2`} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Onde assinar */}
+            <div>
+              <label className={lbl}>Onde inserir as assinaturas no documento</label>
+              <div className="flex gap-2 flex-wrap">
+                <button onClick={() => setOndeAssinar('fim')} className={`text-xs px-3 py-1.5 rounded-lg border ${ondeAssinar === 'fim' ? 'border-brand-500 bg-brand-500/10 text-accent-400' : 'border-[var(--border)] text-[var(--text-muted)]'}`}>Ao final do documento</button>
+                <button onClick={() => temMarcador && setOndeAssinar('marcador')} disabled={!temMarcador}
+                  className={`text-xs px-3 py-1.5 rounded-lg border ${ondeAssinar === 'marcador' ? 'border-brand-500 bg-brand-500/10 text-accent-400' : 'border-[var(--border)] text-[var(--text-muted)]'} ${!temMarcador ? 'opacity-40 cursor-not-allowed' : ''}`}>Onde marquei no documento</button>
+              </div>
+              <p className="text-[10px] text-[var(--text-muted)] mt-1">A posição vem do marcador <code>[ASSINATURA_CLIENTE]</code> / <code>[ASSINATURA_EMPRESA]</code> definido no cadastro do documento (Modelos). Sem marcador, as assinaturas vão ao final.</p>
+            </div>
+
+            {/* Corpo editável (só p/ 1 doc) + preview */}
+            {unico && (
+              <div>
+                <label className={lbl}>Documento (dados já preenchidos — pode editar)</label>
+                <textarea value={docs[0]?.corpo ?? ''} onChange={e => updDoc(docs[0].id, { corpo: e.target.value })} rows={8}
+                  className={`${inputCls} font-mono text-xs leading-relaxed`} style={{ fontFamily: "'Times New Roman', serif" }} />
+              </div>
+            )}
+            <details className="mt-1">
+              <summary className="text-[11px] text-brand-500 cursor-pointer">Ver prévia com as assinaturas</summary>
+              <pre className="mt-2 p-3 rounded-lg bg-[var(--bg-input)] border border-[var(--border)] text-[11px] text-[var(--text-secondary)] whitespace-pre-wrap max-h-52 overflow-y-auto" style={{ fontFamily: "'Times New Roman', serif" }}>{previewCorpo}</pre>
+            </details>
+
+            <div className="flex justify-between gap-2">
+              <Button variant="secondary" size="sm" onClick={() => docInicial ? onClose() : setStep(1)}>{docInicial ? 'Cancelar' : '← Voltar'}</Button>
+              <Button variant="primary" size="sm" onClick={enviar} loading={enviando}>Criar assinatura →</Button>
+            </div>
+          </div>
+        )}
+
+        {/* Passo 3 — enviar links */}
+        {step === 3 && resultado && (
+          <div className="p-5 space-y-4">
+            <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-center">
+              <p className="text-2xl mb-1">✅</p>
+              <p className="text-sm font-semibold text-emerald-300">Documento pronto para assinar</p>
+              <p className="text-[11px] text-[var(--text-muted)] mt-1">Código de validação: <b className="text-[var(--text-secondary)]">{resultado.validationCode}</b></p>
+            </div>
+            <div>
+              <label className={lbl}>Link de assinatura</label>
+              <div className="flex gap-2">
+                <input readOnly value={resultado.link} className={`${inputCls} text-xs`} onFocus={e => e.target.select()} />
+                <Button variant="secondary" size="sm" onClick={() => { navigator.clipboard?.writeText(resultado.link); showToast('Link copiado.', 'success') }}>Copiar</Button>
+                <Button variant="secondary" size="sm" onClick={() => window.open(resultado.link, '_blank')}>Abrir</Button>
+              </div>
+            </div>
+            <div>
+              <p className="text-xs font-semibold text-[var(--text-secondary)] mb-1.5">Enviar para cada signatário</p>
+              <div className="space-y-1.5">
+                {signatarios.filter(s => s.nome?.trim()).map(s => (
+                  <div key={s.id} className="flex items-center gap-2 p-2 rounded-lg border border-[var(--border)]">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm text-[var(--text-primary)] truncate">{s.nome} <span className="text-[10px] text-[var(--text-muted)]">· {s.papel}</span></p>
+                      <p className="text-[10px] text-[var(--text-muted)]">{s.whatsapp || 'sem WhatsApp'}{s.email ? ` · ${s.email}` : ''}</p>
+                    </div>
+                    {s.whatsapp && <button onClick={() => window.open(whatsappLink(s.whatsapp, msgWhats(s, resultado.link)), '_blank')} className="text-[11px] px-2 py-1 rounded-md bg-emerald-600/20 text-emerald-300 hover:bg-emerald-600/30">💬 WhatsApp</button>}
+                    {s.email && <a href={mailto(s, resultado.link)} className="text-[11px] px-2 py-1 rounded-md bg-blue-500/15 text-blue-300 hover:bg-blue-500/25">✉️ E-mail</a>}
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="flex justify-end">
+              <Button variant="primary" size="sm" onClick={onClose}>Concluir</Button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ── Cobrar via WhatsApp (PIX / cartão / boleto) ───────────────────
 function CobrarModal({ entry, client, onClose }) {
   const { showToast } = useUiStore()
-  const office = lsGet('pj_local_office', {})
+  const office = getOffice()
   const [metodo, setMetodo] = useState('pix')
   const [pixKey, setPixKey] = useState(office.pixKey ?? '')
   const [link, setLink] = useState('')
@@ -265,7 +604,7 @@ function corpoBoleto(entry, client, office) {
 
 // Imprime o(s) boleto(s) de um lançamento — se for parcela, imprime o grupo todo.
 function imprimirBoletos(entry, client) {
-  const office = lsGet('pj_local_office', {})
+  const office = getOffice()
   const all = lsGet('pj_local_financial_entries', [])
   const grupo = entry.groupId ? all.filter(f => f.groupId === entry.groupId) : [entry]
   const corpos = grupo.sort((a, b) => (a.parcela?.num ?? 0) - (b.parcela?.num ?? 0)).map(e => corpoBoleto(e, client, office))
@@ -355,7 +694,7 @@ function PaymentModal({ clientId, clientName, processes, entry, onSaved, onClose
     if (!form.description || !form.amount) { showToast('Preencha descrição e valor.', 'error'); return }
     const all = lsGet('pj_local_financial_entries', [])
     const base = {
-      tenantId: 'tenant_demo', clientId, type: form.type, description: form.description,
+      tenantId: currentTenantId(), clientId, type: form.type, description: form.description,
       processId: form.processId, status: form.status, formaPagamento: form.formaPagamento,
       paymentMethod: form.paymentMethod, paymentLink: form.paymentLink, notes: form.notes,
       updatedAt: new Date().toISOString(),
@@ -509,19 +848,104 @@ function PaymentModal({ clientId, clientName, processes, entry, onSaved, onClose
 }
 
 // ── Documents section ─────────────────────────────────────────────
+const DEFAULT_FOLDERS = [
+  { id: 'root',           name: 'Geral',                       color: '#6366f1' },
+  { id: 'gerados',        name: 'Gerados',                     color: '#0ea5e9' },
+  { id: 'assinados',      name: 'Assinados',                   color: '#10b981' },
+  { id: 'identificacao',  name: 'Documentos de Identificação', color: '#f59e0b' },
+  { id: 'complementares', name: 'Complementares',              color: '#8b5cf6' },
+]
+
+// ── Atendimentos do cliente (fila + presencial/online/WhatsApp) ────
+function AtendimentosCard({ clientId, clientName }) {
+  const { showToast } = useUiStore()
+  const [lista, setLista] = useState(() => getAtendimentosCliente(clientId))
+  const reload = () => setLista(getAtendimentosCliente(clientId))
+
+  const naFila = () => { addToFila({ clientId, clientName, tipo: 'presencial' }); registrar('atendimento', `colocou ${clientName || 'cliente'} na fila de atendimento`, { cliente: clientName }); showToast('Adicionado à fila de atendimento.', 'success'); reload() }
+  const registrar_ = (tipo) => { registrarAtendimento({ clientId, clientName, tipo }); registrar('atendimento', `registrou atendimento ${tipoAtend(tipo).label} de ${clientName || 'cliente'}`, { cliente: clientName }); showToast('Atendimento registrado.', 'success'); reload() }
+
+  return (
+    <Card className="p-5 space-y-3">
+      <h3 className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wide">📞 Atendimentos</h3>
+      <div className="flex gap-2 flex-wrap">
+        <Button variant="primary" size="sm" onClick={naFila}>🟠 Adicionar à fila</Button>
+        <Button variant="secondary" size="sm" onClick={() => registrar_('online')}>💻 Online</Button>
+        <Button variant="secondary" size="sm" onClick={() => registrar_('whatsapp')}>💬 WhatsApp</Button>
+      </div>
+      {lista.length === 0 ? (
+        <p className="text-[11px] text-[var(--text-muted)]">Nenhum atendimento registrado ainda.</p>
+      ) : (
+        <div className="space-y-1.5 max-h-52 overflow-y-auto">
+          {lista.map(a => (
+            <div key={a.id} className="flex items-center gap-2 text-xs p-2 rounded-lg bg-[var(--bg-hover)]">
+              <span>{tipoAtend(a.tipo).icone}</span>
+              <div className="flex-1 min-w-0">
+                <p className="text-[var(--text-secondary)]">{tipoAtend(a.tipo).label} {a.status === 'fila' ? <span className="text-orange-400">· na fila</span> : ''}</p>
+                <p className="text-[10px] text-[var(--text-muted)]">
+                  {new Date(a.criadoEm).toLocaleString('pt-BR')}
+                  {a.status === 'atendido' && a.atendidoPor ? ` · por ${a.atendidoPor} · espera ${esperaMin(a)} min` : ''}
+                  {a.obs ? ` · ${a.obs}` : ''}
+                </p>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
+  )
+}
+
 function DocumentsSection({ clientId, client, processes }) {
   const { showToast } = useUiStore()
   const FOLDERS_KEY = `pj_folders_${clientId}`
   const DOCS_KEY    = `pj_docs_${clientId}`
 
-  const [folders,  setFolders]  = useState(() => lsGet(FOLDERS_KEY, [{ id: 'root', name: 'Geral', color: '#6366f1' }]))
+  const [folders,  setFolders]  = useState(() => {
+    const stored = lsGet(FOLDERS_KEY, null)
+    if (!stored || !stored.length) return DEFAULT_FOLDERS
+    const ids = new Set(stored.map(f => f.id))
+    return [...stored, ...DEFAULT_FOLDERS.filter(f => !ids.has(f.id))]   // garante as pastas padrão
+  })
   const [docs,     setDocs]     = useState(() => lsGet(DOCS_KEY, []))
-  const [dragging, setDragging] = useState(null)
+  const [dragging, setDragging] = useState(null)   // array de ids sendo arrastados
+  const [sel,      setSel]      = useState(() => new Set())  // seleção múltipla
   const [over,     setOver]     = useState(null)
+  useEffect(() => { lsSet(FOLDERS_KEY, folders) }, [])  // persiste as pastas padrão recém-criadas
   const [newFolder,setNewFolder]= useState(false)
   const [folderName,setFolderName] = useState('')
   const [printModal,setPrintModal] = useState(false)
+  const [signModal, setSignModal] = useState(false)
+  const [signDoc,   setSignDoc]   = useState(null)
+  const [signReqs,  setSignReqs]  = useState([])
   const fileRef = useRef()
+  const fileRefAssinado = useRef()
+
+  const loadSignReqs = () => api.signatures.list()
+    .then(rows => {
+      const mine = (Array.isArray(rows) ? rows : (rows?.data ?? [])).filter(r => r.clientId === clientId)
+      setSignReqs(mine)
+      // Documentos assinados vão automaticamente para a pasta "Assinados"
+      setDocs(prev => {
+        const jaTem = new Set(prev.filter(d => d.signatureId).map(d => d.signatureId))
+        const novos = mine.filter(r => r.status === 'assinado' && !jaTem.has(r.id)).map(r => ({
+          id: uid(), name: `${r.documentos?.[0]?.titulo ?? 'Documento'} (assinado)`,
+          kind: 'signed', signatureId: r.id, folderId: 'assinados',
+          uploadedAt: r.signedAt ?? new Date().toISOString(),
+        }))
+        if (!novos.length) return prev
+        const next = [...prev, ...novos]
+        lsSet(DOCS_KEY, next)
+        return next
+      })
+    })
+    .catch(() => {})
+  useEffect(() => { loadSignReqs() }, [clientId])
+
+  const removerAssinatura = async (id) => {
+    try { await deleteRequest(id) } catch {}
+    setSignReqs(list => list.filter(r => r.id !== id))
+  }
 
   const saveFolders = f => { setFolders(f); lsSet(FOLDERS_KEY, f) }
   const saveDocs    = d => { setDocs(d);    lsSet(DOCS_KEY, d) }
@@ -534,13 +958,21 @@ function DocumentsSection({ clientId, client, processes }) {
     showToast(`Pasta "${f.name}" criada.`, 'success')
   }
 
-  const uploadFile = e => {
+  const uploadFile = (folderId = 'root') => e => {
     const files = [...(e.target.files ?? [])]
-    const newDocs = files.map(f => ({ id: uid(), name: f.name, size: f.size, type: f.type, folderId: 'root', uploadedAt: new Date().toISOString() }))
+    const kind = folderId === 'assinados' ? 'signed' : undefined
+    const newDocs = files.map(f => ({ id: uid(), name: f.name, size: f.size, type: f.type, kind, folderId, uploadedAt: new Date().toISOString() }))
     saveDocs([...docs, ...newDocs])
-    showToast(`${files.length} arquivo${files.length!==1?'s':''} adicionado${files.length!==1?'s':''}.`, 'success')
+    showToast(`${files.length} arquivo${files.length!==1?'s':''} adicionado${files.length!==1?'s':''}${folderId === 'assinados' ? ' em Assinados' : ''}.`, 'success')
+    if (folderId === 'assinados') registrar('assinatura', `enviou documento assinado (impresso) — ${files.map(f => f.name).join(', ')}`, { cliente: client.name })
     e.target.value = ''
   }
+
+  // Migra documentos gerados que ainda estavam em "Geral" para a pasta "Gerados"
+  useEffect(() => {
+    const precisa = docs.some(d => d.kind === 'generated' && d.folderId === 'root')
+    if (precisa) saveDocs(docs.map(d => (d.kind === 'generated' && d.folderId === 'root') ? { ...d, folderId: 'gerados' } : d))
+  }, [])
 
   const deleteFolder = id => {
     if (id === 'root') return
@@ -548,7 +980,19 @@ function DocumentsSection({ clientId, client, processes }) {
     saveFolders(folders.filter(f => f.id !== id))
   }
 
-  const moveDoc = (docId, folderId) => { saveDocs(docs.map(d => d.id === docId ? { ...d, folderId } : d)); setDragging(null); setOver(null) }
+  // Move um ou vários documentos (seleção múltipla) para uma pasta
+  const moveDocs = (ids, folderId) => { saveDocs(docs.map(d => ids.includes(d.id) ? { ...d, folderId } : d)); setDragging(null); setOver(null); setSel(new Set()) }
+  const startDrag = (docId) => setDragging(sel.has(docId) && sel.size ? [...sel] : [docId])
+  const toggleSel = (docId) => setSel(s => { const n = new Set(s); n.has(docId) ? n.delete(docId) : n.add(docId); return n })
+  const deleteDoc = (docId) => saveDocs(docs.filter(d => d.id !== docId))
+
+  // Documentos gerados (com dados do cliente) ficam salvos automaticamente na pasta "Gerados"
+  const onGenerated = (rendered, procId) => {
+    const novos = rendered.map(r => ({ id: uid(), name: r.titulo, kind: 'generated', corpo: r.corpo, processId: procId || null, folderId: 'gerados', uploadedAt: new Date().toISOString() }))
+    saveDocs([...docs, ...novos])
+    registrar('documento', novos.length > 1 ? `gerou ${novos.length} documentos` : `gerou o documento "${rendered[0].titulo}"`, { cliente: client.name })
+    showToast(`${novos.length} documento(s) salvo(s) na lista.`, 'success')
+  }
   const fmtSize = b => b >= 1e6 ? `${(b/1e6).toFixed(1)} MB` : `${Math.round(b/1000)} KB`
   const fileIcon = t => t?.includes('pdf') ? '📄' : t?.includes('image') ? '🖼️' : t?.includes('word') ? '📝' : '📎'
 
@@ -556,9 +1000,16 @@ function DocumentsSection({ clientId, client, processes }) {
     <div className="space-y-3">
       <div className="flex items-center gap-2 flex-wrap">
         <Button variant="secondary" size="sm" onClick={() => fileRef.current?.click()}>⬆️ Enviar arquivo</Button>
-        <input ref={fileRef} type="file" multiple className="hidden" onChange={uploadFile} />
+        <input ref={fileRef} type="file" multiple className="hidden" onChange={uploadFile('root')} />
+        <Button variant="secondary" size="sm" onClick={() => fileRefAssinado.current?.click()}>✅ Enviar assinado (impresso)</Button>
+        <input ref={fileRefAssinado} type="file" multiple className="hidden" onChange={uploadFile('assinados')} />
         <Button variant="secondary" size="sm" onClick={() => setNewFolder(true)}>📁 Nova pasta</Button>
-        <Button variant="primary" size="sm" onClick={() => setPrintModal(true)}>🖨️ Gerar documento</Button>
+        <Button variant="secondary" size="sm" onClick={() => setPrintModal(true)}>🖨️ Gerar documento</Button>
+        <Button variant="primary" size="sm" onClick={() => setSignModal(true)}>✍️ Preparar assinatura</Button>
+      </div>
+
+      <div className="rounded-lg bg-[var(--bg-hover)] border border-[var(--border)] p-3 text-[11px] text-[var(--text-muted)] leading-relaxed">
+        <b className="text-[var(--text-secondary)]">Como organizar os documentos:</b> use <b>📁 Nova pasta</b> para criar pastas (ex.: Identificação, Procurações, Complementares) e <b>arraste</b> os arquivos para dentro delas (pode selecionar vários). Envie em <b>PDF</b> sempre que possível (mais leve e universal); imagens (RG/CNH) em JPG/PNG. Use <b>⬆️ Enviar arquivo</b> para documentos comuns e <b>✅ Enviar assinado</b> para o documento já assinado à mão (vai direto para "Assinados"). Documentos <b>gerados</b> pelo sistema ficam em "Gerados" e os <b>assinados digitalmente</b> em "Assinados".
       </div>
 
       {newFolder && (
@@ -572,6 +1023,60 @@ function DocumentsSection({ clientId, client, processes }) {
         </div>
       )}
 
+      {/* Assinaturas pendentes/concluídas deste cliente */}
+      {signReqs.length > 0 && (
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--bg-card)]">
+          <div className="px-4 py-2.5 border-b border-[var(--border)] flex items-center gap-2">
+            <span>✍️</span>
+            <span className="text-sm font-medium text-[var(--text-primary)]">Assinaturas</span>
+            <span className="text-[10px] text-[var(--text-muted)] bg-[var(--bg-hover)] px-1.5 py-0.5 rounded-full">{signReqs.length}</span>
+          </div>
+          <div className="p-3 space-y-2">
+            {signReqs.map(r => {
+              const assinado = r.status === 'assinado'
+              const doc = r.documentos?.[0]
+              const sigs = r.signatarios ?? []
+              const primeiro = sigs.find(s => s.whatsapp) ?? sigs[0]
+              const link = signLink(r.id)
+              const msg = `Olá! Segue o documento "${doc?.titulo ?? ''}" para sua assinatura eletrônica.\n\nAssine pelo link:\n${link}`
+              return (
+                <div key={r.id} className="flex items-center gap-3 p-2.5 rounded-lg border border-[var(--border)]">
+                  <span className={`w-1.5 h-9 rounded-full flex-shrink-0 ${assinado ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-[var(--text-primary)] truncate">{doc?.titulo ?? 'Documento'}</p>
+                    <p className="text-[10px] text-[var(--text-muted)]">
+                      {sigs.length} signatário(s){r.validationCode ? ` · cód. ${r.validationCode}` : ''}{r.signedAt ? ` · assinado ${formatDate(r.signedAt)}` : ''}
+                    </p>
+                  </div>
+                  <span className={`text-[10px] px-2 py-0.5 rounded-full flex-shrink-0 ${assinado ? 'bg-emerald-500/15 text-emerald-400' : 'bg-amber-500/15 text-amber-400'}`}>{assinado ? '✓ Assinado' : '⏳ Aguardando'}</span>
+                  {!assinado && (
+                    <>
+                      <button onClick={() => { navigator.clipboard?.writeText(link); showToast('Link copiado.', 'success') }} className="text-[11px] px-2 py-1 rounded-md bg-[var(--bg-hover)] text-[var(--text-secondary)] hover:bg-[var(--bg-input)]">🔗 Link</button>
+                      {primeiro?.whatsapp && <button onClick={() => window.open(whatsappLink(primeiro.whatsapp, msg), '_blank')} className="text-[11px] px-2 py-1 rounded-md bg-emerald-600/20 text-emerald-300 hover:bg-emerald-600/30">💬</button>}
+                    </>
+                  )}
+                  {assinado && <button onClick={() => imprimirComprovante(r)} className="text-[11px] px-2 py-1 rounded-md bg-brand-500/15 text-accent-400 hover:bg-brand-500/25">📄 Comprovante</button>}
+                  <button onClick={() => removerAssinatura(r.id)} className="text-[11px] text-[var(--text-muted)] hover:text-red-400">✕</button>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {sel.size > 0 && (
+        <div className="flex items-center gap-2 flex-wrap rounded-xl border border-brand-500/30 bg-brand-500/10 px-3 py-2">
+          <span className="text-xs text-accent-400 font-medium">{sel.size} selecionado(s)</span>
+          <span className="text-[11px] text-[var(--text-muted)]">arraste em grupo ou</span>
+          <select value="" onChange={e => { if (e.target.value) moveDocs([...sel], e.target.value) }}
+            className="text-xs px-2 py-1 rounded-md bg-[var(--bg-input)] border border-[var(--border)] text-[var(--text-primary)] focus:border-brand-500 focus:outline-none">
+            <option value="">Mover para…</option>
+            {folders.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
+          </select>
+          <button onClick={() => setSel(new Set())} className="text-[11px] text-[var(--text-muted)] hover:text-[var(--text-secondary)] ml-auto">Limpar seleção</button>
+        </div>
+      )}
+
       <div className="space-y-3">
         {folders.map(folder => {
           const folderDocs = docs.filter(d => d.folderId === folder.id)
@@ -580,7 +1085,7 @@ function DocumentsSection({ clientId, client, processes }) {
             <div key={folder.id}
               onDragOver={e => { e.preventDefault(); setOver(folder.id) }}
               onDragLeave={() => setOver(null)}
-              onDrop={e => { e.preventDefault(); if (dragging) moveDoc(dragging, folder.id) }}
+              onDrop={e => { e.preventDefault(); if (dragging) moveDocs(dragging, folder.id) }}
               className={`rounded-xl border transition-all ${isOver ? 'border-brand-500 bg-brand-500/5' : 'border-[var(--border)] bg-[var(--bg-card)]'}`}>
               <div className="flex items-center justify-between px-4 py-2.5 border-b border-[var(--border)]">
                 <div className="flex items-center gap-2">
@@ -599,18 +1104,42 @@ function DocumentsSection({ clientId, client, processes }) {
                   </p>
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {folderDocs.map(doc => (
+                    {folderDocs.map(doc => {
+                      const gerado = doc.kind === 'generated'
+                      const assinadoDoc = doc.kind === 'signed'
+                      const reqDoc = assinadoDoc ? signReqs.find(r => r.id === doc.signatureId) : null
+                      const selecionado = sel.has(doc.id)
+                      const arrastando = Array.isArray(dragging) && dragging.includes(doc.id)
+                      return (
                       <div key={doc.id} draggable
-                        onDragStart={() => setDragging(doc.id)}
+                        onDragStart={() => startDrag(doc.id)}
                         onDragEnd={() => { setDragging(null); setOver(null) }}
-                        className={`flex items-center gap-2.5 p-2.5 rounded-lg border cursor-grab transition-all ${dragging===doc.id?'opacity-40 border-brand-500':'border-[var(--border)] hover:border-brand-500/40 hover:bg-[var(--bg-hover)]'}`}>
-                        <span className="text-xl flex-shrink-0">{fileIcon(doc.type)}</span>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-xs font-medium text-[var(--text-primary)] truncate">{doc.name}</p>
-                          <p className="text-[10px] text-[var(--text-muted)]">{doc.size ? fmtSize(doc.size) : ''} · {formatDate(doc.uploadedAt)}</p>
+                        className={`flex flex-col gap-2 p-2.5 rounded-lg border cursor-grab transition-all ${arrastando ? 'opacity-40 border-brand-500' : selecionado ? 'border-brand-500 bg-brand-500/5' : 'border-[var(--border)] hover:border-brand-500/40 hover:bg-[var(--bg-hover)]'}`}>
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <input type="checkbox" checked={selecionado} onChange={() => toggleSel(doc.id)} onClick={e => e.stopPropagation()} className="accent-brand-500 flex-shrink-0" title="Selecionar" />
+                          <span className="text-xl flex-shrink-0">{gerado ? '📃' : assinadoDoc ? '✅' : fileIcon(doc.type)}</span>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs font-medium text-[var(--text-primary)] truncate">{doc.name}</p>
+                            <p className="text-[10px] text-[var(--text-muted)]">
+                              {gerado ? 'Gerado' : assinadoDoc ? 'Assinado' : (doc.size ? fmtSize(doc.size) : 'Arquivo')} · {formatDate(doc.uploadedAt)}
+                            </p>
+                          </div>
                         </div>
+                        {gerado && (
+                          <div className="flex items-center gap-1.5 flex-wrap pt-1.5 border-t border-[var(--border)]">
+                            <button onClick={() => printDocumentos([doc.corpo], { titulo: doc.name })} className="text-[10px] px-2 py-1 rounded-md bg-[var(--bg-hover)] text-[var(--text-secondary)] hover:bg-[var(--bg-input)]">🖨️ Imprimir</button>
+                            <button onClick={() => setSignDoc(doc)} className="text-[10px] px-2 py-1 rounded-md bg-brand-500/15 text-accent-400 hover:bg-brand-500/25">✍️ Preparar assinatura</button>
+                            <button onClick={() => deleteDoc(doc.id)} className="text-[10px] px-2 py-1 rounded-md text-[var(--text-muted)] hover:text-red-400 ml-auto">Excluir</button>
+                          </div>
+                        )}
+                        {assinadoDoc && (
+                          <div className="flex items-center gap-1.5 flex-wrap pt-1.5 border-t border-[var(--border)]">
+                            {reqDoc && <button onClick={() => imprimirComprovante(reqDoc)} className="text-[10px] px-2 py-1 rounded-md bg-brand-500/15 text-accent-400 hover:bg-brand-500/25">📄 Comprovante</button>}
+                            <button onClick={() => deleteDoc(doc.id)} className="text-[10px] px-2 py-1 rounded-md text-[var(--text-muted)] hover:text-red-400 ml-auto">Excluir</button>
+                          </div>
+                        )}
                       </div>
-                    ))}
+                    )})}
                   </div>
                 )}
               </div>
@@ -618,7 +1147,8 @@ function DocumentsSection({ clientId, client, processes }) {
           )
         })}
       </div>
-      {printModal && <PrintDocModal client={client} processes={processes} onClose={() => setPrintModal(false)} />}
+      {printModal && <PrintDocModal client={client} processes={processes} onGenerated={onGenerated} onClose={() => setPrintModal(false)} />}
+      {(signModal || signDoc) && <PrepareSignModal clientId={clientId} client={client} processes={processes} docInicial={signDoc} onCreated={loadSignReqs} onClose={() => { setSignModal(false); setSignDoc(null) }} />}
     </div>
   )
 }
@@ -647,7 +1177,7 @@ function WorkspaceSection({ clientId, client, processes }) {
 
   if (preview) return <PrintPreview text={preview.text} templateName={preview.name} onClose={() => setPreview(null)} />
 
-  const calcHistory = lsGet('pj_calc_history', [])
+  const calcHistory = lsGet(tkey('pj_calc_history'), [])
   const teses = lsGet('pj_local_theses', [])
   const templates = getTemplates()
 
@@ -786,8 +1316,9 @@ function TasksSection({ clientId, clientName, onTasksChange }) {
   const [tasks, setTasks] = useState(() => lsGet(TKEY, []))
   const [obs, setObs]     = useState(() => lsGet(OKEY, []))
   const [funcs, setFuncs] = useState(() => lsGet(FKEY, [currentUser]))
-  const [taskForm, setTaskForm] = useState({ titulo: '', descricao: '', para: currentUser })
+  const [taskForm, setTaskForm] = useState({ titulo: '', descricao: '', para: currentUser, prazo: '' })
   const [obsForm, setObsForm]   = useState({ assunto: '', texto: '' })
+  const [respondendo, setRespondendo] = useState(null)   // { id, texto }
 
   const saveTasks = (n) => { setTasks(n); lsSet(TKEY, n); onTasksChange?.() }
   const saveObs   = (n) => { setObs(n);   lsSet(OKEY, n) }
@@ -796,12 +1327,18 @@ function TasksSection({ clientId, clientName, onTasksChange }) {
   const addTask = () => {
     if (!taskForm.titulo.trim()) { showToast('Informe o título da tarefa.', 'error'); return }
     rememberFunc(taskForm.para.trim())
-    saveTasks([{ id: uid(), ...taskForm, de: currentUser, status: 'aberta', createdAt: new Date().toISOString() }, ...tasks])
-    setTaskForm({ titulo: '', descricao: '', para: currentUser })
+    saveTasks([{ id: uid(), ...taskForm, de: currentUser, status: 'aberta', resposta: '', createdAt: new Date().toISOString() }, ...tasks])
+    setTaskForm({ titulo: '', descricao: '', para: currentUser, prazo: '' })
     showToast('Tarefa criada.', 'success')
   }
-  const concluirTask = (id) => saveTasks(tasks.map(t => t.id === id ? { ...t, status: 'concluida', concluidoPor: currentUser, concluidoEm: new Date().toISOString() } : t))
-  const reabrirTask  = (id) => saveTasks(tasks.map(t => t.id === id ? { ...t, status: 'aberta', concluidoPor: null, concluidoEm: null } : t))
+  // Quem recebeu responde e conclui → volta para quem mandou (azul, aguardando visto)
+  const responderTask = (id, texto) => {
+    saveTasks(tasks.map(t => t.id === id ? { ...t, status: 'respondida', resposta: texto || '', respondidoPor: currentUser, respondidoEm: new Date().toISOString() } : t))
+    setRespondendo(null); showToast('Tarefa respondida — voltou para quem enviou.', 'success')
+  }
+  // Quem mandou dá o visto → conclui de vez (sai da lista dos dois)
+  const darVisto = (id) => saveTasks(tasks.map(t => t.id === id ? { ...t, status: 'concluida', vistoEm: new Date().toISOString() } : t))
+  const reabrirTask  = (id) => saveTasks(tasks.map(t => t.id === id ? { ...t, status: 'aberta', respondidoPor: null, respondidoEm: null, vistoEm: null } : t))
   const delTask = (id) => saveTasks(tasks.filter(t => t.id !== id))
 
   const addObs = () => {
@@ -813,7 +1350,8 @@ function TasksSection({ clientId, clientName, onTasksChange }) {
   const concluirObs = (id) => saveObs(obs.map(o => o.id === id ? { ...o, concluido: true, concluidoPor: currentUser, concluidoEm: new Date().toISOString() } : o))
   const delObs = (id) => saveObs(obs.filter(o => o.id !== id))
 
-  const abertas = tasks.filter(t => t.status !== 'concluida')
+  const abertas    = tasks.filter(t => t.status === 'aberta' || !t.status)
+  const respondidas = tasks.filter(t => t.status === 'respondida')
   const concluidas = tasks.filter(t => t.status === 'concluida')
 
   return (
@@ -830,18 +1368,26 @@ function TasksSection({ clientId, clientName, onTasksChange }) {
           <Card className="p-4 space-y-3">
             <Input label="Título da tarefa" value={taskForm.titulo} onChange={e => setTaskForm(d => ({ ...d, titulo: e.target.value }))} placeholder="Ex: Protocolar petição inicial" />
             <Textarea label="Descrição" rows={2} value={taskForm.descricao} onChange={e => setTaskForm(d => ({ ...d, descricao: e.target.value }))} placeholder="Detalhes da tarefa..." />
-            <div>
-              <label className="text-xs font-medium text-[var(--text-secondary)] mb-1 block">Atribuir para</label>
-              <input list="funcs-list" value={taskForm.para} onChange={e => setTaskForm(d => ({ ...d, para: e.target.value }))}
-                className="w-full px-3 py-2 rounded-lg bg-[var(--bg-input)] border border-[var(--border)] text-sm text-[var(--text-primary)] focus:border-brand-500 focus:outline-none" placeholder="Nome do funcionário" />
-              <datalist id="funcs-list">{funcs.map(f => <option key={f} value={f} />)}</datalist>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="text-xs font-medium text-[var(--text-secondary)] mb-1 block">Atribuir para</label>
+                <input list="funcs-list" value={taskForm.para} onChange={e => setTaskForm(d => ({ ...d, para: e.target.value }))}
+                  className="w-full px-3 py-2 rounded-lg bg-[var(--bg-input)] border border-[var(--border)] text-sm text-[var(--text-primary)] focus:border-brand-500 focus:outline-none" placeholder="Nome do funcionário" />
+                <datalist id="funcs-list">{funcs.map(f => <option key={f} value={f} />)}</datalist>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-[var(--text-secondary)] mb-1 block">Prazo</label>
+                <input type="date" value={taskForm.prazo} onChange={e => setTaskForm(d => ({ ...d, prazo: e.target.value }))}
+                  className="w-full px-3 py-2 rounded-lg bg-[var(--bg-input)] border border-[var(--border)] text-sm text-[var(--text-primary)] focus:border-brand-500 focus:outline-none" />
+              </div>
             </div>
             <Button variant="primary" size="sm" className="w-full" onClick={addTask}>Criar tarefa</Button>
           </Card>
 
-          {abertas.length === 0 && concluidas.length === 0 && (
+          {abertas.length === 0 && respondidas.length === 0 && concluidas.length === 0 && (
             <div className="text-center py-8 border border-dashed border-[var(--border)] rounded-xl text-xs text-[var(--text-muted)]">Nenhuma tarefa ainda.</div>
           )}
+          {/* Abertas — quem recebeu responde e conclui */}
           {abertas.map(t => (
             <div key={t.id} className="rounded-xl border border-[var(--border)] bg-[var(--bg-card)] p-4 group">
               <div className="flex items-start justify-between gap-2">
@@ -849,19 +1395,48 @@ function TasksSection({ clientId, clientName, onTasksChange }) {
                 <button onClick={() => delTask(t.id)} className="text-[var(--text-muted)] hover:text-red-400 text-xs opacity-0 group-hover:opacity-100">✕</button>
               </div>
               {t.descricao && <p className="text-xs text-[var(--text-secondary)] mt-1">{t.descricao}</p>}
-              <div className="flex items-center justify-between mt-3">
-                <p className="text-[10px] text-[var(--text-muted)]">De <b className="text-[var(--text-secondary)]">{t.de}</b> → <b className="text-[var(--text-secondary)]">{t.para}</b> · {formatDate(t.createdAt)}</p>
-                <button onClick={() => concluirTask(t.id)} className="text-xs px-2.5 py-1 rounded-lg bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25">Concluir</button>
+              <p className="text-[10px] text-[var(--text-muted)] mt-2">De <b className="text-[var(--text-secondary)]">{t.de}</b> → <b className="text-[var(--text-secondary)]">{t.para}</b> · criada {formatDate(t.createdAt)}{t.prazo ? ` · prazo ${formatDate(t.prazo)}` : ''}</p>
+              {respondendo?.id === t.id ? (
+                <div className="mt-2 space-y-2">
+                  <textarea autoFocus rows={2} value={respondendo.texto} onChange={e => setRespondendo(r => ({ ...r, texto: e.target.value }))}
+                    placeholder="O que foi feito? (resposta)" className="w-full px-2.5 py-1.5 rounded-lg bg-[var(--bg-input)] border border-[var(--border)] text-xs text-[var(--text-primary)] focus:border-brand-500 focus:outline-none" />
+                  <div className="flex gap-2">
+                    <button onClick={() => responderTask(t.id, respondendo.texto)} className="text-xs px-2.5 py-1 rounded-lg bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25">✓ Responder e concluir</button>
+                    <button onClick={() => setRespondendo(null)} className="text-xs text-[var(--text-muted)]">Cancelar</button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex justify-end mt-2">
+                  <button onClick={() => setRespondendo({ id: t.id, texto: '' })} className="text-xs px-2.5 py-1 rounded-lg bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25">Responder / Concluir</button>
+                </div>
+              )}
+            </div>
+          ))}
+          {/* Respondidas — voltaram para quem mandou (azul), aguardando o "visto" */}
+          {respondidas.map(t => (
+            <div key={t.id} className="rounded-xl border border-blue-500/40 bg-blue-500/5 p-4 group">
+              <div className="flex items-start justify-between gap-2">
+                <p className="text-sm font-medium text-[var(--text-primary)]">{t.titulo} <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-500/15 text-blue-300">🔵 Respondida</span></p>
+                <button onClick={() => delTask(t.id)} className="text-[var(--text-muted)] hover:text-red-400 text-xs opacity-0 group-hover:opacity-100">✕</button>
+              </div>
+              {t.descricao && <p className="text-xs text-[var(--text-secondary)] mt-1">{t.descricao}</p>}
+              {t.resposta && <p className="text-xs text-blue-200 mt-2 bg-blue-500/10 rounded-lg p-2"><b>Resposta de {t.respondidoPor}:</b> {t.resposta}</p>}
+              <p className="text-[10px] text-[var(--text-muted)] mt-2">De <b className="text-[var(--text-secondary)]">{t.de}</b> → <b className="text-[var(--text-secondary)]">{t.para}</b> · respondida {formatDate(t.respondidoEm)}</p>
+              <div className="flex justify-end mt-2">
+                <button onClick={() => darVisto(t.id)} className="text-xs px-2.5 py-1 rounded-lg bg-brand-500/20 text-accent-400 hover:bg-brand-500/30">👁 Dar visto e finalizar</button>
               </div>
             </div>
           ))}
+          {/* Concluídas — histórico completo */}
           {concluidas.map(t => (
-            <div key={t.id} className="rounded-xl border border-[var(--border)] bg-[var(--bg-hover)] p-4 opacity-70 group">
+            <div key={t.id} className="rounded-xl border border-[var(--border)] bg-[var(--bg-hover)] p-4 opacity-80 group">
               <div className="flex items-start justify-between gap-2">
                 <p className="text-sm font-medium text-[var(--text-primary)] line-through">{t.titulo}</p>
                 <button onClick={() => delTask(t.id)} className="text-[var(--text-muted)] hover:text-red-400 text-xs opacity-0 group-hover:opacity-100">✕</button>
               </div>
-              <p className="text-[10px] text-emerald-400 mt-2">✔ Concluída por <b>{t.concluidoPor}</b> em {formatDate(t.concluidoEm)}</p>
+              {t.descricao && <p className="text-[11px] text-[var(--text-muted)] mt-1">{t.descricao}</p>}
+              {t.resposta && <p className="text-[11px] text-[var(--text-secondary)] mt-1"><b>Resposta:</b> {t.resposta}</p>}
+              <p className="text-[10px] text-[var(--text-muted)] mt-1.5">De <b>{t.de}</b> → <b>{t.para}</b> · criada {formatDate(t.createdAt)}{t.prazo ? ` · prazo ${formatDate(t.prazo)}` : ''}{t.respondidoEm ? ` · respondida ${formatDate(t.respondidoEm)}` : ''}{t.vistoEm ? ` · finalizada ${formatDate(t.vistoEm)}` : ''}</p>
               <button onClick={() => reabrirTask(t.id)} className="text-[10px] text-[var(--text-muted)] hover:text-brand-500 mt-1">Reabrir</button>
             </div>
           ))}
@@ -958,6 +1533,7 @@ export default function ClientPage() {
       const payload = { ...data, cpfCnpj: (data.cpfCnpj ?? '').replace(/\D/g,'') }
       if (isNew) {
         const created = await api.clients.create(payload)
+        registrar('cliente', `cadastrou o cliente "${payload.name}"`, { cliente: payload.name })
         showToast('Cliente cadastrado com sucesso.', 'success')
         navigate(`/app/clients/${created.id}`)
       } else {
@@ -969,10 +1545,31 @@ export default function ClientPage() {
     finally { setSaving(false) }
   }
 
-  const totalReceived = financial.filter(f => f.type==='receivable' && f.status==='paid').reduce((s,f) => s+(f.amount??0), 0)
-  const totalPending  = financial.filter(f => f.type==='receivable' && f.status==='pending').reduce((s,f) => s+(f.amount??0), 0)
-  const totalOverdue  = financial.filter(f => f.type==='receivable' && f.status==='overdue').reduce((s,f) => s+(f.amount??0), 0)
-  const aOrganizar    = financial.filter(f => f.needsReview).length
+  // Auto-save (cliente já cadastrado): salva sozinho ao editar, sem precisar do botão
+  const autoFirst = useRef(true)
+  const [autoSaved, setAutoSaved] = useState('idle')  // idle | saving | saved
+  useEffect(() => {
+    if (isNew || loading) return
+    if (autoFirst.current) { autoFirst.current = false; return }
+    if (!data.name?.trim()) return
+    setAutoSaved('saving')
+    const t = setTimeout(async () => {
+      try {
+        await api.clients.update(id, { ...data, cpfCnpj: (data.cpfCnpj ?? '').replace(/\D/g, '') })
+        setAutoSaved('saved')
+      } catch { setAutoSaved('idle') }
+    }, 900)
+    return () => clearTimeout(t)
+  }, [data])
+
+  // Honorários de êxito são estimativas — ficam separados dos lançamentos de caixa
+  const financialExito   = financial.filter(f => f.feeKind === 'exito')
+  const financialNormais = financial.filter(f => f.feeKind !== 'exito')
+  const totalReceived = financialNormais.filter(f => f.type==='receivable' && f.status==='paid').reduce((s,f) => s+(f.amount??0), 0)
+  const totalPending  = financialNormais.filter(f => f.type==='receivable' && f.status==='pending').reduce((s,f) => s+(f.amount??0), 0)
+  const totalOverdue  = financialNormais.filter(f => f.type==='receivable' && f.status==='overdue').reduce((s,f) => s+(f.amount??0), 0)
+  const totalExito    = financialExito.reduce((s,f) => s+(f.estimativa??0), 0)
+  const aOrganizar    = financialNormais.filter(f => f.needsReview).length
 
   // Persiste alterações de um lançamento (data, status, organizado)
   const updateEntry = (entryId, patch) => {
@@ -982,12 +1579,98 @@ export default function ClientPage() {
     setFinancial(next.filter(f => f.clientId === id))
   }
 
+  // Remove um lançamento
+  const removeEntry = (entryId) => {
+    const next = lsGet('pj_local_financial_entries', []).filter(f => f.id !== entryId)
+    lsSet('pj_local_financial_entries', next)
+    setFinancial(next.filter(f => f.clientId === id))
+  }
+
   // Recarrega a lista a partir do localStorage (após criar/editar/parcelar)
   const reloadFinancial = () => setFinancial(lsGet('pj_local_financial_entries', []).filter(f => f.clientId === id))
+
+  // ── Navegação por gesto: swipe horizontal (trackpad 2 dedos / toque) troca de aba ──
+  const contentRef = useRef(null)
+  const tabRef = useRef(tab)
+  const dirRef = useRef(1)
+  useEffect(() => { tabRef.current = tab }, [tab])
+  useEffect(() => {
+    const el = contentRef.current
+    if (!el) return
+    const keys = isNew ? ['cadastro'] : ['cadastro', 'processos', 'pagamentos', 'documentos', 'area', 'tarefas']
+    const move = (dir) => {
+      const i = keys.indexOf(tabRef.current)
+      const j = i + dir
+      if (i === -1 || j < 0 || j >= keys.length) return
+      dirRef.current = dir
+      setTab(keys[j])
+      el.scrollTop = 0
+    }
+    // Não sequestrar o gesto se o alvo (ou um ancestral) tem rolagem horizontal própria
+    const dentroDeScrollX = (target) => {
+      let n = target
+      while (n && n !== el) {
+        if (n.scrollWidth > n.clientWidth + 4) { const ox = getComputedStyle(n).overflowX; if (ox === 'auto' || ox === 'scroll') return true }
+        n = n.parentElement
+      }
+      return false
+    }
+    // Trackpad (dois dedos) → eventos wheel com deltaX.
+    // Trava após uma troca e só destrava quando o gesto/inércia PARA (sem doubles).
+    let accX = 0, locked = false, idleTimer
+    const armarIdle = () => { clearTimeout(idleTimer); idleTimer = setTimeout(() => { locked = false; accX = 0 }, 280) }
+    const onWheel = (e) => {
+      if (Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return   // vertical: ignora
+      if (dentroDeScrollX(e.target)) return
+      e.preventDefault()                                      // evita voltar/avançar do navegador
+      armarIdle()                                             // enquanto houver inércia, mantém o gesto "em andamento"
+      if (locked) return                                      // já trocou neste gesto → espera parar
+      accX += e.deltaX
+      if (Math.abs(accX) > 90) {
+        move(accX > 0 ? 1 : -1)
+        accX = 0; locked = true                               // trava até a inércia acabar (idle)
+      }
+    }
+    // Toque (telas touch) → swipe horizontal
+    let sx = 0, sy = 0, touching = false
+    const onTS = (e) => { const t = e.touches[0]; sx = t.clientX; sy = t.clientY; touching = true }
+    const onTE = (e) => {
+      if (!touching) return; touching = false
+      const t = e.changedTouches[0]
+      const dx = t.clientX - sx, dy = t.clientY - sy
+      if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.4 && !dentroDeScrollX(e.target)) move(dx < 0 ? 1 : -1)
+    }
+    // Teclado (mouse / sem trackpad): setas ← → trocam de aba
+    const onKey = (e) => {
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return
+      const ae = document.activeElement
+      if (ae && (/^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName) || ae.isContentEditable)) return  // não interfere ao digitar
+      move(e.key === 'ArrowRight' ? 1 : -1)
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    el.addEventListener('touchstart', onTS, { passive: true })
+    el.addEventListener('touchend', onTE, { passive: true })
+    window.addEventListener('keydown', onKey)
+    return () => {
+      el.removeEventListener('wheel', onWheel)
+      el.removeEventListener('touchstart', onTS)
+      el.removeEventListener('touchend', onTE)
+      window.removeEventListener('keydown', onKey)
+      clearTimeout(idleTimer)
+    }
+  }, [isNew, loading])
 
   if (loading) return <div className="flex items-center justify-center h-full"><Spinner size={32} className="text-brand-500" /></div>
 
   const displayName = data.name || (isNew ? 'Novo cliente' : '—')
+
+  // Troca de aba (clique ou gesto) definindo a direção da animação
+  const changeTab = (key) => {
+    const order = ['cadastro', 'processos', 'pagamentos', 'documentos', 'area', 'tarefas']
+    dirRef.current = order.indexOf(key) >= order.indexOf(tab) ? 1 : -1
+    setTab(key)
+    if (contentRef.current) contentRef.current.scrollTop = 0
+  }
 
   const TABS = [
     { key: 'cadastro',   label: 'Cadastro' },
@@ -1026,16 +1709,22 @@ export default function ClientPage() {
               </button>
             </div>
           </div>
-          <Button variant="primary" size="sm" onClick={save} loading={saving}>
-            {isNew ? 'Cadastrar' : 'Salvar'}
-          </Button>
+          {isNew ? (
+            <Button variant="primary" size="sm" onClick={save} loading={saving}>Cadastrar</Button>
+          ) : (
+            <span className="text-xs text-[var(--text-muted)] flex items-center gap-1.5">
+              {autoSaved === 'saving' ? <><span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" /> Salvando…</>
+               : autoSaved === 'saved' ? <><span className="w-1.5 h-1.5 rounded-full bg-emerald-500" /> Salvo automaticamente</>
+               : <><span className="w-1.5 h-1.5 rounded-full bg-[var(--text-muted)]" /> Alterações salvam sozinhas</>}
+            </span>
+          )}
         </div>
 
         {/* Tab nav */}
         <div className="flex border-b border-[var(--border)] px-6 flex-shrink-0 overflow-x-auto">
           {TABS.map(t => (
             <button key={t.key}
-              onClick={() => !t.disabled && setTab(t.key)}
+              onClick={() => !t.disabled && changeTab(t.key)}
               disabled={t.disabled}
               className={`flex items-center gap-1.5 px-4 py-2.5 text-sm border-b-2 transition-colors whitespace-nowrap ${
                 t.disabled ? 'opacity-30 cursor-not-allowed border-transparent text-[var(--text-muted)]' :
@@ -1063,8 +1752,9 @@ export default function ClientPage() {
         </div>
 
         {/* Tab content */}
-        <div className="flex-1 overflow-y-auto">
-          <div className="mx-auto px-8 py-6 max-w-[1500px]">
+        <div ref={contentRef} className="flex-1 overflow-y-auto overscroll-x-contain">
+          <style>{`@keyframes pjTabIn{from{opacity:0;transform:translateX(var(--pjx,16px))}to{opacity:1;transform:translateX(0)}}`}</style>
+          <div key={tab} className="mx-auto px-8 py-6 max-w-[1500px]" style={{ animation: 'pjTabIn .2s ease-out', '--pjx': dirRef.current > 0 ? '20px' : '-20px' }}>
 
             {/* ── CADASTRO ── */}
             {tab === 'cadastro' && (
@@ -1109,6 +1799,33 @@ export default function ClientPage() {
                       <Input label="E-mail" type="email" value={data.email} onChange={set('email')} />
                       <Select label="Como nos encontrou?" value={data.source} onChange={set('source')} options={LEAD_SOURCES} placeholder="Selecionar..." />
                     </Card>
+
+                    {/* Acesso ao Portal do Cliente */}
+                    <Card className="p-5 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <h3 className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wide">🔐 Acesso ao Portal do Cliente</h3>
+                        <label className="flex items-center gap-1.5 text-[11px] text-[var(--text-secondary)] cursor-pointer">
+                          <input type="checkbox" checked={!!data.portalEnabled}
+                            onChange={e => setData(d => ({ ...d, portalEnabled: e.target.checked, portalPassword: e.target.checked && !d.portalPassword ? '001' : d.portalPassword }))}
+                            className="accent-brand-500" />
+                          Habilitar
+                        </label>
+                      </div>
+                      {data.portalEnabled ? (
+                        <>
+                          <p className="text-[11px] text-[var(--text-muted)]">O cliente entra em <b>/portal</b> com <b>CPF, e-mail ou nome</b> + a senha abaixo. Use quando o cliente não conseguir acessar sozinho.</p>
+                          <div className="flex items-end gap-2">
+                            <div className="flex-1"><Input label="Senha do portal" value={data.portalPassword} onChange={set('portalPassword')} placeholder="Ex.: 001" /></div>
+                            <Button variant="secondary" size="sm" onClick={() => setData(d => ({ ...d, portalPassword: Math.random().toString(36).slice(2, 8) }))}>Gerar</Button>
+                          </div>
+                          <p className="text-[10px] text-[var(--text-muted)]">Login do cliente: <b>{data.cpfCnpj || data.email || data.name || '—'}</b> · lembre de <b>Salvar</b>.</p>
+                        </>
+                      ) : (
+                        <p className="text-[11px] text-[var(--text-muted)]">Desativado. Marque "Habilitar" para criar um login de acesso deste cliente ao portal.</p>
+                      )}
+                    </Card>
+
+                    {!isNew && <AtendimentosCard clientId={id} clientName={data.name} />}
                   </div>
 
                   {/* Col 2 — Endereço */}
@@ -1230,7 +1947,34 @@ export default function ClientPage() {
                         className="text-xs text-orange-300 hover:underline whitespace-nowrap flex-shrink-0">Marcar todos organizados</button>
                     </div>
                   )}
-                  {financial.length === 0 ? (
+                  {/* Honorários de êxito — estimativas (separadas do caixa) */}
+                  {financialExito.length > 0 && (
+                    <div className="rounded-xl border border-amber-500/25 bg-amber-500/5 p-3 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs font-semibold text-amber-300">🏆 Honorários de êxito (estimativa)</p>
+                        <span className="text-xs text-amber-300">Total estimado: <b>{formatCurrency(totalExito)}</b></span>
+                      </div>
+                      {financialExito.map(f => (
+                        <div key={f.id} className="flex items-center gap-3 p-2.5 rounded-lg bg-[var(--bg-card)] border border-[var(--border)]">
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm text-[var(--text-primary)]">{f.description}</p>
+                            <div className="flex items-center gap-2 mt-1">
+                              <span className="text-[11px] text-[var(--text-muted)]">Estimativa se ganhar:</span>
+                              <input type="number" step="0.01" value={f.estimativa ?? ''} placeholder="—"
+                                onChange={e => updateEntry(f.id, { estimativa: e.target.value === '' ? null : parseFloat(e.target.value) })}
+                                className="w-28 px-2 py-1 rounded-md bg-[var(--bg-input)] border border-[var(--border)] text-xs text-[var(--text-primary)] focus:border-brand-500 focus:outline-none" />
+                              {f.percentage ? <span className="text-[10px] text-amber-400">{f.percentage}% de êxito</span> : null}
+                            </div>
+                          </div>
+                          <button onClick={() => { const v = f.estimativa ?? 0; updateEntry(f.id, { feeKind: null, status: 'pending', amount: v, needsReview: true, dueDate: new Date().toISOString().slice(0,10), description: f.description.replace('Honorários de êxito', 'Honorários de êxito (GANHO)') }); registrar('pagamento', `marcou como GANHO o êxito de "${data.name}" (${formatCurrency(v)})`, { cliente: data.name }) }}
+                            className="text-[11px] px-2 py-1 rounded-md bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 flex-shrink-0" title="Processo ganho — lançar o valor real">🏆 Ganhou · lançar</button>
+                          <button onClick={() => removeEntry(f.id)}
+                            className="text-[11px] text-[var(--text-muted)] hover:text-red-400 flex-shrink-0" title="Remover estimativa">✕</button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {financialNormais.length === 0 && financialExito.length === 0 ? (
                     <div className="text-center py-16 border border-dashed border-[var(--border)] rounded-xl">
                       <p className="text-3xl mb-2">💰</p>
                       <p className="text-sm text-[var(--text-muted)]">Nenhum lançamento</p>
@@ -1238,7 +1982,7 @@ export default function ClientPage() {
                     </div>
                   ) : (
                     <div className="space-y-2">
-                      {financial.map(f => (
+                      {financialNormais.map(f => (
                         <div key={f.id} className={`p-4 rounded-xl border ${f.needsReview ? 'border-orange-500/40 bg-orange-500/5' : 'border-[var(--border)] bg-[var(--bg-card)]'}`}>
                           <div className="flex items-center gap-4">
                             <div className={`w-1.5 h-10 rounded-full flex-shrink-0 ${f.needsReview?'bg-orange-500':f.status==='paid'?'bg-emerald-500':f.status==='overdue'?'bg-red-500':f.status==='cancelled'?'bg-gray-500':'bg-amber-500'}`} />

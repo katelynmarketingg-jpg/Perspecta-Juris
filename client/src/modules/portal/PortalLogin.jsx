@@ -3,10 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { usePortalAuthStore } from '../../stores/portalAuthStore'
 import { IconScale, IconShield } from '../../components/ui'
 
-const MOCK_CLIENTS = [
-  { id: '1', name: 'José da Silva', cpf: '123.456.789-00', email: 'jose@email.com', password: '123456' },
-  { id: '2', name: 'Maria Santos', cpf: '987.654.321-00', email: 'maria@email.com', password: '123456' },
-]
+const soDig = (s) => String(s ?? '').replace(/\D/g, '')
 
 export default function PortalLogin() {
   const navigate  = useNavigate()
@@ -20,15 +17,23 @@ export default function PortalLogin() {
     e.preventDefault()
     setError('')
     setLoading(true)
-    await new Promise(r => setTimeout(r, 600))
-    const client = MOCK_CLIENTS.find(
-      c => (c.cpf === credential || c.email === credential) && c.password === password
-    )
+    await new Promise(r => setTimeout(r, 400))
+    // Autentica contra os clientes reais do escritório (que têm o portal habilitado)
+    let clients = []
+    try { clients = JSON.parse(localStorage.getItem('pj_local_clients') ?? '[]') } catch {}
+    const cred = credential.trim().toLowerCase()
+    const client = clients.find(c => {
+      if (!c.portalEnabled || !c.portalPassword) return false
+      if (String(c.portalPassword) !== password) return false
+      return soDig(c.cpfCnpj) === soDig(credential)
+        || (c.email && c.email.toLowerCase() === cred)
+        || (c.name && c.name.toLowerCase() === cred)
+    })
     if (client) {
-      login(client)
+      login({ id: client.id, name: client.name, cpf: client.cpfCnpj, email: client.email })
       navigate('/portal')
     } else {
-      setError('CPF/e-mail ou senha inválidos.')
+      setError('CPF, e-mail ou nome / senha inválidos. Se não tem acesso, fale com o escritório.')
     }
     setLoading(false)
   }
@@ -54,11 +59,11 @@ export default function PortalLogin() {
 
           <form onSubmit={handleSubmit} className="space-y-3">
             <div>
-              <label className="block text-xs text-[var(--text-muted)] mb-1.5">CPF ou E-mail</label>
+              <label className="block text-xs text-[var(--text-muted)] mb-1.5">Nome</label>
               <input
                 value={credential}
                 onChange={e => setCredential(e.target.value)}
-                placeholder="000.000.000-00 ou seu@email.com"
+                placeholder="Seu nome (ou CPF)"
                 className="w-full px-3 py-2.5 rounded-lg bg-[var(--bg-app)] border border-[var(--border)] text-sm text-[var(--text-primary)] focus:border-brand-500 focus:outline-none placeholder:text-[var(--text-muted)]"
                 required
               />

@@ -10,6 +10,7 @@ import {
   importTribunalProcesses,
   getStoredSession,
 } from '../../lib/tribunalScraper'
+import { currentTenantId } from '../../lib/tenant'
 
 // ── Tribunal mapping ──────────────────────────────────────────────
 const UF_TO_TRIBUNAL = {
@@ -156,7 +157,7 @@ function importDatajudHits(hits) {
     const id = uidFn()
     const num = `P${String(procs.length + imported + 1).padStart(4,'0')}`
     const row = {
-      id, tenantId: 'tenant_demo',
+      id, tenantId: currentTenantId(),
       internalNumber: num,
       createdAt: new Date().toISOString(),
       ...p,
@@ -168,7 +169,7 @@ function importDatajudHits(hits) {
 
     ;(p._movimentos ?? []).forEach(m => {
       movs.push({
-        id: uidFn(), tenantId: 'tenant_demo', processId: id,
+        id: uidFn(), tenantId: currentTenantId(), processId: id,
         description: m.nome ?? m.descricao ?? 'Movimentação',
         date: (m.dataHora ?? new Date().toISOString()).slice(0, 10),
         type: 'system', author: 'DataJud / CNJ',

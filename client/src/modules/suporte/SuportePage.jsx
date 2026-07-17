@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Card, Button } from '../../components/ui'
+import { getOffice } from '../../lib/tenant'
 
 // ── Conteúdo do manual (compartilhado entre a tela e o PDF) ─────────────────
 const SECOES = [
@@ -94,7 +95,7 @@ const FAQ = [
 
 // ── PDF moderno do manual ───────────────────────────────────────────────────
 function baixarManual() {
-  const office = (() => { try { return JSON.parse(localStorage.getItem('pj_local_office') ?? '{}') } catch { return {} } })()
+  const office = getOffice()
   const secoesHtml = SECOES.map((s, i) => `
     <div class="sec">
       <div class="sec-h"><span class="sec-ic">${s.icone}</span><div><div class="sec-t">${i + 1}. ${s.titulo}</div><div class="sec-r">${s.resumo}</div></div></div>

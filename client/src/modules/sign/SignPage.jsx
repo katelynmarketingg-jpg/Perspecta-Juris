@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { useParams } from 'react-router-dom'
 import { getRequest, saveSignature } from '../../lib/signatures'
+import { hashDocumentos, coletarEvidencias, TERMO_LGPD } from '../../lib/signatureProof'
 
 // ── Canvas de assinatura ────────────────────────────────────────────────────
 function SignaturePad({ onChange }) {
@@ -70,9 +71,11 @@ export default function SignPage() {
   const [signer, setSigner] = useState({ nome: '', cpf: '' })
   const [signatureImg, setSignatureImg] = useState(null)
   const [photoImg, setPhotoImg] = useState(null)
+  const [consent, setConsent] = useState(false)
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
   const [done, setDone] = useState(false)
+  const [proof, setProof] = useState(null)
 
   useEffect(() => {
     getRequest(id).then(r => {
@@ -93,9 +96,16 @@ export default function SignPage() {
     if (!signer.nome.trim() || signer.cpf.replace(/\D/g, '').length < 11) { setError('Preencha nome completo e CPF válido.'); return }
     if (!signatureImg) { setError('Faça o desenho da sua assinatura.'); return }
     if (!photoImg) { setError('Envie uma foto de comprovação.'); return }
+    if (!consent) { setError('É necessário aceitar o termo de consentimento para assinar.'); return }
     setError(''); setSaving(true)
     try {
-      await saveSignature(id, { signer, signatureImg, photoImg })
+      // Integridade + evidências de autenticação, coletadas neste gesto do usuário
+      const [documentHash, evidencias] = await Promise.all([
+        hashDocumentos(req.documentos),
+        coletarEvidencias(),
+      ])
+      await saveSignature(id, { signer, signatureImg, photoImg, consent: true, consentText: TERMO_LGPD, documentHash, evidencias })
+      setProof({ documentHash })
       setDone(true)
     } catch (e) { setError(e.message || 'Erro ao enviar. Tente novamente.') }
     finally { setSaving(false) }
@@ -123,8 +133,9 @@ export default function SignPage() {
       <div className="max-w-md text-center bg-white rounded-2xl shadow p-8">
         <p className="text-5xl mb-3">✅</p>
         <h1 className="text-lg font-bold text-gray-800">Assinatura concluída!</h1>
-        <p className="text-sm text-gray-500 mt-2">Obrigado. Seus documentos foram assinados e validados. O escritório <b>{/* tenant */}</b> foi notificado.</p>
+        <p className="text-sm text-gray-500 mt-2">Obrigado. Seus documentos foram assinados e validados. O escritório foi notificado e o comprovante com a trilha de auditoria ficou registrado.</p>
         <p className="text-xs text-gray-400 mt-4">Código de validação: <b>{req.validationCode}</b></p>
+        {proof?.documentHash && <p className="text-[10px] text-gray-400 mt-1 break-all">Hash SHA-256: {proof.documentHash}</p>}
       </div>
     </div>
   )
@@ -180,12 +191,18 @@ export default function SignPage() {
             {photoImg && <img src={photoImg} alt="comprovação" className="mt-2 rounded-lg max-h-40 mx-auto" />}
           </div>
 
+          {/* Consentimento LGPD */}
+          <label className="flex items-start gap-2.5 rounded-xl border border-gray-200 bg-gray-50 p-3 cursor-pointer">
+            <input type="checkbox" checked={consent} onChange={e => setConsent(e.target.checked)} className="mt-0.5 accent-orange-500 flex-shrink-0" />
+            <span className="text-[11px] text-gray-600 leading-relaxed">{TERMO_LGPD}</span>
+          </label>
+
           {error && <p className="text-sm text-red-500">{error}</p>}
 
           <button onClick={submit} disabled={saving} className="w-full py-3 rounded-xl bg-orange-500 hover:bg-orange-600 disabled:opacity-60 text-white font-semibold text-sm transition-colors">
-            {saving ? 'Enviando…' : 'Assinar e validar documentos'}
+            {saving ? 'Coletando evidências e assinando…' : 'Assinar e validar documentos'}
           </button>
-          <p className="text-[11px] text-gray-400 text-center">Ao assinar, você declara que leu e concorda com os documentos acima. Assinatura eletrônica nos termos da Lei 14.063/2020 e MP 2.200-2/2001.</p>
+          <p className="text-[11px] text-gray-400 text-center">Ao assinar são registrados data/hora, IP, dispositivo e localização (se autorizada) e o hash do documento, para comprovar autoria e integridade. Assinatura eletrônica nos termos da Lei 14.063/2020 e MP 2.200-2/2001.</p>
         </div>
       </div>
     </div>

@@ -80,20 +80,26 @@ export default async function signatureRoutes(app) {
     if (!row) return reply.code(404).send({ message: 'Pedido não encontrado.' })
     if (row.status === 'assinado') return reply.code(409).send({ message: 'Este documento já foi assinado.' })
 
-    const { signer, signatureImg, photoImg } = req.body ?? {}
+    const { signer, signatureImg, photoImg, consent, consentText, documentHash, evidencias } = req.body ?? {}
     if (!signer?.nome || !signer?.cpf || !signatureImg || !photoImg) {
       return reply.code(400).send({ message: 'Dados incompletos: nome, CPF, assinatura e foto são obrigatórios.' })
     }
     const now = new Date().toISOString()
+    // IP observado pelo servidor é a fonte confiável; guardamos também o do cliente nas evidências.
+    const evid = { ...(evidencias ?? {}), ipServidor: req.ip ?? null }
     await db.update(signatureRequests).set({
       signerName: signer.nome,
       signerCpf: signer.cpf,
       signatureImg, photoImg,
+      documentHash: documentHash ?? null,
+      consent: !!consent,
+      consentText: consentText ?? null,
+      evidencias: evid,
       status: 'assinado',
       signedAt: now,
       signedIp: req.ip ?? null,
       updatedAt: now,
     }).where(eq(signatureRequests.id, req.params.id))
-    return { ok: true, status: 'assinado', signedAt: now }
+    return { ok: true, status: 'assinado', signedAt: now, validationCode: row.validationCode }
   })
 }

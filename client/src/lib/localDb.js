@@ -23,21 +23,31 @@ function curTenant() {
   } catch { return DEMO }
 }
 
-// ── Seed inicial: empresa admin (master) + empresa demo ─────────
+// ── Seed inicial: empresa admin (master) + primeiro escritório ─────────
+// Faz upsert por id (não apaga seus dados) — garante os logins mesmo se já
+// houver semeadura antiga no navegador.
 function seedAuth() {
   const now = new Date().toISOString()
-  if (table('tenants').length === 0) {
-    saveTable('tenants', [
-      { id: 'tnt_master', name: 'Perspecta Admin', slug: 'admin', cnpj: '', plan: 'master', isActive: true, createdAt: now, updatedAt: now },
-      { id: DEMO, name: 'Perspecta', slug: 'perspecta', cnpj: '00.000.000/0001-00', plan: 'professional', isActive: true, createdAt: now, updatedAt: now },
-    ])
-  }
-  if (table('users').length === 0) {
-    saveTable('users', [
-      { id: 'usr_master',  tenantId: 'tnt_master', name: 'Administrador', loginName: 'admin',   email: 'admin@perspecta.com',   role: 'master', password: 'admin', createdAt: now },
-      { id: 'user_katelyn', tenantId: DEMO,        name: 'Katelyn',       loginName: 'Katelyn', email: 'katelyn@perspecta.com', role: 'admin',  password: '001',   createdAt: now },
-    ])
-  }
+
+  // Empresas (tenants)
+  const tens = table('tenants')
+  const ensureTenant = (t) => { if (!tens.find(x => x.id === t.id)) tens.push({ createdAt: now, updatedAt: now, ...t }) }
+  ensureTenant({ id: 'tnt_master', name: 'Perspecta Admin',        slug: 'admin',     cnpj: '',                    plan: 'master',       isActive: true })
+  ensureTenant({ id: DEMO,         name: 'Perspecta',              slug: 'perspecta', cnpj: '00.000.000/0001-00',  plan: 'professional', isActive: true })
+  ensureTenant({ id: 'tnt_kn',     name: 'KN Advocacia Criminal',  slug: 'kn',        cnpj: '',                    plan: 'professional', isActive: true })
+  saveTable('tenants', tens)
+
+  // Usuários (upsert por id — atualiza login/senha sem tocar em outros usuários)
+  const us = table('users')
+  const upsertUser = (u) => { const i = us.findIndex(x => x.id === u.id); if (i >= 0) us[i] = { ...us[i], ...u }; else us.push({ createdAt: now, ...u }) }
+  // Master do sistema (administra TODOS os acessos / cria escritórios) — separado
+  upsertUser({ id: 'usr_master',   tenantId: 'tnt_master', name: 'Administradora', loginName: 'admin', email: 'admin@perspecta.com', role: 'master', password: '001' })
+  // SEU login (escritório Perspecta)
+  upsertUser({ id: 'user_katelyn', tenantId: DEMO,         name: 'Katelyn',        loginName: 'kat',   email: 'kat@perspecta.com',   role: 'admin',  password: '001' })
+  // Escritório KN Advocacia Criminal — Karen e Nathi (podem editar depois)
+  upsertUser({ id: 'usr_karen',    tenantId: 'tnt_kn',     name: 'Karen',          loginName: 'karen', email: 'karen@kn.adv.br',     role: 'admin',  password: '001' })
+  upsertUser({ id: 'usr_nathi',    tenantId: 'tnt_kn',     name: 'Nathi',          loginName: 'nathi', email: 'nathi@kn.adv.br',     role: 'admin',  password: '001' })
+  saveTable('users', us)
 }
 seedAuth()
 
@@ -211,8 +221,8 @@ export function localHandle(path, method = 'GET', body = null) {
       return { id: r.id, clientName: r.clientName, documentos: r.documentos, modo: r.modo, status: r.status, validationCode: r.validationCode, createdAt: r.createdAt, signer: r.signer, signatureImg: r.signatureImg, photoImg: r.photoImg }
     }
     if (method === 'POST') {
-      const { signer, signatureImg, photoImg } = body ?? {}
-      updateRow('signatures', id, { signer, signatureImg, photoImg, status: 'assinado', signedAt: new Date().toISOString() })
+      // Guarda todo o pacote de evidências (assinatura, selfie, hash, IP, geo, consentimento…)
+      updateRow('signatures', id, { ...(body ?? {}), status: 'assinado', signedAt: new Date().toISOString() })
       return { ok: true, status: 'assinado' }
     }
   }

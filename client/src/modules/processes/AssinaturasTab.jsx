@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { getPeticoes } from '../../lib/peticoesModels'
 import { getTemplates, buildVars, renderTemplate } from '../../lib/templateEngine'
 import { createRequest, getRequestsByProcess, deleteRequest, signLink, whatsappLink } from '../../lib/signatures'
+import { imprimirComprovante } from '../../lib/signatureProof'
 import { useAuthStore } from '../../stores/authStore'
 import { useUiStore } from '../../stores/uiStore'
 import { Button, Card } from '../../components/ui'
@@ -139,17 +140,29 @@ function RequestCard({ req, onDelete }) {
 
       {assinado && (
         <div className="mt-3">
-          <button onClick={() => setOpen(o => !o)} className="text-xs text-brand-500 hover:underline">{open ? 'Ocultar' : 'Ver comprovação'}</button>
+          <div className="flex items-center gap-3">
+            <button onClick={() => setOpen(o => !o)} className="text-xs text-brand-500 hover:underline">{open ? 'Ocultar' : 'Ver comprovação'}</button>
+            <button onClick={() => imprimirComprovante(req)} className="text-xs px-2 py-1 rounded-md bg-brand-500/15 text-accent-400 hover:bg-brand-500/25">📄 Comprovante (PDF)</button>
+          </div>
           {open && (
-            <div className="mt-2 grid grid-cols-2 gap-3">
-              <div>
-                <p className="text-[10px] text-[var(--text-muted)] mb-1">Assinatura de {req.signer?.nome}</p>
-                {req.signatureImg && <img src={req.signatureImg} alt="assinatura" className="bg-white rounded-lg border border-[var(--border)] w-full" />}
-                <p className="text-[10px] text-[var(--text-muted)] mt-1">CPF: {req.signer?.cpf}</p>
+            <div className="mt-2 space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <p className="text-[10px] text-[var(--text-muted)] mb-1">Assinatura de {req.signer?.nome}</p>
+                  {req.signatureImg && <img src={req.signatureImg} alt="assinatura" className="bg-white rounded-lg border border-[var(--border)] w-full" />}
+                  <p className="text-[10px] text-[var(--text-muted)] mt-1">CPF: {req.signer?.cpf}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] text-[var(--text-muted)] mb-1">Foto de comprovação</p>
+                  {req.photoImg && <img src={req.photoImg} alt="comprovação" className="rounded-lg border border-[var(--border)] w-full max-h-40 object-cover" />}
+                </div>
               </div>
-              <div>
-                <p className="text-[10px] text-[var(--text-muted)] mb-1">Foto de comprovação</p>
-                {req.photoImg && <img src={req.photoImg} alt="comprovação" className="rounded-lg border border-[var(--border)] w-full max-h-40 object-cover" />}
+              {/* Trilha de auditoria */}
+              <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-hover)] p-2.5 space-y-1 text-[10px] text-[var(--text-muted)]">
+                <p><b className="text-[var(--text-secondary)]">Hash SHA-256:</b> <span className="break-all font-mono">{req.documentHash || '—'}</span></p>
+                <p><b className="text-[var(--text-secondary)]">IP:</b> {req.evidencias?.ip || '—'} · <b className="text-[var(--text-secondary)]">Localização:</b> {req.evidencias?.geo ? `${req.evidencias.geo.lat.toFixed(4)}, ${req.evidencias.geo.lon.toFixed(4)}` : 'não autorizada'}</p>
+                <p><b className="text-[var(--text-secondary)]">Dispositivo:</b> {req.evidencias?.userAgent || '—'}</p>
+                <p><b className="text-[var(--text-secondary)]">Consentimento LGPD:</b> {req.consent ? 'aceito ✔' : 'não registrado'} · <b className="text-[var(--text-secondary)]">Assinado:</b> {fmtDate(req.signedAt)}</p>
               </div>
             </div>
           )}

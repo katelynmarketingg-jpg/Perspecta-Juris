@@ -4,6 +4,7 @@ import {
   ResponsiveContainer, Legend, PieChart, Pie, Cell,
 } from 'recharts'
 import { IconBarChart2, IconPieChart, IconUsers2, IconTrendingUp, IconDollar, CustomSelect } from '../../components/ui'
+import { getRelatorioAtendimentos, esperaMin, tipoAtend } from '../../lib/atendimentos'
 
 const fmt = n => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(n)
 
@@ -297,6 +298,60 @@ export default function ReportsPage() {
               </tbody>
             </table>
           </div>
+        </div>
+      )}
+
+      <RelatorioAtendimentos />
+    </div>
+  )
+}
+
+// ── Relatório de atendimentos (tempo de espera, quem atendeu) ──────
+function RelatorioAtendimentos() {
+  const [de, setDe] = useState('')
+  const [ate, setAte] = useState('')
+  const rows = getRelatorioAtendimentos({ de, ate })
+  const totalEspera = rows.reduce((s, a) => s + esperaMin(a), 0)
+  const mediaEspera = rows.length ? Math.round(totalEspera / rows.length) : 0
+
+  return (
+    <div className="card p-5 space-y-4">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <h2 className="text-base font-semibold text-white flex items-center gap-2">📞 Atendimentos</h2>
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] text-[var(--text-muted)]">Período:</span>
+          <input type="date" value={de} onChange={e => setDe(e.target.value)} className="px-2 py-1 rounded-lg bg-[var(--bg-input)] border border-[var(--border)] text-xs text-white focus:border-brand-500 focus:outline-none" />
+          <span className="text-[11px] text-[var(--text-muted)]">até</span>
+          <input type="date" value={ate} onChange={e => setAte(e.target.value)} className="px-2 py-1 rounded-lg bg-[var(--bg-input)] border border-[var(--border)] text-xs text-white focus:border-brand-500 focus:outline-none" />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-3 gap-3">
+        <div className="rounded-lg bg-[var(--bg-hover)] p-3"><p className="text-[11px] text-[var(--text-muted)]">Atendimentos</p><p className="text-xl font-bold text-white">{rows.length}</p></div>
+        <div className="rounded-lg bg-[var(--bg-hover)] p-3"><p className="text-[11px] text-[var(--text-muted)]">Espera média</p><p className="text-xl font-bold text-amber-400">{mediaEspera} min</p></div>
+        <div className="rounded-lg bg-[var(--bg-hover)] p-3"><p className="text-[11px] text-[var(--text-muted)]">Espera total</p><p className="text-xl font-bold text-white">{totalEspera} min</p></div>
+      </div>
+
+      {rows.length === 0 ? (
+        <p className="text-sm text-[var(--text-muted)] text-center py-6">Nenhum atendimento no período.</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead><tr className="text-left text-[11px] text-[var(--text-muted)] uppercase border-b border-[var(--border)]">
+              <th className="px-2 py-2">Cliente</th><th className="px-2 py-2">Tipo</th><th className="px-2 py-2">Atendido por</th><th className="px-2 py-2 text-right">Espera</th><th className="px-2 py-2 text-right">Quando</th>
+            </tr></thead>
+            <tbody>
+              {rows.map(a => (
+                <tr key={a.id} className="border-b border-[var(--border)]/50">
+                  <td className="px-2 py-2 text-white">{a.clientName || '—'}</td>
+                  <td className="px-2 py-2 text-[var(--text-secondary)]">{tipoAtend(a.tipo).icone} {tipoAtend(a.tipo).label}</td>
+                  <td className="px-2 py-2 text-[var(--text-secondary)]">{a.atendidoPor || '—'}</td>
+                  <td className="px-2 py-2 text-right text-amber-400">{esperaMin(a)} min</td>
+                  <td className="px-2 py-2 text-right text-[var(--text-muted)] text-xs">{a.atendidoEm ? new Date(a.atendidoEm).toLocaleString('pt-BR') : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
     </div>

@@ -15,10 +15,25 @@ export default function ProcessesPage() {
   const [processes, setProcesses] = useState([])
   const [total, setTotal]         = useState(0)
   const [loading, setLoading]     = useState(true)
-  const [search, setSearch]       = useState('')
-  const [area, setArea]           = useState('')
-  const [status, setStatus]       = useState('active')
+  const saved = (() => { try { return JSON.parse(sessionStorage.getItem('pj_proc_filters') ?? '{}') } catch { return {} } })()
+  const [search, setSearch]       = useState(saved.search ?? '')
+  const [area, setArea]           = useState(saved.area ?? '')
+  const [status, setStatus]       = useState(saved.status ?? 'active')
+  const [de, setDe]               = useState(saved.de ?? '')
+  const [ate, setAte]             = useState(saved.ate ?? '')
   const [page, setPage]           = useState(1)
+
+  // Preserva a busca/filtros ao abrir um processo e voltar
+  useEffect(() => { sessionStorage.setItem('pj_proc_filters', JSON.stringify({ search, area, status, de, ate })) }, [search, area, status, de, ate])
+
+  // Filtro de período (por data de abertura) — no lado do cliente
+  const noPeriodo = (p) => {
+    const d = String(p.startedAt ?? p.createdAt ?? '').slice(0, 10)
+    if (de && (!d || d < de)) return false
+    if (ate && (!d || d > ate)) return false
+    return true
+  }
+  const visiveis = processes.filter(noPeriodo)
 
   async function load() {
     setLoading(true)
@@ -103,42 +118,43 @@ export default function ProcessesPage() {
         </Button>
       </div>
 
-      <div className="flex gap-2 flex-wrap items-center">
-        <div className="relative flex-1 min-w-[180px]">
-          <IconSearch size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
+      {/* Busca em destaque */}
+      <div className="space-y-2.5">
+        <div className="relative">
+          <IconSearch size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
           <input
+            autoFocus
             value={search}
             onChange={e => { setSearch(e.target.value); setPage(1) }}
-            placeholder="Buscar por título, número..."
-            className="w-full pl-7 pr-3 py-1.5 rounded-lg bg-[var(--bg-card)] border border-[var(--border)] text-sm text-[var(--text-primary)] focus:border-brand-500 focus:outline-none placeholder:text-[var(--text-muted)]"
+            placeholder="Pesquisar processo por título, número, parte..."
+            className="w-full pl-11 pr-10 py-3 rounded-xl bg-[var(--bg-card)] border border-[var(--border)] text-base text-[var(--text-primary)] focus:border-brand-500 focus:outline-none placeholder:text-[var(--text-muted)]"
           />
+          {search && (
+            <button onClick={() => { setSearch(''); setPage(1) }} className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text-primary)]" title="Limpar">✕</button>
+          )}
         </div>
-        <CustomSelect
-          value={area}
-          onChange={v => { setArea(v); setPage(1) }}
-          options={areaOptions}
-          placeholder="Todas as áreas"
-          className="w-40"
-        />
-        <CustomSelect
-          value={status}
-          onChange={v => { setStatus(v); setPage(1) }}
-          options={statusOptions}
-          placeholder="Todos os status"
-          className="w-40"
-        />
+        <div className="flex gap-2 flex-wrap items-center">
+          <span className="text-[11px] text-[var(--text-muted)]">Filtrar:</span>
+          <CustomSelect value={area} onChange={v => { setArea(v); setPage(1) }} options={areaOptions} placeholder="Todas as áreas" className="w-40" />
+          <CustomSelect value={status} onChange={v => { setStatus(v); setPage(1) }} options={statusOptions} placeholder="Todos os status" className="w-40" />
+          <span className="text-[11px] text-[var(--text-muted)] ml-1">Abertura:</span>
+          <input type="date" value={de} onChange={e => setDe(e.target.value)} className="px-2 py-1.5 rounded-lg bg-[var(--bg-card)] border border-[var(--border)] text-xs text-[var(--text-primary)] focus:border-brand-500 focus:outline-none" />
+          <span className="text-[11px] text-[var(--text-muted)]">até</span>
+          <input type="date" value={ate} onChange={e => setAte(e.target.value)} className="px-2 py-1.5 rounded-lg bg-[var(--bg-card)] border border-[var(--border)] text-xs text-[var(--text-primary)] focus:border-brand-500 focus:outline-none" />
+          {(de || ate) && <button onClick={() => { setDe(''); setAte('') }} className="text-[11px] text-[var(--text-muted)] hover:text-red-400">limpar</button>}
+        </div>
       </div>
 
       <Card>
         {loading ? (
           <div className="flex items-center justify-center py-16"><Spinner size={32} className="text-brand-500" /></div>
-        ) : processes.length === 0 ? (
+        ) : visiveis.length === 0 ? (
           <EmptyState icon={<IconBriefcase size={40} />} title="Nenhum processo encontrado"
-            description={search ? 'Tente outros termos.' : 'Cadastre o primeiro processo.'}
-            action={!search && <Button variant="primary" onClick={() => navigate('/app/processes/new')}><IconPlus size={16} /> Novo Processo</Button>}
+            description={search || de || ate ? 'Tente outros termos ou período.' : 'Cadastre o primeiro processo.'}
+            action={!search && !de && !ate && <Button variant="primary" onClick={() => navigate('/app/processes/new')}><IconPlus size={16} /> Novo Processo</Button>}
           />
         ) : (
-          <Table columns={columns} data={processes} onRowClick={r => navigate(`/app/processes/${r.id}`)} />
+          <Table columns={columns} data={visiveis} onRowClick={r => navigate(`/app/processes/${r.id}`)} />
         )}
       </Card>
     </div>

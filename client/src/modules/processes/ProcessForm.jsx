@@ -4,6 +4,8 @@ import api from '../../lib/api'
 import { formatProcessNumber } from '../../lib/format'
 import { LEGAL_AREAS, PROCESS_TYPES, CONTRACT_TYPES } from '../../lib/constants'
 import { useUiStore } from '../../stores/uiStore'
+import { currentTenantId } from '../../lib/tenant'
+import { registrar } from '../../lib/auditLog'
 import { Button, Input, Select, Textarea, Card, Spinner } from '../../components/ui'
 
 const lsGet = (k, fb) => { try { return JSON.parse(localStorage.getItem(k) ?? 'null') ?? fb } catch { return fb } }
@@ -15,7 +17,7 @@ const empty = {
   title: '', area: '', subArea: '', processType: '', judicialNumber: '',
   court: '', courtDistrict: '', courtCity: '', courtState: '',
   judgeName: '', opposingParty: '',
-  feeType: 'fixed', feeAmount: '', feePercentage: '', feeNotes: '',
+  feeType: 'fixed', feeAmount: '', feePercentage: '', feeNotes: '', feeExitoEstimativa: '',
   priority: 'normal', summary: '',
   // Cobrança (não persistido no processo — gera débitos)
   cobranca: 'avista', entrada: '', parcelas: '1', primeiroVenc: '',
@@ -35,7 +37,7 @@ function gerarDebitos({ cobranca, feeAmount, entrada, parcelas, primeiroVenc }, 
   const venc0 = primeiroVenc || new Date().toISOString().slice(0, 10)
   const nParc = Math.max(1, parseInt(parcelas) || 1)
   const mk = (amount, dueDate, label) => ({
-    id: 'fin_' + uid(), tenantId: 'tenant_demo', clientId, processId,
+    id: 'fin_' + uid(), tenantId: currentTenantId(), clientId, processId,
     type: 'receivable', status: 'pending',
     description: `Honorários — ${processTitle}${label ? ` (${label})` : ''}`,
     amount: Math.round(amount * 100) / 100, dueDate,
@@ -58,6 +60,24 @@ function gerarDebitos({ cobranca, feeAmount, entrada, parcelas, primeiroVenc }, 
     for (let i = 0; i < nParc; i++) out.push(mk(total, addMonthsISO(venc0, i), `mês ${i + 1}/${nParc}`))
   }
   return out
+}
+
+// Honorário de ÊXITO: entra como estimativa (sem valor discriminado, fora dos relatórios de caixa).
+function gerarExito({ feeType, feePercentage, feeExitoEstimativa, feeNotes }, { clientId, processId, processTitle }) {
+  if (feeType !== 'success' && feeType !== 'mixed') return null
+  const pct = numBR(feePercentage)
+  const est = numBR(feeExitoEstimativa)
+  const nowISO = new Date().toISOString()
+  return {
+    id: 'fin_' + uid(), tenantId: currentTenantId(), clientId, processId,
+    type: 'receivable', feeKind: 'exito', status: 'exito',
+    description: `Honorários de êxito${pct ? ` (${pct}%)` : ''} — ${processTitle}`,
+    percentage: pct || null,
+    estimativa: est > 0 ? est : null,   // estimativa "se ganhar"
+    amount: 0,                           // não conta em Recebido/A receber nem nos relatórios
+    dueDate: '', needsReview: false, createdViaProcess: true,
+    notes: feeNotes || '', createdAt: nowISO, updatedAt: nowISO,
+  }
 }
 
 export default function ProcessForm() {
@@ -138,22 +158,28 @@ export default function ProcessForm() {
       } else {
         const created = await api.processes.create(payload)
         processId = created.id
+        registrar('processo', `criou o processo "${data.title}"`)
       }
 
-      // Auto-criar débitos (somente na criação e se houver valor)
-      let nDebitos = 0
-      if (!isEdit && numBR(data.feeAmount) > 0) {
-        const debitos = gerarDebitos(data, { clientId: data.clientId, processId, processTitle: data.title })
-        if (debitos.length) {
+      // Auto-criar lançamentos (somente na criação): débitos fixos + honorário de êxito
+      let nDebitos = 0, temExito = false
+      if (!isEdit) {
+        const ctx = { clientId: data.clientId, processId, processTitle: data.title }
+        const novos = []
+        if (numBR(data.feeAmount) > 0) { const d = gerarDebitos(data, ctx); novos.push(...d); nDebitos = d.length }
+        const exito = gerarExito(data, ctx)
+        if (exito) { novos.push(exito); temExito = true }
+        if (novos.length) {
           const all = lsGet('pj_local_financial_entries', [])
-          lsSet('pj_local_financial_entries', [...all, ...debitos])
-          nDebitos = debitos.length
+          lsSet('pj_local_financial_entries', [...all, ...novos])
         }
       }
 
       showToast(
         isEdit ? 'Processo atualizado.'
-        : nDebitos ? `Processo criado. ${nDebitos} lançamento(s) gerado(s) em Pagamentos.` : 'Processo criado com sucesso.',
+        : [nDebitos ? `${nDebitos} lançamento(s) em Pagamentos` : '', temExito ? 'honorário de êxito (estimativa)' : ''].filter(Boolean).length
+          ? `Processo criado. ${[nDebitos ? `${nDebitos} lançamento(s) gerado(s)` : '', temExito ? 'êxito lançado como estimativa' : ''].filter(Boolean).join(' · ')}.`
+          : 'Processo criado com sucesso.',
         'success'
       )
       navigate(`/app/processes/${processId}`)
@@ -241,6 +267,12 @@ export default function ProcessForm() {
                   {['success', 'mixed'].includes(data.feeType) &&
                     <Input label="% Êxito" value={data.feePercentage} onChange={set('feePercentage')} suffix="%" />}
                 </div>
+                {['success', 'mixed'].includes(data.feeType) && (
+                  <div className="rounded-lg bg-amber-500/8 border border-amber-500/20 p-3 space-y-2">
+                    <p className="text-[11px] text-amber-300/90">🏆 <b>Honorário de êxito:</b> entra como <b>estimativa</b> — sem valor a cobrar agora e fora dos relatórios de caixa. Vira valor real só quando o processo é ganho.</p>
+                    <Input label="Estimativa se ganhar (R$)" value={data.feeExitoEstimativa} onChange={set('feeExitoEstimativa')} prefix="R$" placeholder="Ex.: 30% de R$ 50.000 = 15.000,00" />
+                  </div>
+                )}
                 <Textarea label="Observações sobre Honorários" value={data.feeNotes} onChange={set('feeNotes')} rows={2} />
               </Card>
 

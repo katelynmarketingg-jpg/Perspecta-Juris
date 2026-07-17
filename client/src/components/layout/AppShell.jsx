@@ -16,11 +16,15 @@ import {
   IconClipboard, IconFolder, IconBarChart, IconSettings, IconLogOut,
   IconScale, IconMenu, IconX, IconExternalLink,
   IconAlertCircle, IconCheck, IconBuilding, IconBookOpen, IconZap,
-  IconSun, IconMoon, IconCalculator, IconFileText, IconActivity,
+  IconSun, IconMoon, IconCalculator, IconFileText, IconActivity, IconSearch,
 } from '../ui'
+import { filaCount } from '../../lib/atendimentos'
+import TermosModal, { precisaAceitarTermos } from '../TermosModal'
 
 const NAV = [
   { to: '/app',             label: 'Dashboard',   icon: <IconGrid size={18} />,      exact: true },
+  { to: '/app/atendimento', label: 'Fila de Atendimento', icon: <IconAlertCircle size={18} /> },
+  { to: '/app/pesquisas',   label: 'Pesquisas',   icon: <IconSearch size={18} /> },
   { to: '/app/clients',     label: 'Clientes',    icon: <IconUsers size={18} /> },
   { to: '/app/processes',   label: 'Processos',   icon: <IconBriefcase size={18} /> },
   { to: '/app/movimentacoes', label: 'Movimentações', icon: <IconActivity size={18} /> },
@@ -30,7 +34,7 @@ const NAV = [
   { to: '/app/documents',   label: 'Documentos',  icon: <IconFolder size={18} /> },
   { to: '/app/modelos',     label: 'Modelos',     icon: <IconFileText size={18} /> },
   { to: '/app/calculator',  label: 'Calculadora', icon: <IconCalculator size={18} /> },
-  { to: '/app/theses',      label: 'Teses',       icon: <IconBookOpen size={18} /> },
+  { to: '/app/theses',      label: 'Legislação',  icon: <IconBookOpen size={18} /> },
   { to: '/app/automations', label: 'Automações',  icon: <IconZap size={18} /> },
   { to: '/app/reports',     label: 'Relatórios',  icon: <IconBarChart size={18} /> },
   { to: '/app/registros',   label: 'Registros',   icon: <IconClipboard size={18} /> },
@@ -49,6 +53,8 @@ export default function AppShell() {
   const [collapsed, setCollapsed] = useState(false)
   const [toast, setToast] = useState(null)
   const [myTasks, setMyTasks] = useState(0)
+  const [mostrarTermos, setMostrarTermos] = useState(() => precisaAceitarTermos(user))
+  useEffect(() => { setMostrarTermos(precisaAceitarTermos(user)) }, [user?.id])
 
   const { theme, toggleTheme, applyTheme, showToast } = useUiStore()
   useEffect(() => { applyTheme() }, [])
@@ -63,15 +69,39 @@ export default function AppShell() {
     }
   }, [user?.id])
 
-  // Conta tarefas em aberto atribuídas ao usuário logado (badge lateral)
+  // Bolinhas do topo: 🔴 hoje/atrasadas · 🟠 próx. 7 dias · 🟡 8+ dias · 🔵 respondidas (aguardando ciência)
+  const [taskDots, setTaskDots] = useState({ red: 0, orange: 0, yellow: 0, blue: 0 })
   useEffect(() => {
     let alive = true
     apiTasksList().then(list => {
       if (!alive) return
-      setMyTasks(list.filter(t => t.assignedTo === user?.id && t.status !== 'done').length)
+      const mine = list.filter(t => t.assignedTo === user?.id && t.status !== 'done')
+      setMyTasks(mine.length)
+      const hoje = new Date(); hoje.setHours(0, 0, 0, 0)
+      const em7 = new Date(hoje); em7.setDate(em7.getDate() + 7)
+      let red = 0, orange = 0, yellow = 0
+      mine.forEach(t => {
+        if (!t.dueDate) { yellow++; return }
+        const d = new Date(t.dueDate); d.setHours(0, 0, 0, 0)
+        if (d <= hoje) red++
+        else if (d <= em7) orange++
+        else yellow++
+      })
+      // Respondidas: tarefas que EU enviei, foram concluídas e ainda não dei ciência
+      const blue = list.filter(t => t.status === 'done' && t.createdBy === user?.id && !t.acknowledged).length
+      setTaskDots({ red, orange, yellow, blue })
     })
     return () => { alive = false }
   }, [location.pathname, user?.id])
+
+  // Conta quantos estão na fila de atendimento (badge laranja)
+  const [filaN, setFilaN] = useState(0)
+  useEffect(() => {
+    const upd = () => { try { setFilaN(filaCount()) } catch {} }
+    upd()
+    const t = setInterval(upd, 15000)
+    return () => clearInterval(t)
+  }, [location.pathname])
 
   // ── Auto-sync do Diário (DJEN) a cada 1 minuto (enquanto o app estiver aberto) ──
   useEffect(() => {
@@ -101,7 +131,13 @@ export default function AppShell() {
   // ── Preferências de navegação por empresa (ordem + posição) ──
   const navPrefsKey = `pj_navprefs_${tenant?.id ?? 'demo'}`
   const [navPrefs, setNavPrefs] = useState(() => lsGet(navPrefsKey, { position: 'side', order: [] }))
-  useEffect(() => { setNavPrefs(lsGet(navPrefsKey, { position: 'side', order: [] })) }, [location.pathname, navPrefsKey])
+  useEffect(() => {
+    const re = () => setNavPrefs(lsGet(navPrefsKey, { position: 'side', order: [] }))
+    re()
+    window.addEventListener('pj-navprefs', re)
+    window.addEventListener('storage', re)
+    return () => { window.removeEventListener('pj-navprefs', re); window.removeEventListener('storage', re) }
+  }, [location.pathname, navPrefsKey])
 
   const navItems = (() => {
     const order = navPrefs.order ?? []
@@ -111,6 +147,28 @@ export default function AppShell() {
     return [...inOrder, ...rest]
   })()
   const topNav = navPrefs.position === 'top' && !isMaster
+
+  // Bolinhas de notificação (tarefas por urgência) — número DENTRO de cada bolinha
+  const bolinha = (cor, n, titulo) => (
+    <span title={titulo} className={`flex items-center justify-center min-w-[20px] h-5 px-1 rounded-full ${cor} text-white text-[10px] font-bold`}>{n}</span>
+  )
+  const taskDotsEl = (
+    <button onClick={() => navigate('/app/tasks')} title="Tarefas — hoje/atrasadas · próximos 7 dias · depois"
+      className="flex items-center gap-1.5 px-1.5 py-1 rounded-lg hover:bg-[var(--bg-hover)] transition-colors">
+      {bolinha('bg-red-500', taskDots.red, 'Hoje / atrasadas')}
+      {bolinha('bg-orange-500', taskDots.orange, 'Próximos 7 dias')}
+      {bolinha('bg-amber-400', taskDots.yellow, '8 dias ou mais')}
+      {bolinha('bg-blue-500', taskDots.blue, 'Respondidas — aguardando sua ciência')}
+    </button>
+  )
+  // Fila de atendimento — à esquerda, perto do logo
+  const filaEl = (
+    <button onClick={() => navigate('/app/atendimento')} title="Fila de atendimento"
+      className="flex items-center gap-1.5 px-2 py-1 rounded-lg hover:bg-[var(--bg-hover)] text-sm text-[var(--text-secondary)] transition-colors">
+      <span>🟠</span><span className="hidden sm:inline text-[13px]">Fila</span>
+      {filaN > 0 && <span className="flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-orange-500 text-white text-[10px] font-bold">{filaN}</span>}
+    </button>
+  )
 
   return (
     <div className="flex h-screen overflow-hidden bg-[var(--bg-app)]">
@@ -128,7 +186,7 @@ export default function AppShell() {
         ${topNav ? 'lg:hidden' : ''}
       `}>
         {/* Logo */}
-        <div className={`flex items-center gap-3 px-3 py-4 border-b border-[var(--border)] ${collapsed ? 'justify-center' : ''}`}>
+        <div className={`flex items-center gap-3 px-3 h-14 flex-shrink-0 border-b border-[var(--border)] ${collapsed ? 'justify-center' : ''}`}>
           <div className="flex-shrink-0 w-8 h-8 rounded-lg bg-brand-500 flex items-center justify-center shadow-orange">
             <IconScale size={15} className="text-white" />
           </div>
@@ -175,6 +233,11 @@ export default function AppShell() {
               {item.to === '/app/tasks' && myTasks > 0 && (
                 <span className={`flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-orange-500 text-white text-[10px] font-bold shadow-[0_0_6px_rgba(249,115,22,0.6)] ${collapsed ? 'absolute top-1 right-1' : ''}`} title={`${myTasks} tarefa(s) em aberto`}>
                   {myTasks}
+                </span>
+              )}
+              {item.to === '/app/atendimento' && filaN > 0 && (
+                <span className={`flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-orange-500 text-white text-[10px] font-bold shadow-[0_0_6px_rgba(249,115,22,0.6)] ${collapsed ? 'absolute top-1 right-1' : ''}`} title={`${filaN} na fila`}>
+                  {filaN}
                 </span>
               )}
             </NavLink>
@@ -249,7 +312,7 @@ export default function AppShell() {
       {/* Main content */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         {/* Top header */}
-        <header className="flex items-center gap-4 px-4 py-2 border-b border-[var(--border)] bg-[var(--bg-card)] flex-shrink-0">
+        <header className="flex items-center gap-3 px-4 h-14 border-b border-[var(--border)] bg-[var(--bg-card)] flex-shrink-0">
           <button
             onClick={() => setMobileOpen(o => !o)}
             className="lg:hidden p-1.5 rounded-lg hover:bg-[var(--bg-hover)] text-[var(--text-muted)]"
@@ -259,11 +322,12 @@ export default function AppShell() {
 
           {topNav ? (
             <>
-              {/* Logo + nav horizontal (barra em cima) */}
+              {/* Logo + Fila + nav horizontal (barra em cima) */}
               <div className="hidden lg:flex items-center gap-2 flex-shrink-0">
                 <div className="w-7 h-7 rounded-lg bg-brand-500 flex items-center justify-center shadow-orange"><IconScale size={13} className="text-white" /></div>
                 <span className="text-[13px] font-bold text-[var(--text-primary)]">Perspecta<span className="text-brand-500 text-[9px] font-semibold tracking-widest uppercase ml-1">Juris</span></span>
               </div>
+              {filaEl}
               <nav className="hidden lg:flex items-center gap-0.5 flex-1 overflow-x-auto">
                 {navItems.map(item => (
                   <NavLink key={item.to} to={item.to} end={item.exact}
@@ -273,22 +337,30 @@ export default function AppShell() {
                     {item.to === '/app/tasks' && myTasks > 0 && (
                       <span className="flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-orange-500 text-white text-[10px] font-bold">{myTasks}</span>
                     )}
+                    {item.to === '/app/atendimento' && filaN > 0 && (
+                      <span className="flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-orange-500 text-white text-[10px] font-bold">{filaN}</span>
+                    )}
                   </NavLink>
                 ))}
               </nav>
               <div className="flex items-center gap-1 flex-shrink-0 ml-auto">
+                {taskDotsEl}
                 <button onClick={toggleTheme} title={theme === 'dark' ? 'Modo claro' : 'Modo escuro'} className="p-1.5 rounded-lg text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]">{theme === 'dark' ? <IconSun size={16} /> : <IconMoon size={16} />}</button>
                 <NavLink to="/app/settings" className="p-1.5 rounded-lg text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"><IconSettings size={16} /></NavLink>
                 <button onClick={handleLogout} className="p-1.5 rounded-lg text-[var(--text-muted)] hover:text-red-400 hover:bg-red-500/10"><IconLogOut size={16} /></button>
               </div>
             </>
           ) : (
-            <button
-              onClick={() => setCollapsed(c => !c)}
-              className="hidden lg:flex p-1.5 rounded-lg hover:bg-[var(--bg-hover)] text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors"
-            >
-              <IconMenu size={17} />
-            </button>
+            <>
+              <button
+                onClick={() => setCollapsed(c => !c)}
+                className="hidden lg:flex p-1.5 rounded-lg hover:bg-[var(--bg-hover)] text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors"
+              >
+                <IconMenu size={17} />
+              </button>
+              {filaEl}
+              <div className="ml-auto">{taskDotsEl}</div>
+            </>
           )}
         </header>
 
@@ -316,6 +388,8 @@ export default function AppShell() {
           </button>
         </div>
       )}
+
+      {mostrarTermos && <TermosModal onAccept={() => setMostrarTermos(false)} />}
     </div>
   )
 }

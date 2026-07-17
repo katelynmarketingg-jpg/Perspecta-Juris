@@ -8,7 +8,7 @@ import { useAuthStore } from '../../stores/authStore'
 import {
   Button, Card, Badge, Tabs, Table, EmptyState, Spinner, Modal,
   Input, Select, Textarea, IconEdit, IconPlus, IconCalendar, IconDollar,
-  IconFolder, IconClipboard,
+  IconFolder, IconClipboard, IconSearch,
 } from '../../components/ui'
 import AssinaturasTab from './AssinaturasTab'
 import DiarioModal from './DiarioModal'
@@ -80,6 +80,7 @@ export default function ProcessDetail() {
   const [showMovModal, setShowMovModal]     = useState(false)
   const [showDiario, setShowDiario]         = useState(false)
   const [showStatusPicker, setShowStatusPicker] = useState(false)
+  const [buscaMov, setBuscaMov] = useState('')
   const statusRef = useRef(null)
 
   useEffect(() => {
@@ -219,9 +220,18 @@ export default function ProcessDetail() {
           {tab === 'assinaturas' && <AssinaturasTab process={process} />}
 
           {/* Timeline */}
-          {tab === 'timeline' && (
+          {tab === 'timeline' && (() => {
+            const movsFiltrados = movements.filter(m => !buscaMov ||
+              (m.description || '').toLowerCase().includes(buscaMov.toLowerCase()) ||
+              (m.author || '').toLowerCase().includes(buscaMov.toLowerCase()))
+            return (
             <div className="space-y-4">
-              <div className="flex justify-end gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                <div className="relative flex-1 min-w-[180px]">
+                  <IconSearch size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
+                  <input value={buscaMov} onChange={e => setBuscaMov(e.target.value)} placeholder="Buscar nesta movimentação..."
+                    className="w-full pl-9 pr-3 py-2 rounded-lg bg-[var(--bg-card)] border border-[var(--border)] text-sm text-[var(--text-primary)] focus:border-brand-500 focus:outline-none" />
+                </div>
                 <Button variant="secondary" size="sm" onClick={() => setShowDiario(true)}>
                   📰 Diário Oficial
                 </Button>
@@ -231,11 +241,13 @@ export default function ProcessDetail() {
               </div>
               {movements.length === 0 ? (
                 <EmptyState icon="📋" title="Sem movimentações" description="Adicione a primeira movimentação do processo." action={<Button variant="primary" size="sm" onClick={() => setShowMovModal(true)}><IconPlus size={14} /> Adicionar</Button>} />
+              ) : movsFiltrados.length === 0 ? (
+                <p className="text-center text-sm text-[var(--text-muted)] py-10">Nenhuma movimentação com “{buscaMov}”.</p>
               ) : (
                 <div className="relative">
                   <div className="absolute left-4 top-0 bottom-0 w-px bg-[var(--border)]" />
                   <div className="space-y-3 pl-12">
-                    {movements.map(m => {
+                    {movsFiltrados.map(m => {
                       const isAuto = m.isAutomatic || m.author === 'Sistema'
                       const dotColor = {
                         status:    'border-blue-500',
@@ -268,7 +280,7 @@ export default function ProcessDetail() {
                 </div>
               )}
             </div>
-          )}
+          )})()}
 
           {/* Deadlines */}
           {tab === 'deadlines' && (

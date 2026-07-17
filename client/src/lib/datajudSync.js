@@ -3,6 +3,7 @@
 // número CNJ e persiste automaticamente no localStorage.
 // ─────────────────────────────────────────────────────────────────
 
+import { currentTenantId } from './tenant'
 const LS = 'pj_local_'
 const lsGet = (k, fb) => { try { return JSON.parse(localStorage.getItem(k) ?? 'null') ?? fb } catch { return fb } }
 const lsSet = (k, v)  => localStorage.setItem(k, JSON.stringify(v))
@@ -98,7 +99,7 @@ async function syncProcess(process) {
     })
     .map(m => ({
       id: uid(),
-      tenantId: 'tenant_demo',
+      tenantId: currentTenantId(),
       processId: process.id,
       description: m.nome ?? m.descricao ?? 'Movimentação',
       date: (m.dataHora ?? new Date().toISOString()).slice(0, 10),

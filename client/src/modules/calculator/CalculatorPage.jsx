@@ -6,6 +6,7 @@ import { useAuthStore } from '../../stores/authStore'
 import PrevidenciarioPlanner from './PrevidenciarioPlanner'
 import ParametrosModal from './ParametrosModal'
 import { registrar } from '../../lib/auditLog'
+import { tkey } from '../../lib/tenant'
 
 const lsGet = (k, fb) => { try { return JSON.parse(localStorage.getItem(k) ?? 'null') ?? fb } catch { return fb } }
 const lsSet = (k, v)  => localStorage.setItem(k, JSON.stringify(v))
@@ -217,9 +218,9 @@ function CalcRunner({ calc, onBack }) {
 
   const saveHistory = () => {
     if (!result) return
-    const hist = lsGet('pj_calc_history', [])
+    const hist = lsGet(tkey('pj_calc_history'), [])
     hist.unshift({ id: uid(), calcId: calc.id, titulo: calc.titulo, ramo: calc.ramo, headline: result.headline, inputs, createdAt: new Date().toISOString() })
-    lsSet('pj_calc_history', hist.slice(0, 100))
+    lsSet(tkey('pj_calc_history'), hist.slice(0, 100))
     registrar('calculo', `salvou o cálculo "${calc.titulo}"${result.headline ? ` — ${result.headline}` : ''}`)
     showToast('Cálculo salvo no histórico.', 'success')
   }
@@ -272,13 +273,13 @@ export default function CalculatorPage() {
   const [activeCalc, setActiveCalc] = useState(null)
   const [q, setQ] = useState('')
   const [ramo, setRamo] = useState('')
-  const [history, setHistory] = useState(() => lsGet('pj_calc_history', []))
+  const [history, setHistory] = useState(() => lsGet(tkey('pj_calc_history'), []))
   const [params, setParams] = useState(false)
   const [pInfo, setPInfo] = useState(() => paramsInfo())
   const isAdmin = useAuthStore(s => s.user?.role) === 'master'
   const desatualizado = isAdmin && parametrosDesatualizados()   // aviso só p/ administradora
 
-  useEffect(() => { if (view === 'history') setHistory(lsGet('pj_calc_history', [])) }, [view])
+  useEffect(() => { if (view === 'history') setHistory(lsGet(tkey('pj_calc_history'), [])) }, [view])
 
   const filtered = useMemo(() => {
     const term = q.trim().toLowerCase()

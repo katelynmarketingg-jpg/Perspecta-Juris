@@ -91,6 +91,9 @@ function Editor({ peticao, onSave, onClose }) {
   const [form, setForm] = useState(peticao ?? { titulo: '', categoria: 'inicial', area: 'geral', tags: [], corpo: '' })
   const set = (k) => (e) => setForm(d => ({ ...d, [k]: e.target.value }))
   const insertVar = (key) => setForm(d => ({ ...d, corpo: (d.corpo || '') + `{{${key}}}` }))
+  const temCli = /\[ASSINATURA_CLIENTE\]/i.test(form.corpo || '')
+  const temEmp = /\[ASSINATURA_EMPRESA\]/i.test(form.corpo || '')
+  const insertMarcador = (tag) => setForm(d => ({ ...d, corpo: (d.corpo || '').replace(/\s*$/, '') + `\n\n${tag}\n` }))
 
   const salvar = () => {
     if (!form.titulo.trim() || !form.corpo.trim()) { showToast('Preencha título e corpo.', 'error'); return }
@@ -113,7 +116,21 @@ function Editor({ peticao, onSave, onClose }) {
               <Select label="Área" value={form.area} onChange={set('area')} options={PETICAO_AREAS} />
             </div>
             <Input label="Tags (separadas por vírgula)" value={Array.isArray(form.tags) ? form.tags.join(', ') : form.tags} onChange={set('tags')} placeholder="usucapião, posse" />
-            <Textarea label="Corpo da petição" rows={16} value={form.corpo} onChange={set('corpo')} className="font-mono text-xs" placeholder="Use {{cliente.nome}}, {{advogado.oab}}... e [PLACEHOLDERS] para ajuste manual." />
+            <div className="flex items-center justify-between mb-1 gap-2 flex-wrap">
+              <label className="text-xs font-medium text-[var(--text-secondary)]">Corpo do documento</label>
+              <div className="flex gap-1.5">
+                <button type="button" onClick={() => insertMarcador('[ASSINATURA_CLIENTE]')} disabled={temCli}
+                  className={`text-[11px] px-2 py-1 rounded-md ${temCli ? 'bg-emerald-500/15 text-emerald-400 cursor-default' : 'bg-brand-500/15 text-accent-400 hover:bg-brand-500/25'}`}>
+                  {temCli ? '✍️ Cliente ✓' : '✍️ Assinatura do cliente'}
+                </button>
+                <button type="button" onClick={() => insertMarcador('[ASSINATURA_EMPRESA]')} disabled={temEmp}
+                  className={`text-[11px] px-2 py-1 rounded-md ${temEmp ? 'bg-emerald-500/15 text-emerald-400 cursor-default' : 'bg-[var(--bg-hover)] text-[var(--text-secondary)] hover:bg-[var(--bg-input)]'}`}>
+                  {temEmp ? '🏢 Escritório ✓' : '🏢 Assinatura do escritório'}
+                </button>
+              </div>
+            </div>
+            <Textarea rows={16} value={form.corpo} onChange={set('corpo')} className="font-mono text-xs" placeholder="Use {{cliente.nome}}, {{advogado.oab}}... e [PLACEHOLDERS] para ajuste manual." />
+            <p className="text-[10px] text-[var(--text-muted)]">O timbrado e o logo são aplicados ao gerar/imprimir. Os marcadores <code>[ASSINATURA_CLIENTE]</code> (Contratante) e <code>[ASSINATURA_EMPRESA]</code> (Contratada) definem — <b>uma vez só</b> — onde cada assinatura entra; pode movê-los no texto.</p>
           </div>
           <div>
             <p className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wide mb-2">Variáveis</p>

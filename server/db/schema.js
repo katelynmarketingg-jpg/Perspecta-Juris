@@ -292,7 +292,11 @@ export const signatureRequests = pgTable('signature_requests', {
   signatureImg:   text('signature_img'),   // dataURL
   photoImg:       text('photo_img'),        // dataURL
   signedAt:       text('signed_at'),
-  signedIp:       text('signed_ip'),
+  signedIp:       text('signed_ip'),        // IP observado pelo servidor (autoritativo)
+  documentHash:   text('document_hash'),    // SHA-256 do conteúdo assinado (integridade)
+  consent:        boolean('consent').default(false),  // aceite LGPD
+  consentText:    text('consent_text'),     // termo exato aceito
+  evidencias:     jsonb('evidencias'),      // { ip, geo, userAgent, plataforma, idioma, tela, fuso, carimboTempo }
   createdBy:      text('created_by').references(() => users.id),
   createdAt:      text('created_at').notNull(),
   updatedAt:      text('updated_at').notNull(),

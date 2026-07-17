@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useUiStore } from '../../stores/uiStore'
 import api from '../../lib/api'
+import { getOffice, setOffice } from '../../lib/tenant'
 import { getPeticoes } from '../../lib/peticoesModels'
 import {
   Button, Card, Input,
@@ -202,17 +203,51 @@ function FillFormModal({ service, onClose }) {
 // ── ServicesTab ───────────────────────────────────────────────────
 const EMPTY_SVC = { name: '', areaId: '', contractType: 'fixed', defaultFee: '', percentage: '' }
 
+// Lista inicial de serviços/honorários (o "o que é" já preenchido — você define os valores).
+const mkSvc = (name, contractType) => ({ id: uid(), name, areaId: '', contractType, defaultFee: '', percentage: '', documentos: [], formFields: [] })
+const DEFAULT_SERVICES = [
+  mkSvc('Reclamação Trabalhista', 'success'),
+  mkSvc('Acordo / Rescisão Trabalhista', 'fixed'),
+  mkSvc('Aposentadoria (INSS)', 'success'),
+  mkSvc('Auxílio-Doença / BPC-LOAS', 'success'),
+  mkSvc('Revisão de Benefício', 'success'),
+  mkSvc('Ação de Indenização', 'mixed'),
+  mkSvc('Ação de Cobrança / Execução', 'success'),
+  mkSvc('Inventário e Partilha', 'success'),
+  mkSvc('Divórcio Consensual', 'fixed'),
+  mkSvc('Pensão Alimentícia', 'fixed'),
+  mkSvc('Guarda / Regulamentação de Visitas', 'fixed'),
+  mkSvc('Ação contra Banco / Negativação Indevida', 'success'),
+  mkSvc('Usucapião', 'fixed'),
+  mkSvc('Assessoria Jurídica Mensal', 'monthly'),
+  mkSvc('Defesa Criminal', 'fixed'),
+  mkSvc('Consulta Jurídica', 'hourly'),
+]
+// Espelha os serviços em "tipos de honorário" — assim o processo continua buscando o valor.
+const espelharHonorarios = (services) => lsSet('pj_local_fee_types', services.map(s => ({
+  id: s.id, name: s.name, contractType: s.contractType ?? 'fixed',
+  amount: s.defaultFee === '' ? null : s.defaultFee, percentage: s.percentage === '' ? null : s.percentage, desc: '',
+})))
+
 function ServicesTab() {
   const { showToast } = useUiStore()
   const [areas]    = useState(() => lsGet('pj_local_areas', []))
-  const [services, setServices] = useState(() => lsGet('pj_local_services', []))
+  const [services, setServices] = useState(() => {
+    // Reset único: começa do zero (remove qualquer lista pré-preenchida anterior)
+    if (!lsGet('pj_services_reset_v1', false)) {
+      lsSet('pj_local_services', [])
+      lsSet('pj_local_fee_types', [])
+      lsSet('pj_services_reset_v1', true)
+    }
+    return lsGet('pj_local_services', [])
+  })
   const [editing, setEditing]   = useState(null)
   const [form, setForm]         = useState(EMPTY_SVC)
   const [configuring, setConfiguring] = useState(null)  // service id
   const [filling, setFilling]   = useState(null)        // service object
   const modelos = getPeticoes()
 
-  const persist = (next) => { setServices(next); lsSet('pj_local_services', next) }
+  const persist = (next) => { setServices(next); lsSet('pj_local_services', next); espelharHonorarios(next) }
   const updateSvc = (id, patch) => persist(services.map(s => s.id === id ? { ...s, ...patch } : s))
 
   function save() {
@@ -243,6 +278,9 @@ function ServicesTab() {
 
   return (
     <div className="space-y-4">
+      <div className="rounded-lg bg-brand-500/8 border border-brand-500/20 p-3">
+        <p className="text-xs text-[var(--text-secondary)]">Aqui ficam seus <b>serviços e os honorários</b> de cada um. Cadastre cada serviço com a <b>forma de pagamento e o valor / % de êxito</b>. Ao criar um processo, esses honorários são <b>buscados automaticamente</b> (e podem ser ajustados no processo).</p>
+      </div>
       <Card className="p-4 space-y-3">
         <p className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider">{editing?.id ? 'Editar serviço' : 'Novo serviço'}</p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -453,11 +491,14 @@ function FeeTypesTab() {
 // ── OfficeTab ─────────────────────────────────────────────────────
 function OfficeTab() {
   const { showToast } = useUiStore()
-  const [data, setData] = useState(() => lsGet('pj_local_office', {
-    name: 'Perspecta Advocacia', cnpj: '', oab: '', email: '', phone: '',
-    addressStreet: '', addressCity: '', addressState: '', pixKey: '', cardLink: '',
-    logoDataUrl: '', timbradoDataUrl: '', usarTimbrado: true,
-  }))
+  const [data, setData] = useState(() => {
+    const o = getOffice()
+    return Object.keys(o).length ? o : {
+      name: '', cnpj: '', oab: '', email: '', phone: '',
+      addressStreet: '', addressCity: '', addressState: '', pixKey: '', cardLink: '',
+      logoDataUrl: '', timbradoDataUrl: '', usarTimbrado: true,
+    }
+  })
   const set = field => e => setData(d => ({ ...d, [field]: e.target.value }))
 
   const uploadImg = (field) => (e) => {
@@ -470,7 +511,7 @@ function OfficeTab() {
   }
 
   function save() {
-    lsSet('pj_local_office', data)
+    setOffice(data)
     showToast('Dados salvos.', 'success')
   }
 
@@ -638,7 +679,7 @@ const NAV_ITEMS = [
   { to: '/app/deadlines', label: 'Prazos' }, { to: '/app/tasks', label: 'Tarefas' },
   { to: '/app/financial', label: 'Financeiro' }, { to: '/app/documents', label: 'Documentos' },
   { to: '/app/modelos', label: 'Modelos' }, { to: '/app/calculator', label: 'Calculadora' },
-  { to: '/app/theses', label: 'Teses' }, { to: '/app/automations', label: 'Automações' },
+  { to: '/app/theses', label: 'Legislação' }, { to: '/app/automations', label: 'Automações' },
   { to: '/app/reports', label: 'Relatórios' },
 ]
 
@@ -658,7 +699,7 @@ function AppearanceTab() {
     if (j < 0 || j >= order.length) return
     const next = [...order]; [next[i], next[j]] = [next[j], next[i]]; setOrder(next)
   }
-  const save = () => { lsSet(KEY, { position, order }); showToast('Aparência salva. As mudanças aparecem ao navegar.', 'success') }
+  const save = () => { lsSet(KEY, { position, order }); window.dispatchEvent(new Event('pj-navprefs')); showToast('Aparência salva.', 'success') }
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -713,10 +754,9 @@ function AppearanceTab() {
 
 // ── Main ──────────────────────────────────────────────────────────
 const TABS = [
-  { key: 'areas',        label: 'Áreas Jurídicas',  icon: IconBriefcase },
-  { key: 'services',     label: 'Serviços',          icon: IconTag },
-  { key: 'fees',         label: 'Honorários',        icon: IconDollar },
-  { key: 'users',        label: 'Usuários / Logins', icon: IconUsers },
+  { key: 'areas',        label: 'Áreas Jurídicas',      icon: IconBriefcase },
+  { key: 'services',     label: 'Serviços e Honorários', icon: IconDollar },
+  { key: 'users',        label: 'Usuários / Logins',     icon: IconUsers },
   { key: 'appearance',   label: 'Aparência',         icon: IconGrid },
   { key: 'office',       label: 'Escritório',        icon: IconTag },
   { key: 'integrations', label: 'Integrações',       icon: IconExternalLink },
@@ -756,7 +796,6 @@ export default function SettingsPage() {
       {/* Tab content */}
       {tab === 'areas'        && <AreasTab />}
       {tab === 'services'     && <ServicesTab />}
-      {tab === 'fees'         && <FeeTypesTab />}
       {tab === 'users'        && <UsersTab />}
       {tab === 'appearance'   && <AppearanceTab />}
       {tab === 'office'       && <OfficeTab />}
