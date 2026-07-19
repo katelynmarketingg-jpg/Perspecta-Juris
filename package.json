@@ -11,6 +11,7 @@
     "start": "node server/index.mjs",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "node server/db/migrate.mjs",
+    "db:seed": "node server/db/seed.mjs",
     "db:studio": "drizzle-kit studio"
   },
   "dependencies": {
