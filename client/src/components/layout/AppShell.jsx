@@ -244,18 +244,20 @@ export default function AppShell() {
           ))}
         </nav>
 
-        {/* Perspecta Hub link */}
+        {/* Perspecta Hub link — CRM ainda em preparação */}
         {!collapsed && (
           <div className="px-1.5 py-1">
-            <a
-              href={import.meta.env.VITE_HUB_URL ?? '#'}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-2 rounded-lg px-3 py-2 text-xs text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-white/[0.04] transition-colors"
+            <div
+              title="O CRM Perspecta Hub está em preparação e será liberado em breve."
+              className="flex items-center gap-2 rounded-lg px-3 py-2 text-xs text-[var(--text-muted)] cursor-default select-none"
             >
               <IconExternalLink size={13} />
-              Perspecta Hub
-            </a>
+              <span>Perspecta Hub</span>
+              <span className="ml-auto flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-amber-500/15 border border-amber-500/30 text-amber-400 text-[9px] font-semibold uppercase tracking-wide">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                em breve
+              </span>
+            </div>
           </div>
         )}
 
