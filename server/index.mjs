@@ -100,6 +100,7 @@ const { default: dashboardRoutes } = await import('./routes/dashboard.js')
 const { default: tribunalRoutes }  = await import('./routes/tribunal.js')
 const { default: signatureRoutes } = await import('./routes/signatures.js')
 const { default: diarioRoutes }    = await import('./routes/diario.js')
+const { default: masterRoutes }    = await import('./routes/master.js')
 
 await app.register(authRoutes,      { prefix: '/api/auth' })
 await app.register(clientRoutes,    { prefix: '/api/clients' })
@@ -113,6 +114,7 @@ await app.register(dashboardRoutes, { prefix: '/api/dashboard' })
 await app.register(tribunalRoutes,  { prefix: '/api/tribunal' })
 await app.register(signatureRoutes, { prefix: '/api/signatures' })
 await app.register(diarioRoutes,    { prefix: '/api/diario' })
+await app.register(masterRoutes,    { prefix: '/api/master' })
 
 // ── Health ────────────────────────────────────────────────────
 app.get('/api/health', async () => ({

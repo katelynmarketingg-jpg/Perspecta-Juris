@@ -7,8 +7,9 @@ import { IconScale, IconBuilding, IconUsers, IconSettings, IconLogOut, IconPlus 
 const EMPTY_FORM = { name: '', plan: 'professional', cnpj: '', adminName: '', adminLogin: '', adminPassword: '' }
 
 export default function MasterPage() {
-  const { user, logout } = useAuthStore()
+  const { user, logout, enterCompany } = useAuthStore()
   const navigate = useNavigate()
+  const [entering, setEntering] = useState(null) // id da empresa sendo aberta
   const [companies, setCompanies] = useState([])
   const [loading, setLoading] = useState(true)
   const [showNew, setShowNew] = useState(false)
@@ -51,6 +52,17 @@ export default function MasterPage() {
     if (!window.confirm(`Excluir a empresa "${c.name}" e todos os seus acessos?`)) return
     await api.master.deleteCompany(c.id).catch(() => {})
     loadCompanies()
+  }
+  const entrar = async (c) => {
+    if (!c.isActive) return
+    setEntering(c.id)
+    try {
+      await enterCompany(c.id)
+      navigate('/app')
+    } catch (e) {
+      alert('Não foi possível entrar neste escritório. ' + (e?.message ?? ''))
+      setEntering(null)
+    }
   }
 
   const totalClientes = companies.reduce((s, c) => s + (c.clientsCount ?? 0), 0)
@@ -171,6 +183,16 @@ export default function MasterPage() {
                     <p className="text-[10px] text-[var(--text-muted)] mt-0.5">Processos</p>
                   </div>
                 </div>
+
+                {/* Entrar no escritório */}
+                <button
+                  onClick={() => entrar(c)}
+                  disabled={!c.isActive || entering === c.id}
+                  className="btn-primary w-full text-sm py-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                  title={c.isActive ? 'Abrir este escritório como master' : 'Ative a empresa para poder entrar'}
+                >
+                  {entering === c.id ? 'Entrando…' : 'Entrar no escritório'}
+                </button>
 
                 {/* Status + actions */}
                 <div className="flex items-center justify-between pt-1 border-t border-[var(--border)]">

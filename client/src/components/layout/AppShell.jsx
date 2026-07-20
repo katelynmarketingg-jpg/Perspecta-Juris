@@ -46,7 +46,7 @@ const NAV_MASTER = [
 ]
 
 export default function AppShell() {
-  const { user, tenant, logout } = useAuthStore()
+  const { user, tenant, logout, impersonating, exitToMaster } = useAuthStore()
   const navigate = useNavigate()
   const location = useLocation()
   const [mobileOpen, setMobileOpen] = useState(false)
@@ -311,6 +311,21 @@ export default function AppShell() {
 
       {/* Main content */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+        {/* Faixa de impersonação (master dentro de um escritório) */}
+        {impersonating && (
+          <div className="flex items-center justify-between gap-3 px-4 py-2 bg-amber-500/15 border-b border-amber-500/30 text-amber-300 text-[13px] flex-shrink-0">
+            <span className="flex items-center gap-2 min-w-0">
+              <span className="w-2 h-2 rounded-full bg-amber-400 flex-shrink-0" />
+              <span className="truncate">Você está no escritório <b className="text-amber-200">{tenant?.name}</b> como master.</span>
+            </span>
+            <button
+              onClick={() => { exitToMaster(); navigate('/master/companies') }}
+              className="flex-shrink-0 px-3 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-100 font-medium transition-colors whitespace-nowrap"
+            >
+              ← Voltar ao painel master
+            </button>
+          </div>
+        )}
         {/* Top header */}
         <header className="flex items-center gap-3 px-4 h-14 border-b border-[var(--border)] bg-[var(--bg-card)] flex-shrink-0">
           <button

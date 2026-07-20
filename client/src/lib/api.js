@@ -193,6 +193,7 @@ const api = {
     createCompany:  (d)    => api.post('/api/master/companies', d),
     updateCompany:  (id,d) => api.put(`/api/master/companies/${id}`, d),
     deleteCompany:  (id)   => api.delete(`/api/master/companies/${id}`),
+    enterCompany:   (id)   => api.post(`/api/master/companies/${id}/enter`),
   },
 
   dashboard: {
