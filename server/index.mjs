@@ -11,7 +11,9 @@ import { existsSync, mkdirSync } from 'fs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const ROOT = join(__dirname, '..')
-const DIST = join(ROOT, 'dist')
+// O build do Vite pode cair em <raiz>/dist ou em <raiz>/client/dist
+// dependendo de como o outDir é resolvido. Procuramos nos dois.
+const DIST = [join(ROOT, 'dist'), join(ROOT, 'client', 'dist')].find(existsSync) ?? join(ROOT, 'dist')
 const FILES_DIR = process.env.FILES_DIR ?? join(ROOT, 'data', 'files')
 
 // Ensure dirs exist
