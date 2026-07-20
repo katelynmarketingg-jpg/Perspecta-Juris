@@ -39,10 +39,18 @@ export function printDocumentos(corpos, { titulo = 'Documento' } = {}) {
     : ''
   const padTop = usarTimbradoImg ? '45mm' : '30mm'   // espaço p/ o timbrado da imagem
 
-  // Marcador de assinatura (definido no cadastro) vira uma linha de assinatura ao imprimir.
-  const limparMarcador = (t) => String(t ?? '').replace(/\[ASSINATURA(?:S|_CLIENTE|_EMPRESA| DO CLIENTE)?\]/gi, '\n_________________________________________\n')
+  // Conteúdo pode ser texto simples (antigo) ou HTML (editor rico).
+  const isHtml = (s) => /<[a-z!/][\s\S]*>/i.test(String(s ?? ''))
+  const sigRe = /\[ASSINATURA(?:S|_CLIENTE|_EMPRESA| DO CLIENTE)?\]/gi
+  const marcadorPlain = (t) => String(t ?? '').replace(sigRe, '\n_________________________________________\n')
+  const marcadorHtml  = (t) => String(t ?? '').replace(sigRe, '<p style="margin-top:26px">_________________________________________</p>')
   const header = temCabecalho ? cabecalhoHTML(office) : ''
-  const pages = bodies.map(b => `<div class="page" style="${pageBg}">${header}<pre>${esc(limparMarcador(b))}</pre></div>`).join('')
+  const pages = bodies.map(b => {
+    const content = isHtml(b)
+      ? `<div class="doc">${marcadorHtml(b)}</div>`
+      : `<pre>${esc(marcadorPlain(b))}</pre>`
+    return `<div class="page" style="${pageBg}">${header}${content}</div>`
+  }).join('')
 
   const win = window.open('', '_blank')
   win.document.write(`<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><title>${esc(titulo)}</title>
@@ -52,6 +60,10 @@ export function printDocumentos(corpos, { titulo = 'Documento' } = {}) {
   .page{width:210mm;min-height:297mm;padding:${padTop} 25mm 25mm 30mm;page-break-after:always}
   .page:last-child{page-break-after:auto}
   pre{white-space:pre-wrap;word-break:break-word;font-family:inherit;font-size:inherit;line-height:inherit;text-align:justify}
+  .doc{text-align:justify}
+  .doc p{margin:0 0 6px}
+  .doc h1{font-size:15pt;margin:0 0 10px}.doc h2{font-size:13pt;margin:0 0 8px}.doc h3{font-size:12pt;font-weight:700;margin:0 0 6px}
+  .doc ul,.doc ol{margin:0 0 8px 22px}
   .lh{display:flex;align-items:center;gap:16px;border-bottom:2px solid #222;padding-bottom:12px;margin-bottom:26px}
   .lh-logo{height:64px;max-width:120px;object-fit:contain}
   .lh-name{font-family:Arial,sans-serif;font-weight:700;font-size:14pt;color:#111}

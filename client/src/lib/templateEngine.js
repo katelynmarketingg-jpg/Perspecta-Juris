@@ -112,12 +112,52 @@ export function buildVars(client, process, user, tenant) {
   }
 }
 
-// ── Substitui variáveis no texto ──────────────────────────────────
+// ── Campos amigáveis (nome humano → chave técnica) ────────────────
+// Usados no editor como {nome do cliente}, {oab}, {data por extenso}...
+export const FRIENDLY_FIELDS = [
+  { group: 'Cliente', items: [
+    ['nome do cliente', 'cliente.nome'], ['cpf/cnpj do cliente', 'cliente.cpf_cnpj'],
+    ['rg do cliente', 'cliente.rg'], ['nacionalidade', 'cliente.nacionalidade'],
+    ['estado civil', 'cliente.estado_civil'], ['profissão', 'cliente.profissao'],
+    ['endereço do cliente', 'cliente.endereco'], ['cidade do cliente', 'cliente.cidade'],
+    ['e-mail do cliente', 'cliente.email'], ['telefone do cliente', 'cliente.telefone'],
+  ]},
+  { group: 'Processo', items: [
+    ['número do processo', 'processo.numero'], ['título do processo', 'processo.titulo'],
+    ['tribunal', 'processo.tribunal'], ['vara', 'processo.vara'],
+    ['parte contrária', 'processo.parte_contraria'], ['honorários', 'processo.honorarios'],
+  ]},
+  { group: 'Advogado', items: [
+    ['nome do advogado', 'advogado.nome'], ['oab', 'advogado.oab'], ['uf da oab', 'advogado.oab_uf'],
+  ]},
+  { group: 'Escritório', items: [
+    ['nome do escritório', 'escritorio.nome'], ['cidade do escritório', 'escritorio.cidade'],
+  ]},
+  { group: 'Datas', items: [
+    ['data de hoje', 'data.hoje'], ['data por extenso', 'data.extenso'], ['ano', 'data.ano'],
+  ]},
+]
+
+const FRIENDLY_MAP = Object.fromEntries(
+  FRIENDLY_FIELDS.flatMap(g => g.items.map(([label, key]) => [label.toLowerCase(), key])),
+)
+
+// ── Substitui variáveis no texto/HTML ─────────────────────────────
 export function renderTemplate(body, vars) {
-  return body.replace(/\{\{([^}]+)\}\}/g, (_, key) => {
+  let out = String(body ?? '')
+  // 1) técnico: {{cliente.nome}}
+  out = out.replace(/\{\{([^{}]+)\}\}/g, (_, key) => {
     const v = vars[key.trim()]
     return v !== undefined ? v : `{{${key}}}`
   })
+  // 2) amigável: {nome do cliente}
+  out = out.replace(/\{([^{}]+)\}/g, (m, phrase) => {
+    const key = FRIENDLY_MAP[phrase.trim().toLowerCase()]
+    if (!key) return m
+    const v = vars[key]
+    return (v !== undefined && v !== '') ? v : m
+  })
+  return out
 }
 
 // ── CRUD de modelos ────────────────────────────────────────────────

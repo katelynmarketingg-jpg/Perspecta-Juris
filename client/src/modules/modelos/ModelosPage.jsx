@@ -1,11 +1,20 @@
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import { getPeticoes, savePeticao, deletePeticao, PETICAO_CATEGORIAS, PETICAO_AREAS } from '../../lib/peticoesModels'
-import { buildVars, renderTemplate, ALL_VARIABLES } from '../../lib/templateEngine'
+import { buildVars, renderTemplate, ALL_VARIABLES, FRIENDLY_FIELDS } from '../../lib/templateEngine'
 import api from '../../lib/api'
 import { useAuthStore } from '../../stores/authStore'
 import { useUiStore } from '../../stores/uiStore'
 import { Button, Card, Input, Select, Textarea } from '../../components/ui'
+import RichTextEditor from '../../components/RichTextEditor'
 import { printDocumentos } from '../../lib/printDoc'
+
+// Conteúdo pode ser texto simples (modelos antigos) ou HTML (editor rico).
+const isHtml = (s) => /<[a-z!/][\s\S]*>/i.test(String(s ?? ''))
+function DocBody({ html, style }) {
+  return isHtml(html)
+    ? <div className="pj-doc" style={style} dangerouslySetInnerHTML={{ __html: html }} />
+    : <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontFamily: 'inherit', fontSize: 'inherit', lineHeight: 'inherit', ...style }}>{html}</pre>
+}
 
 const catLabel = (v) => PETICAO_CATEGORIAS.find(c => c.value === v)?.label ?? v
 const areaLabel = (v) => PETICAO_AREAS.find(a => a.value === v)?.label ?? v
@@ -26,7 +35,7 @@ function PrintPreview({ text, titulo, onClose }) {
         </div>
         <div className="p-6">
           <div className="bg-white text-black rounded-lg p-8" style={{ fontFamily:"'Times New Roman',serif", fontSize:'12pt', lineHeight:'1.9', textAlign:'justify' }}>
-            <pre style={{ whiteSpace:'pre-wrap', wordBreak:'break-word', fontFamily:'inherit', fontSize:'inherit', lineHeight:'inherit' }}>{text}</pre>
+            <DocBody html={text} />
           </div>
         </div>
       </div>
@@ -88,24 +97,27 @@ function GerarModal({ peticao, onClose }) {
 // ── Editor de modelo ────────────────────────────────────────────────────────
 function Editor({ peticao, onSave, onClose }) {
   const { showToast } = useUiStore()
-  const [form, setForm] = useState(peticao ?? { titulo: '', categoria: 'inicial', area: 'geral', tags: [], corpo: '' })
+  const editorRef = useRef(null)
+  const [form, setForm] = useState(peticao ?? { titulo: '', categoria: 'inicial', area: 'geral', tags: [], corpo: '', lineHeight: 1.9 })
   const set = (k) => (e) => setForm(d => ({ ...d, [k]: e.target.value }))
-  const insertVar = (key) => setForm(d => ({ ...d, corpo: (d.corpo || '') + `{{${key}}}` }))
+  const setBody = (html) => setForm(d => ({ ...d, corpo: html }))
+  const insertCampo = (label) => editorRef.current?.insertText(`{${label}}`)
   const temCli = /\[ASSINATURA_CLIENTE\]/i.test(form.corpo || '')
   const temEmp = /\[ASSINATURA_EMPRESA\]/i.test(form.corpo || '')
-  const insertMarcador = (tag) => setForm(d => ({ ...d, corpo: (d.corpo || '').replace(/\s*$/, '') + `\n\n${tag}\n` }))
+  const insertMarcador = (tag) => editorRef.current?.insertHtml(`<p>${tag}</p>`)
 
   const salvar = () => {
-    if (!form.titulo.trim() || !form.corpo.trim()) { showToast('Preencha título e corpo.', 'error'); return }
+    const plain = (form.corpo || '').replace(/<[^>]*>/g, '').trim()
+    if (!form.titulo.trim() || !plain) { showToast('Preencha título e corpo.', 'error'); return }
     const tags = typeof form.tags === 'string' ? form.tags.split(',').map(t => t.trim()).filter(Boolean) : form.tags
     onSave(savePeticao({ ...form, tags }))
   }
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 overflow-y-auto py-6 px-4" onClick={onClose}>
-      <div className="bg-[var(--bg-card)] rounded-2xl shadow-2xl w-full max-w-4xl" onClick={e => e.stopPropagation()}>
+      <div className="bg-[var(--bg-card)] rounded-2xl shadow-2xl w-full max-w-5xl" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--border)]">
-          <p className="text-sm font-semibold text-[var(--text-primary)]">{peticao ? 'Editar modelo' : 'Novo modelo de petição'}</p>
+          <p className="text-sm font-semibold text-[var(--text-primary)]">{peticao ? 'Editar modelo' : 'Novo modelo de documento'}</p>
           <button onClick={onClose} className="text-[var(--text-muted)] hover:text-[var(--text-primary)]">✕</button>
         </div>
         <div className="p-5 grid grid-cols-1 lg:grid-cols-3 gap-4">
@@ -129,20 +141,32 @@ function Editor({ peticao, onSave, onClose }) {
                 </button>
               </div>
             </div>
-            <Textarea rows={16} value={form.corpo} onChange={set('corpo')} className="font-mono text-xs" placeholder="Use {{cliente.nome}}, {{advogado.oab}}... e [PLACEHOLDERS] para ajuste manual." />
-            <p className="text-[10px] text-[var(--text-muted)]">O timbrado e o logo são aplicados ao gerar/imprimir. Os marcadores <code>[ASSINATURA_CLIENTE]</code> (Contratante) e <code>[ASSINATURA_EMPRESA]</code> (Contratada) definem — <b>uma vez só</b> — onde cada assinatura entra; pode movê-los no texto.</p>
+            <RichTextEditor
+              ref={editorRef}
+              value={form.corpo}
+              onChange={setBody}
+              lineHeight={form.lineHeight ?? 1.9}
+              onLineHeight={(lh) => setForm(d => ({ ...d, lineHeight: lh }))}
+            />
+            <div className="text-[10px] text-[var(--text-muted)] space-y-1 leading-relaxed">
+              <p>✏️ Escreva como no Word — negrito, itálico, alinhamento, listas, espaçamento. <b>Pode colar de um documento do Word</b> que a formatação vem junto.</p>
+              <p>🔖 Para dados automáticos, clique nos <b>Campos automáticos</b> ao lado. Ex.: <code className="text-accent-400">{'{nome do cliente}'}</code> é trocado pelo nome do cadastro quando você gerar o documento para um cliente.</p>
+              <p>✍️ Os marcadores <code>[ASSINATURA_CLIENTE]</code> e <code>[ASSINATURA_EMPRESA]</code> definem — <b>uma vez só</b> — onde cada assinatura entra.</p>
+              <p>🏢 O <b>logo e o papel timbrado</b> do escritório são aplicados automaticamente ao gerar/imprimir.</p>
+            </div>
           </div>
           <div>
-            <p className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wide mb-2">Variáveis</p>
-            <div className="space-y-3 max-h-96 overflow-y-auto pr-1">
-              {ALL_VARIABLES.map(g => (
+            <p className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wide mb-1">Campos automáticos</p>
+            <p className="text-[10px] text-[var(--text-muted)] mb-2">Clique para inserir no ponto do cursor.</p>
+            <div className="space-y-3 max-h-[440px] overflow-y-auto pr-1">
+              {FRIENDLY_FIELDS.map(g => (
                 <div key={g.group}>
                   <p className="text-[10px] font-semibold text-[var(--text-secondary)] mb-1">{g.group}</p>
                   <div className="flex flex-wrap gap-1">
-                    {g.vars.map(v => (
-                      <button key={v.key} onClick={() => insertVar(v.key)} title={v.label}
+                    {g.items.map(([label]) => (
+                      <button key={label} type="button" onClick={() => insertCampo(label)} title={`Insere {${label}}`}
                         className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--bg-hover)] text-[var(--text-secondary)] hover:bg-brand-500/20 hover:text-accent-400">
-                        {v.key}
+                        {'{'}{label}{'}'}
                       </button>
                     ))}
                   </div>
@@ -165,9 +189,14 @@ function Detalhe({ peticao, onBack, onEdit, onDelete }) {
   const { showToast } = useUiStore()
   const [gerar, setGerar] = useState(false)
 
-  const copiar = () => { navigator.clipboard.writeText(peticao.corpo); showToast('Texto copiado.', 'success') }
+  const copiar = () => {
+    const txt = isHtml(peticao.corpo) ? peticao.corpo.replace(/<\/(p|div|h[1-6]|li)>/gi, '\n').replace(/<[^>]*>/g, '') : peticao.corpo
+    navigator.clipboard.writeText(txt); showToast('Texto copiado.', 'success')
+  }
   const baixar = () => {
-    const blob = new Blob(['﻿' + peticao.corpo], { type: 'application/msword' })
+    const inner = isHtml(peticao.corpo) ? peticao.corpo : `<pre style="white-space:pre-wrap;font-family:inherit">${peticao.corpo}</pre>`
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${peticao.titulo}</title></head><body style="font-family:'Times New Roman',serif;font-size:12pt;line-height:${peticao.lineHeight ?? 1.9};text-align:justify">${inner}</body></html>`
+    const blob = new Blob(['﻿' + html], { type: 'application/msword' })
     const a = document.createElement('a')
     a.href = URL.createObjectURL(blob); a.download = `${peticao.titulo}.doc`; a.click()
     showToast('Modelo baixado (.doc).', 'success')
@@ -195,10 +224,10 @@ function Detalhe({ peticao, onBack, onEdit, onDelete }) {
       </div>
 
       <Card className="p-6">
-        <div className="bg-white text-black rounded-lg p-8" style={{ fontFamily:"'Times New Roman',serif", fontSize:'12pt', lineHeight:'1.9' }}>
-          <pre style={{ whiteSpace:'pre-wrap', wordBreak:'break-word', fontFamily:'inherit', fontSize:'inherit', lineHeight:'inherit' }}>{peticao.corpo}</pre>
+        <div className="bg-white text-black rounded-lg p-8" style={{ fontFamily:"'Times New Roman',serif", fontSize:'12pt', lineHeight: peticao.lineHeight ?? 1.9, textAlign:'justify' }}>
+          <DocBody html={peticao.corpo} />
         </div>
-        <p className="text-[11px] text-[var(--text-muted)] mt-3">💡 Variáveis <code className="text-accent-400">{'{{cliente.nome}}'}</code> são preenchidas ao gerar com um cliente. Trechos [ASSIM] são preenchidos manualmente.</p>
+        <p className="text-[11px] text-[var(--text-muted)] mt-3">💡 Campos como <code className="text-accent-400">{'{nome do cliente}'}</code> são preenchidos ao gerar com um cliente. Trechos [ASSINATURA] viram linha de assinatura.</p>
       </Card>
 
       {gerar && <GerarModal peticao={peticao} onClose={() => setGerar(false)} />}
