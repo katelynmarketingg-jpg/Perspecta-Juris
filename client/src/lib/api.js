@@ -70,8 +70,11 @@ async function request(path, opts = {}) {
     throw Object.assign(new Error(parsed.message ?? 'request_failed'), { status: res.status, data: parsed })
   }
 
-  // Auto-refresh on 401
-  if (res.status === 401) {
+  // Auto-refresh on 401 — exceto nos próprios endpoints de auth.
+  // Um 401 do /login significa "credenciais inválidas", não "sessão expirada":
+  // tratar como sessão expirada aqui esconde o erro real do usuário.
+  const isAuthEndpoint = path.includes('/api/auth/login') || path.includes('/api/auth/refresh')
+  if (res.status === 401 && !isAuthEndpoint) {
     try {
       if (!refreshPromise) {
         refreshPromise = refreshAccessToken().finally(() => { refreshPromise = null })
