@@ -3,6 +3,7 @@ import { nanoid } from 'nanoid'
 import { eq, ne, and, sql } from 'drizzle-orm'
 import { db } from '../db/index.js'
 import { tenants, users, clients, processes, refreshTokens } from '../db/schema.js'
+import { getPlans, savePlans } from '../lib/plans.js'
 
 const REFRESH_EXPIRES_DAYS = parseInt(process.env.REFRESH_TOKEN_EXPIRES_DAYS ?? '7')
 
@@ -36,13 +37,32 @@ export default async function masterRoutes(app) {
   // Todas as rotas exigem papel 'master'.
   const master = { preHandler: [app.requireRoles(['master'])] }
 
+  // ── Planos ────────────────────────────────────────────────────
+  // GET /api/master/plans — definição dos planos (nome + limite de acessos)
+  app.get('/plans', master, async () => {
+    return await getPlans()
+  })
+  // PUT /api/master/plans — salva a definição dos planos
+  app.put('/plans', master, async (req, reply) => {
+    if (!Array.isArray(req.body?.plans)) {
+      return reply.code(400).send({ message: 'Envie { plans: [...] }.' })
+    }
+    return await savePlans(req.body.plans)
+  })
+
   // GET /api/master/companies — lista escritórios (exceto o próprio master)
   app.get('/companies', master, async () => {
     const rows = await db.select().from(tenants).where(ne(tenants.plan, 'master'))
     const { u, c, p } = await counts()
+    const plans = await getPlans()
+    const limitOf = key => {
+      const pl = plans.find(x => x.key === key)
+      return pl ? (pl.maxUsers ?? null) : null
+    }
     return rows.map(t => ({
       ...t,
       cnpj:           t.settings?.cnpj ?? '',
+      maxUsers:       limitOf(t.plan),   // null = ilimitado
       usersCount:     u[t.id] ?? 0,
       clientsCount:   c[t.id] ?? 0,
       processesCount: p[t.id] ?? 0,

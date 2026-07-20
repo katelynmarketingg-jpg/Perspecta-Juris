@@ -3,6 +3,7 @@ import { nanoid } from 'nanoid'
 import { eq, and } from 'drizzle-orm'
 import { db } from '../db/index.js'
 import { users, tenants, units } from '../db/schema.js'
+import { planLimitFor, userCount } from '../lib/plans.js'
 
 export default async function settingsRoutes(app) {
   const auth = { preHandler: [app.authenticate] }
@@ -36,13 +37,29 @@ export default async function settingsRoutes(app) {
   // POST /api/settings/users
   app.post('/users', auth, async (req, reply) => {
     if (!['admin'].includes(req.user.role)) return reply.code(403).send({ message: 'Permissão insuficiente.' })
-    const { name, email, password, role, oabNumber, oabState, phone } = req.body
+
+    // Limite de acessos do plano do escritório.
+    const [tenant] = await db.select().from(tenants).where(eq(tenants.id, req.user.tenantId)).limit(1)
+    const limit = await planLimitFor(tenant)
+    if (limit != null) {
+      const atual = await userCount(req.user.tenantId)
+      if (atual >= limit) {
+        return reply.code(403).send({
+          message: `Limite do plano atingido (${atual}/${limit} acessos). Faça upgrade do plano para adicionar mais usuários.`,
+        })
+      }
+    }
+
+    const { name, email, password, role, oabNumber, oabState, phone, login } = req.body
     const passwordHash = await bcrypt.hash(password, 12)
     const now = new Date().toISOString()
     const id = nanoid()
+    // login_name é obrigatório (usado no login). Deriva de "login" ou do e-mail.
+    const loginName = String(login ?? (email ?? '').split('@')[0] ?? '')
+      .toLowerCase().trim().replace(/\s+/g, '') || ('user' + id.slice(0, 6))
     await db.insert(users).values({
       id, tenantId: req.user.tenantId,
-      name, email: email.toLowerCase().trim(), passwordHash,
+      name, loginName, email: email ? email.toLowerCase().trim() : null, passwordHash,
       role: role ?? 'advogado',
       oabNumber, oabState, phone,
       isActive: true, createdAt: now, updatedAt: now,

@@ -15,10 +15,14 @@ export default function MasterPage() {
   const [showNew, setShowNew] = useState(false)
   const [form, setForm] = useState(EMPTY_FORM)
   const [saving, setSaving] = useState(false)
+  const [tab, setTab] = useState('empresas')       // 'empresas' | 'planos'
+  const [plans, setPlans] = useState([])
+  const [savingPlans, setSavingPlans] = useState(false)
 
   useEffect(() => {
     document.documentElement.classList.add('dark')
     loadCompanies()
+    loadPlans()
   }, [])
 
   async function loadCompanies() {
@@ -31,6 +35,31 @@ export default function MasterPage() {
       setLoading(false)
     }
   }
+
+  async function loadPlans() {
+    try {
+      const data = await api.master.plans()
+      setPlans(Array.isArray(data) ? data : [])
+    } catch { setPlans([]) }
+  }
+
+  // ── edição de planos ──
+  const setPlanField = (i, field, value) =>
+    setPlans(ps => ps.map((p, idx) => idx === i ? { ...p, [field]: value } : p))
+  const addPlan = () => setPlans(ps => [...ps, { key: '', name: '', maxUsers: '' }])
+  const removePlan = (i) => setPlans(ps => ps.filter((_, idx) => idx !== i))
+  const salvarPlanos = async () => {
+    setSavingPlans(true)
+    try {
+      const saved = await api.master.savePlans(plans)
+      setPlans(Array.isArray(saved) ? saved : plans)
+      loadCompanies()
+      alert('Planos salvos com sucesso!')
+    } catch (e) {
+      alert('Não foi possível salvar os planos. ' + (e?.message ?? ''))
+    } finally { setSavingPlans(false) }
+  }
+  const planName = (key) => plans.find(p => p.key === key)?.name ?? key
 
   const setF = (k) => (e) => setForm(d => ({ ...d, [k]: e.target.value }))
 
@@ -113,17 +142,74 @@ export default function MasterPage() {
 
       {/* Content */}
       <div className="flex-1 px-6 py-8 max-w-5xl mx-auto w-full">
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center justify-between mb-4">
           <div>
-            <h1 className="text-xl font-bold text-white">Empresas cadastradas</h1>
-            <p className="text-sm text-[var(--text-muted)] mt-0.5">Gerencie os acessos de cada escritório</p>
+            <h1 className="text-xl font-bold text-white">Painel Master</h1>
+            <p className="text-sm text-[var(--text-muted)] mt-0.5">Gerencie escritórios e planos</p>
           </div>
-          <button onClick={() => setShowNew(true)} className="btn-primary flex items-center gap-2">
-            <IconPlus size={15} />
-            Nova Empresa
-          </button>
+          {tab === 'empresas' && (
+            <button onClick={() => { setForm({ ...EMPTY_FORM, plan: plans[0]?.key ?? 'starter' }); setShowNew(true) }} className="btn-primary flex items-center gap-2">
+              <IconPlus size={15} />
+              Nova Empresa
+            </button>
+          )}
         </div>
 
+        {/* Abas */}
+        <div className="flex items-center gap-1 mb-6 border-b border-[var(--border)]">
+          {[['empresas', 'Empresas'], ['planos', 'Planos']].map(([key, label]) => (
+            <button key={key} onClick={() => setTab(key)}
+              className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${tab === key ? 'border-brand-500 text-white' : 'border-transparent text-[var(--text-muted)] hover:text-[var(--text-secondary)]'}`}>
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {tab === 'planos' && (
+          <div className="max-w-2xl">
+            <div className="card p-5">
+              <div className="flex items-center justify-between mb-1">
+                <p className="text-sm font-semibold text-white">Planos e limites de acesso</p>
+                <button onClick={addPlan} className="text-xs text-brand-400 hover:text-brand-300 flex items-center gap-1">
+                  <IconPlus size={13} /> Adicionar plano
+                </button>
+              </div>
+              <p className="text-[11px] text-[var(--text-muted)] mb-4">Defina o nome de cada plano e quantos acessos (usuários) ele permite. Deixe o limite em branco para <b>ilimitado</b>.</p>
+
+              <div className="space-y-2">
+                <div className="grid grid-cols-[1fr_130px_32px] gap-2 px-1 text-[10px] uppercase tracking-wide text-[var(--text-muted)]">
+                  <span>Nome do plano</span><span>Limite de acessos</span><span></span>
+                </div>
+                {plans.length === 0 && (
+                  <p className="text-sm text-[var(--text-muted)] py-4 text-center">Nenhum plano. Clique em "Adicionar plano".</p>
+                )}
+                {plans.map((p, i) => (
+                  <div key={i} className="grid grid-cols-[1fr_130px_32px] gap-2 items-center">
+                    <input
+                      value={p.name ?? ''} onChange={e => setPlanField(i, 'name', e.target.value)}
+                      placeholder="Ex: Escritório"
+                      className="w-full px-3 py-2 rounded-lg bg-[var(--bg-input)] border border-[var(--border)] text-sm text-white focus:border-brand-500 focus:outline-none" />
+                    <input
+                      type="number" min="1"
+                      value={p.maxUsers ?? ''} onChange={e => setPlanField(i, 'maxUsers', e.target.value)}
+                      placeholder="ilimitado"
+                      className="w-full px-3 py-2 rounded-lg bg-[var(--bg-input)] border border-[var(--border)] text-sm text-white focus:border-brand-500 focus:outline-none" />
+                    <button onClick={() => removePlan(i)} title="Remover plano"
+                      className="w-8 h-8 flex items-center justify-center rounded-lg text-[var(--text-muted)] hover:text-red-400 hover:bg-red-950/40">✕</button>
+                  </div>
+                ))}
+              </div>
+
+              <div className="flex justify-end mt-5 pt-4 border-t border-[var(--border)]">
+                <button onClick={salvarPlanos} disabled={savingPlans} className="btn-primary text-sm disabled:opacity-60">
+                  {savingPlans ? 'Salvando…' : 'Salvar planos'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {tab === 'empresas' && (<>
         {/* Totais do sistema */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-8">
           {[
@@ -171,8 +257,10 @@ export default function MasterPage() {
                 {/* Stats */}
                 <div className="flex gap-4">
                   <div>
-                    <p className="text-lg font-bold text-white leading-none">{c.usersCount ?? 0}</p>
-                    <p className="text-[10px] text-[var(--text-muted)] mt-0.5">Usuários</p>
+                    <p className={`text-lg font-bold leading-none ${c.maxUsers != null && (c.usersCount ?? 0) >= c.maxUsers ? 'text-red-400' : 'text-white'}`}>
+                      {c.usersCount ?? 0}{c.maxUsers != null && <span className="text-[var(--text-muted)] text-sm font-normal"> / {c.maxUsers}</span>}
+                    </p>
+                    <p className="text-[10px] text-[var(--text-muted)] mt-0.5">Acessos</p>
                   </div>
                   <div>
                     <p className="text-lg font-bold text-white leading-none">{c.clientsCount ?? 0}</p>
@@ -207,6 +295,7 @@ export default function MasterPage() {
             ))}
           </div>
         )}
+        </>)}
       </div>
 
       {/* Modal: nova empresa */}
@@ -226,9 +315,12 @@ export default function MasterPage() {
                 <div>
                   <label className="text-xs text-[var(--text-secondary)] mb-1 block">Plano</label>
                   <select value={form.plan} onChange={setF('plan')} className="w-full px-3 py-2 rounded-lg bg-[var(--bg-input)] border border-[var(--border)] text-sm text-white focus:border-brand-500 focus:outline-none">
-                    <option value="starter">Starter</option>
-                    <option value="professional">Profissional</option>
-                    <option value="enterprise">Enterprise</option>
+                    {plans.length === 0 && <option value="">—</option>}
+                    {plans.map(p => (
+                      <option key={p.key} value={p.key}>
+                        {p.name}{p.maxUsers != null ? ` (${p.maxUsers} acessos)` : ' (ilimitado)'}
+                      </option>
+                    ))}
                   </select>
                 </div>
                 <div>
