@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../../stores/authStore'
 import api from '../../lib/api'
+import { applyBranding, applyBrandColor } from '../../lib/brandingClient'
 import { IconScale, IconBuilding, IconUsers, IconSettings, IconLogOut, IconPlus } from '../../components/ui'
 
 const EMPTY_FORM = { name: '', plan: 'professional', cnpj: '', adminName: '', adminLogin: '', adminPassword: '' }
@@ -23,6 +24,7 @@ export default function MasterPage() {
     document.documentElement.classList.add('dark')
     loadCompanies()
     loadPlans()
+    loadBranding()
   }, [])
 
   async function loadCompanies() {
@@ -60,6 +62,31 @@ export default function MasterPage() {
     } finally { setSavingPlans(false) }
   }
   const planName = (key) => plans.find(p => p.key === key)?.name ?? key
+
+  // ── marca do sistema (logo, favicon, cor) ──
+  const [branding, setBranding] = useState({ logoDataUrl: '', faviconDataUrl: '', brandColor: '#c2410c' })
+  const [savingBrand, setSavingBrand] = useState(false)
+  async function loadBranding() {
+    try { const b = await api.master.branding(); if (b && typeof b === 'object') setBranding(d => ({ ...d, ...b })) } catch { /* ignora */ }
+  }
+  const pickImage = (field) => (e) => {
+    const file = e.target.files?.[0]; if (!file) return
+    if (file.size > 1_500_000) { alert('Imagem muito grande (máx. 1,5 MB).'); e.target.value = ''; return }
+    const reader = new FileReader()
+    reader.onload = () => setBranding(d => ({ ...d, [field]: reader.result }))
+    reader.readAsDataURL(file)
+    e.target.value = ''
+  }
+  const salvarMarca = async () => {
+    setSavingBrand(true)
+    try {
+      const saved = await api.master.saveBranding(branding)
+      applyBranding(saved && typeof saved === 'object' ? saved : branding)
+      alert('Marca salva! O sistema já está com a nova identidade.')
+    } catch (e) {
+      alert('Não foi possível salvar a marca. ' + (e?.message ?? ''))
+    } finally { setSavingBrand(false) }
+  }
 
   const setF = (k) => (e) => setForm(d => ({ ...d, [k]: e.target.value }))
 
@@ -157,7 +184,7 @@ export default function MasterPage() {
 
         {/* Abas */}
         <div className="flex items-center gap-1 mb-6 border-b border-[var(--border)]">
-          {[['empresas', 'Empresas'], ['planos', 'Planos']].map(([key, label]) => (
+          {[['empresas', 'Empresas'], ['planos', 'Planos'], ['marca', 'Marca']].map(([key, label]) => (
             <button key={key} onClick={() => setTab(key)}
               className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${tab === key ? 'border-brand-500 text-white' : 'border-transparent text-[var(--text-muted)] hover:text-[var(--text-secondary)]'}`}>
               {label}
@@ -203,6 +230,87 @@ export default function MasterPage() {
               <div className="flex justify-end mt-5 pt-4 border-t border-[var(--border)]">
                 <button onClick={salvarPlanos} disabled={savingPlans} className="btn-primary text-sm disabled:opacity-60">
                   {savingPlans ? 'Salvando…' : 'Salvar planos'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {tab === 'marca' && (
+          <div className="max-w-2xl">
+            <div className="card p-5 space-y-4">
+              <div>
+                <p className="text-sm font-semibold text-white">Identidade visual do sistema</p>
+                <p className="text-[11px] text-[var(--text-muted)] mt-0.5">Vale para <b>todos</b> os escritórios. A pré-visualização é imediata.</p>
+              </div>
+
+              {/* Logo */}
+              <div className="flex items-center gap-4">
+                <div className="w-16 h-16 rounded-xl bg-[var(--bg-hover)] flex items-center justify-center overflow-hidden flex-shrink-0">
+                  {branding.logoDataUrl
+                    ? <img src={branding.logoDataUrl} alt="logo" className="w-full h-full object-contain" />
+                    : <IconScale size={22} className="text-[var(--text-muted)]" />}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-medium text-[var(--text-secondary)] mb-1">Logo do sistema</p>
+                  <div className="flex gap-2 flex-wrap">
+                    <label className="px-3 py-1.5 rounded-lg bg-[var(--bg-hover)] text-xs text-[var(--text-secondary)] hover:text-white cursor-pointer">
+                      Escolher imagem
+                      <input type="file" accept="image/*" onChange={pickImage('logoDataUrl')} className="hidden" />
+                    </label>
+                    {branding.logoDataUrl && (
+                      <button onClick={() => setBranding(d => ({ ...d, logoDataUrl: '' }))} className="px-3 py-1.5 rounded-lg text-xs text-[var(--text-muted)] hover:text-red-400">Remover</button>
+                    )}
+                  </div>
+                  <p className="text-[10px] text-[var(--text-muted)] mt-1">PNG/SVG com fundo transparente. Máx. 1,5 MB.</p>
+                </div>
+              </div>
+
+              {/* Favicon */}
+              <div className="flex items-center gap-4 pt-3 border-t border-[var(--border)]">
+                <div className="w-16 h-16 rounded-xl bg-[var(--bg-hover)] flex items-center justify-center overflow-hidden flex-shrink-0">
+                  {branding.faviconDataUrl
+                    ? <img src={branding.faviconDataUrl} alt="favicon" className="w-8 h-8 object-contain" />
+                    : <span className="text-[10px] text-[var(--text-muted)]">aba</span>}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-medium text-[var(--text-secondary)] mb-1">Ícone da aba do navegador (favicon)</p>
+                  <div className="flex gap-2 flex-wrap">
+                    <label className="px-3 py-1.5 rounded-lg bg-[var(--bg-hover)] text-xs text-[var(--text-secondary)] hover:text-white cursor-pointer">
+                      Escolher imagem
+                      <input type="file" accept="image/*" onChange={pickImage('faviconDataUrl')} className="hidden" />
+                    </label>
+                    {branding.faviconDataUrl && (
+                      <button onClick={() => setBranding(d => ({ ...d, faviconDataUrl: '' }))} className="px-3 py-1.5 rounded-lg text-xs text-[var(--text-muted)] hover:text-red-400">Remover</button>
+                    )}
+                  </div>
+                  <p className="text-[10px] text-[var(--text-muted)] mt-1">É aquele "loguinho" que aparece na abinha do navegador. Quadrado (64×64 ou maior).</p>
+                </div>
+              </div>
+
+              {/* Cor */}
+              <div className="pt-3 border-t border-[var(--border)]">
+                <p className="text-xs font-medium text-[var(--text-secondary)] mb-2">Cor principal do sistema</p>
+                <div className="flex items-center gap-3 flex-wrap">
+                  <input type="color" value={branding.brandColor || '#c2410c'}
+                    onChange={e => { const v = e.target.value; setBranding(d => ({ ...d, brandColor: v })); applyBrandColor(v) }}
+                    className="w-12 h-10 rounded-lg bg-transparent border border-[var(--border)] cursor-pointer" />
+                  <input value={branding.brandColor || ''} placeholder="#c2410c"
+                    onChange={e => { const v = e.target.value; setBranding(d => ({ ...d, brandColor: v })); if (/^#[0-9a-f]{6}$/i.test(v)) applyBrandColor(v) }}
+                    className="w-32 px-3 py-2 rounded-lg bg-[var(--bg-input)] border border-[var(--border)] text-sm text-white focus:border-brand-500 focus:outline-none" />
+                  <div className="flex gap-1.5">
+                    {['#c2410c', '#1d4ed8', '#047857', '#7c3aed', '#be123c', '#0f766e'].map(c => (
+                      <button key={c} title={c} onClick={() => { setBranding(d => ({ ...d, brandColor: c })); applyBrandColor(c) }}
+                        className="w-7 h-7 rounded-lg border border-white/10" style={{ background: c }} />
+                    ))}
+                  </div>
+                </div>
+                <p className="text-[10px] text-[var(--text-muted)] mt-2">Os tons claros e escuros são gerados automaticamente a partir dessa cor.</p>
+              </div>
+
+              <div className="flex justify-end pt-3 border-t border-[var(--border)]">
+                <button onClick={salvarMarca} disabled={savingBrand} className="btn-primary text-sm disabled:opacity-60">
+                  {savingBrand ? 'Salvando…' : 'Salvar marca'}
                 </button>
               </div>
             </div>

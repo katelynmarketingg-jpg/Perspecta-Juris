@@ -3,6 +3,7 @@ import { NavLink, useNavigate, useLocation, Outlet } from 'react-router-dom'
 import AiAssistant from './AiAssistant'
 import api from '../../lib/api'
 import { useAuthStore } from '../../stores/authStore'
+import BrandLogo from '../BrandLogo'
 import { useUiStore } from '../../stores/uiStore'
 
 import { sincronizarDiario } from '../../lib/diarioAuto'
@@ -194,7 +195,7 @@ export default function AppShell() {
         {/* Logo */}
         <div className={`flex items-center gap-3 px-3 h-14 flex-shrink-0 border-b border-[var(--border)] ${collapsed ? 'justify-center' : ''}`}>
           <div className="flex-shrink-0 w-8 h-8 rounded-lg bg-brand-500 flex items-center justify-center shadow-orange">
-            <IconScale size={15} className="text-white" />
+            <BrandLogo size={15} className="text-white" />
           </div>
           {!collapsed && (
             <div>
@@ -347,7 +348,7 @@ export default function AppShell() {
             <>
               {/* Logo + Fila + nav horizontal (barra em cima) */}
               <div className="hidden lg:flex items-center gap-2 flex-shrink-0">
-                <div className="w-7 h-7 rounded-lg bg-brand-500 flex items-center justify-center shadow-orange"><IconScale size={13} className="text-white" /></div>
+                <div className="w-7 h-7 rounded-lg bg-brand-500 flex items-center justify-center shadow-orange"><BrandLogo size={13} className="text-white" /></div>
                 <span className="text-[13px] font-bold text-[var(--text-primary)]">Perspecta<span className="text-brand-500 text-[9px] font-semibold tracking-widest uppercase ml-1">Juris</span></span>
               </div>
               {filaEl}

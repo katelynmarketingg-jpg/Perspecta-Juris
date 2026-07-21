@@ -10,25 +10,26 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        // Brand: laranja mais fechado (orange-700 como primário)
+        // Brand: dirigido por CSS variables (trocável no painel Master).
+        // Padrão = laranja original (definido em globals.css).
         brand: {
-          50:  '#fff4ed',
-          100: '#ffe6d5',
-          200: '#ffc9a8',
-          300: '#ffa070',
-          400: '#fd6c37',
-          500: '#c2410c',   // PRIMARY — laranja escuro
-          600: '#9a3412',   // hover
-          700: '#7c2d12',   // active
-          800: '#4a1a09',
-          900: '#2c0f05',
-          950: '#180800',
+          50:  'rgb(var(--c-brand-50) / <alpha-value>)',
+          100: 'rgb(var(--c-brand-100) / <alpha-value>)',
+          200: 'rgb(var(--c-brand-200) / <alpha-value>)',
+          300: 'rgb(var(--c-brand-300) / <alpha-value>)',
+          400: 'rgb(var(--c-brand-400) / <alpha-value>)',
+          500: 'rgb(var(--c-brand-500) / <alpha-value>)',   // PRIMARY
+          600: 'rgb(var(--c-brand-600) / <alpha-value>)',   // hover
+          700: 'rgb(var(--c-brand-700) / <alpha-value>)',   // active
+          800: 'rgb(var(--c-brand-800) / <alpha-value>)',
+          900: 'rgb(var(--c-brand-900) / <alpha-value>)',
+          950: 'rgb(var(--c-brand-950) / <alpha-value>)',
         },
         // Accent: laranja vivo para texto/ícones em fundo escuro
         accent: {
-          300: '#fdba74',
-          400: '#fb923c',
-          500: '#f97316',
+          300: 'rgb(var(--c-accent-300) / <alpha-value>)',
+          400: 'rgb(var(--c-accent-400) / <alpha-value>)',
+          500: 'rgb(var(--c-accent-500) / <alpha-value>)',
         },
         surface: {
           900: '#060606',

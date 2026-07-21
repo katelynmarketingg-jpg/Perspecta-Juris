@@ -124,6 +124,10 @@ app.get('/api/health', async () => ({
   ts: new Date().toISOString(),
 }))
 
+// ── Marca do sistema (PÚBLICA — tela de login e todo o app) ────
+const { getBranding } = await import('./lib/branding.js')
+app.get('/api/branding', async () => getBranding())
+
 // ── Static files (production) ─────────────────────────────────
 if (existsSync(DIST)) {
   await app.register(fastifyStatic, { root: DIST, wildcard: false })

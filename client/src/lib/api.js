@@ -201,7 +201,12 @@ const api = {
     enterCompany:   (id)   => api.post(`/api/master/companies/${id}/enter`),
     plans:          ()     => api.get('/api/master/plans'),
     savePlans:      (plans)=> api.put('/api/master/plans', { plans }),
+    branding:       ()     => api.get('/api/master/branding'),
+    saveBranding:   (d)    => api.put('/api/master/branding', d),
   },
+
+  // Marca do sistema (pública — sem login)
+  branding: () => api.get('/api/branding'),
 
   dashboard: {
     kpis:      () => api.get('/api/dashboard/kpis'),

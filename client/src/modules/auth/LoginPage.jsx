@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../../stores/authStore'
 import { Button, Input, IconScale } from '../../components/ui'
+import BrandLogo from '../../components/BrandLogo'
 
 export default function LoginPage() {
   const [empresa, setEmpresa] = useState('')
@@ -33,7 +34,7 @@ export default function LoginPage() {
         {/* Logo */}
         <div className="text-center mb-8">
           <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-brand-500 shadow-orange mb-5">
-            <IconScale size={26} className="text-white" />
+            <BrandLogo size={26} className="text-white" />
           </div>
           <h1 className="text-2xl font-bold text-white tracking-tight">Perspecta Juris</h1>
           <p className="text-sm text-[var(--text-muted)] mt-1">Sistema de Gestão Jurídica</p>

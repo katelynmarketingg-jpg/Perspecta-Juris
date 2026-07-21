@@ -27,6 +27,23 @@
   --brand-dark:    #9a3412;
   --brand-light:   #fb923c;
 
+  /* Paleta da marca em canais RGB (permite trocar a cor do sistema em tempo real).
+     Valores padrão = laranja original. O painel Master pode sobrescrever. */
+  --c-brand-50:  255 244 237;
+  --c-brand-100: 255 230 213;
+  --c-brand-200: 255 201 168;
+  --c-brand-300: 255 160 112;
+  --c-brand-400: 253 108 55;
+  --c-brand-500: 194 65 12;
+  --c-brand-600: 154 52 18;
+  --c-brand-700: 124 45 18;
+  --c-brand-800: 74 26 9;
+  --c-brand-900: 44 15 5;
+  --c-brand-950: 24 8 0;
+  --c-accent-300: 253 186 116;
+  --c-accent-400: 251 146 60;
+  --c-accent-500: 249 115 22;
+
   --danger:        #ef4444;
   --warning:       #f59e0b;
   --success:       #22c55e;

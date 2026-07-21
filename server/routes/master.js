@@ -5,6 +5,7 @@ import { db } from '../db/index.js'
 import { tenants, users, clients, processes, refreshTokens } from '../db/schema.js'
 import { getPlans, savePlans } from '../lib/plans.js'
 import { menuAccessFor } from '../lib/permissions.js'
+import { getBranding, setBranding } from '../lib/branding.js'
 
 const REFRESH_EXPIRES_DAYS = parseInt(process.env.REFRESH_TOKEN_EXPIRES_DAYS ?? '7')
 
@@ -50,6 +51,10 @@ export default async function masterRoutes(app) {
     }
     return await savePlans(req.body.plans)
   })
+
+  // ── Marca do sistema (logo, favicon, cor) ────────────────────
+  app.get('/branding', master, async () => await getBranding())
+  app.put('/branding', master, async (req) => await setBranding(req.body ?? {}))
 
   // GET /api/master/companies — lista escritórios (exceto o próprio master)
   app.get('/companies', master, async () => {
