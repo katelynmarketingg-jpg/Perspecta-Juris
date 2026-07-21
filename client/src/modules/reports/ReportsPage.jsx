@@ -1,38 +1,13 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, Legend, PieChart, Pie, Cell,
 } from 'recharts'
 import { IconBarChart2, IconPieChart, IconUsers2, IconTrendingUp, IconDollar, CustomSelect } from '../../components/ui'
 import { getRelatorioAtendimentos, esperaMin, tipoAtend } from '../../lib/atendimentos'
+import api from '../../lib/api'
 
 const fmt = n => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(n)
-
-const BY_AREA = [
-  { area: 'Cível',      receita: 42000, processos: 18, conversao: 74 },
-  { area: 'Trabalhista',receita: 31500, processos: 14, conversao: 68 },
-  { area: 'Tributário', receita: 28000, processos: 9,  conversao: 81 },
-  { area: 'Família',    receita: 19200, processos: 12, conversao: 60 },
-  { area: 'Empresarial',receita: 15800, processos: 5,  conversao: 90 },
-  { area: 'Imobiliário',receita: 9500,  processos: 4,  conversao: 55 },
-]
-
-const BY_LAWYER = [
-  { name: 'Ana Souza',     processos: 14, receita: 58000, taxa: 82 },
-  { name: 'Bruno Lima',    processos: 11, receita: 44500, taxa: 73 },
-  { name: 'Carla Mendes',  processos: 9,  receita: 32000, taxa: 67 },
-  { name: 'Diego Santos',  processos: 7,  receita: 22500, taxa: 71 },
-  { name: 'Erica Duarte',  processos: 6,  receita: 18000, taxa: 78 },
-]
-
-const MONTHLY = [
-  { month: 'Dez', honorarios: 14800, custas: 2100, liquido: 12700 },
-  { month: 'Jan', honorarios: 18500, custas: 3200, liquido: 15300 },
-  { month: 'Fev', honorarios: 22000, custas: 2800, liquido: 19200 },
-  { month: 'Mar', honorarios: 19200, custas: 3500, liquido: 15700 },
-  { month: 'Abr', honorarios: 28500, custas: 4100, liquido: 24400 },
-  { month: 'Mai', honorarios: 25000, custas: 3800, liquido: 21200 },
-]
 
 const PIE_COLORS = ['#c2410c', '#fb923c', '#fbbf24', '#34d399', '#60a5fa', '#a78bfa']
 
@@ -61,10 +36,26 @@ export default function ReportsPage() {
   const [period, setPeriod] = useState('6m')
   const [tab, setTab]       = useState('commercial')
 
-  const totalReceita  = BY_AREA.reduce((s, a) => s + a.receita, 0)
-  const totalProcessos = BY_AREA.reduce((s, a) => s + a.processos, 0)
-  const avgConversao  = Math.round(BY_AREA.reduce((s, a) => s + a.conversao, 0) / BY_AREA.length)
-  const melhorArea    = [...BY_AREA].sort((a, b) => b.receita - a.receita)[0]
+  // Números REAIS do escritório (antes eram valores fixos no código).
+  const MESES_POR_PERIODO = { '30d': 1, '90d': 3, '6m': 6, '12m': 12 }
+  const [rep, setRep] = useState({ byArea: [], byLawyer: [], monthly: [], totals: {} })
+  const [carregando, setCarregando] = useState(true)
+  useEffect(() => {
+    setCarregando(true)
+    api.reports.summary({ months: MESES_POR_PERIODO[period] ?? 6 })
+      .then(r => setRep({ byArea: r?.byArea ?? [], byLawyer: r?.byLawyer ?? [], monthly: r?.monthly ?? [], totals: r?.totals ?? {} }))
+      .catch(() => setRep({ byArea: [], byLawyer: [], monthly: [], totals: {} }))
+      .finally(() => setCarregando(false))
+  }, [period])
+
+  const BY_AREA   = rep.byArea
+  const BY_LAWYER = rep.byLawyer
+  const MONTHLY   = rep.monthly
+  const semDados  = !carregando && BY_AREA.length === 0 && MONTHLY.every(m => !m.honorarios && !m.custas)
+
+  const totalReceita   = rep.totals.receitaTotal ?? BY_AREA.reduce((s, a) => s + a.receita, 0)
+  const totalProcessos = rep.totals.processos ?? BY_AREA.reduce((s, a) => s + a.processos, 0)
+  const melhorArea     = [...BY_AREA].sort((a, b) => b.receita - a.receita)[0]
 
   return (
     <div className="p-6 space-y-5 page-enter">
@@ -79,13 +70,20 @@ export default function ReportsPage() {
         />
       </div>
 
+      {semDados && (
+        <div className="card p-4 border border-amber-500/30 bg-amber-500/5">
+          <p className="text-sm text-amber-300">Ainda não há dados neste período.</p>
+          <p className="text-[11px] text-[var(--text-muted)] mt-1">Os relatórios são calculados a partir dos seus processos e lançamentos financeiros pagos. Conforme você usar o sistema, os números aparecem aqui.</p>
+        </div>
+      )}
+
       {/* KPIs */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {[
           { label: 'Receita Total',     value: fmt(totalReceita),   icon: <IconDollar size={16} />,       color: 'text-emerald-400', bg: 'bg-emerald-900/30' },
           { label: 'Processos Ativos',  value: totalProcessos,      icon: <IconBarChart2 size={16} />,    color: 'text-blue-400',    bg: 'bg-blue-900/30' },
-          { label: 'Taxa de Conversão', value: `${avgConversao}%`,  icon: <IconTrendingUp size={16} />,   color: 'text-amber-400',   bg: 'bg-amber-900/30' },
-          { label: 'Melhor Área',       value: melhorArea.area,     icon: <IconPieChart size={16} />,     color: 'text-brand-500',   bg: 'bg-brand-500/20' },
+          { label: 'A Receber',         value: fmt(rep.totals.aReceber ?? 0), icon: <IconTrendingUp size={16} />, color: 'text-amber-400', bg: 'bg-amber-900/30' },
+          { label: 'Melhor Área',       value: melhorArea?.area ?? '—',     icon: <IconPieChart size={16} />,     color: 'text-brand-500',   bg: 'bg-brand-500/20' },
         ].map(k => (
           <div key={k.label} className="card p-4">
             <div className="flex items-center justify-between mb-2">
@@ -173,7 +171,6 @@ export default function ReportsPage() {
                   <th className="px-4 py-3 text-left text-[11px] text-[var(--text-muted)] uppercase tracking-wider">Área</th>
                   <th className="px-4 py-3 text-right text-[11px] text-[var(--text-muted)] uppercase tracking-wider">Processos</th>
                   <th className="px-4 py-3 text-right text-[11px] text-[var(--text-muted)] uppercase tracking-wider">Receita</th>
-                  <th className="px-4 py-3 text-right text-[11px] text-[var(--text-muted)] uppercase tracking-wider">Conversão</th>
                 </tr>
               </thead>
               <tbody>
@@ -182,14 +179,6 @@ export default function ReportsPage() {
                     <td className="px-4 py-3 text-white font-medium">{a.area}</td>
                     <td className="px-4 py-3 text-right text-[var(--text-secondary)]">{a.processos}</td>
                     <td className="px-4 py-3 text-right font-semibold text-emerald-400">{fmt(a.receita)}</td>
-                    <td className="px-4 py-3 text-right">
-                      <div className="flex items-center justify-end gap-2">
-                        <div className="w-16 h-1.5 rounded-full bg-[var(--bg-app)] overflow-hidden">
-                          <div className="h-full rounded-full bg-amber-500" style={{ width: `${a.conversao}%` }} />
-                        </div>
-                        <span className="text-amber-400 text-xs w-8 text-right">{a.conversao}%</span>
-                      </div>
-                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -221,7 +210,6 @@ export default function ReportsPage() {
                   <th className="px-4 py-3 text-left text-[11px] text-[var(--text-muted)] uppercase tracking-wider">Advogado</th>
                   <th className="px-4 py-3 text-right text-[11px] text-[var(--text-muted)] uppercase tracking-wider">Processos</th>
                   <th className="px-4 py-3 text-right text-[11px] text-[var(--text-muted)] uppercase tracking-wider">Receita</th>
-                  <th className="px-4 py-3 text-right text-[11px] text-[var(--text-muted)] uppercase tracking-wider">Sucesso</th>
                 </tr>
               </thead>
               <tbody>
@@ -237,11 +225,6 @@ export default function ReportsPage() {
                     </td>
                     <td className="px-4 py-3 text-right text-[var(--text-secondary)]">{l.processos}</td>
                     <td className="px-4 py-3 text-right font-semibold text-emerald-400">{fmt(l.receita)}</td>
-                    <td className="px-4 py-3 text-right">
-                      <span className={`text-xs font-semibold ${l.taxa >= 75 ? 'text-emerald-400' : l.taxa >= 65 ? 'text-amber-400' : 'text-red-400'}`}>
-                        {l.taxa}%
-                      </span>
-                    </td>
                   </tr>
                 ))}
               </tbody>

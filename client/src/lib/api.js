@@ -178,6 +178,10 @@ const api = {
     cashflow: ()     => api.get('/api/financial/cashflow'),
   },
 
+  reports: {
+    summary: (p) => api.get('/api/reports/summary?' + new URLSearchParams(p ?? {})),
+  },
+
   audit: {
     list: (p) => api.get('/api/audit?' + new URLSearchParams(p ?? {})),
     log:  (d) => api.post('/api/audit', d),
