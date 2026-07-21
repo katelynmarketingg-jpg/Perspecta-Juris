@@ -5,24 +5,6 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 
-const MOCK_ENTRIES = [
-  { id: '1', type: 'income', description: 'Honorários — Silva x ABC', amount: 5000, dueDate: new Date(Date.now() + 86400000 * 5).toISOString(), status: 'pending', client: 'José Silva', processTitle: 'Apelação Cível' },
-  { id: '2', type: 'income', description: 'Honorários — Trabalhista Santos', amount: 3200, dueDate: new Date(Date.now() - 86400000 * 2).toISOString(), status: 'overdue', client: 'Maria Santos', processTitle: 'Reclamação Trabalhista' },
-  { id: '3', type: 'income', description: 'Cota 50% — Divórcio Rodrigues', amount: 1800, dueDate: new Date(Date.now() - 86400000 * 10).toISOString(), status: 'paid', client: 'Carlos Rodrigues', processTitle: 'Divórcio Consensual' },
-  { id: '4', type: 'expense', description: 'Custas processuais — TJSP', amount: 450, dueDate: new Date(Date.now() + 86400000 * 3).toISOString(), status: 'pending', client: null, processTitle: 'Execução Fiscal' },
-  { id: '5', type: 'expense', description: 'Aluguel escritório', amount: 3500, dueDate: new Date(Date.now() + 86400000 * 15).toISOString(), status: 'pending', client: null, processTitle: null },
-  { id: '6', type: 'expense', description: 'Software jurídico (assinatura)', amount: 299, dueDate: new Date(Date.now() - 86400000 * 1).toISOString(), status: 'paid', client: null, processTitle: null },
-]
-
-const MOCK_CASHFLOW = [
-  { month: 'Dez', receitas: 8200, despesas: 4100 },
-  { month: 'Jan', receitas: 6500, despesas: 3800 },
-  { month: 'Fev', receitas: 9800, despesas: 4200 },
-  { month: 'Mar', receitas: 7200, despesas: 3900 },
-  { month: 'Abr', receitas: 11500, despesas: 4800 },
-  { month: 'Mai', receitas: 10000, despesas: 5200 },
-]
-
 const fmt = n => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(n)
 
 const statusConfig = {
@@ -48,15 +30,17 @@ const CustomTooltip = ({ active, payload, label }) => {
 export default function FinancialPage() {
   const [tab, setTab] = useState('receivable')
   const [entries, setEntries] = useState([])
+  const [erroCarga, setErroCarga] = useState(false)
   const [cashflow, setCashflow] = useState([])
   const [loading, setLoading] = useState(true)
   const [clients, setClients] = useState([])
   const [showNew, setShowNew] = useState(false)
 
   const load = () => {
+    setErroCarga(false)
     Promise.all([
-      api.financial.entries().catch(() => MOCK_ENTRIES),
-      api.financial.cashflow().catch(() => MOCK_CASHFLOW),
+      api.financial.entries().catch(() => { setErroCarga(true); return [] }),
+      api.financial.cashflow().catch(() => []),
       api.clients.list?.().catch(() => []) ?? Promise.resolve([]),
     ]).then(([e, c, cl]) => {
       const clients = Array.isArray(cl) ? cl : (cl?.data ?? [])
@@ -122,6 +106,12 @@ export default function FinancialPage() {
 
   return (
     <div className="p-6 space-y-5 page-enter">
+      {erroCarga && (
+        <div className="card p-4 border border-red-500/40 bg-red-500/5">
+          <p className="text-sm text-red-300 font-medium">Não foi possível carregar os lançamentos do servidor.</p>
+          <p className="text-[11px] text-[var(--text-muted)] mt-1">A lista abaixo pode estar incompleta. Recarregue a página (Cmd+Shift+R). <b>Nada foi apagado</b> — é só uma falha de conexão.</p>
+        </div>
+      )}
       {/* Header */}
       <div className="flex items-center justify-between">
         <h1 className="text-lg font-semibold text-white">Financeiro</h1>

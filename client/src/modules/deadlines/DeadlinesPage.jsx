@@ -4,14 +4,6 @@ import { IconCalendar, IconPlus, IconCheck, IconClock, IconChevronLeft, IconChev
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, addMonths, subMonths, startOfWeek, endOfWeek } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 
-const MOCK = [
-  { id: '1', title: 'Contestação — Silva x Construtora ABC', dueDate: new Date(Date.now() - 86400000 * 2).toISOString(), status: 'pending', processTitle: 'Ação de Indenização 0001234' },
-  { id: '2', title: 'Prazo recursal — Apelação', dueDate: new Date(Date.now() + 86400000 * 3).toISOString(), status: 'pending', processTitle: 'Apelação Cível 0004521' },
-  { id: '3', title: 'Petição inicial', dueDate: new Date(Date.now() + 86400000 * 10).toISOString(), status: 'pending', processTitle: 'Trabalhista 0007890' },
-  { id: '4', title: 'Audiência de conciliação', dueDate: new Date(Date.now() + 86400000 * 1).toISOString(), status: 'pending', processTitle: 'Divórcio Consensual 0002345' },
-  { id: '5', title: 'Recurso de Embargos', dueDate: new Date(Date.now() - 86400000 * 5).toISOString(), status: 'done', processTitle: 'Execução Fiscal 0006789' },
-]
-
 function deadlineStatus(d) {
   if (d.status === 'done') return 'done'
   const d0 = new Date(d.dueDate); d0.setHours(0, 0, 0, 0)
@@ -36,9 +28,12 @@ export default function DeadlinesPage() {
   const [filter, setFilter] = useState('all')
   const [showNew, setShowNew] = useState(false)
 
+  const [erroCarga, setErroCarga] = useState(false)
+  // NUNCA cair em prazos ficticios: se falhar, avisa — esconder um prazo real
+  // ou inventar um falso pode custar um processo.
   const load = () => api.deadlines.list()
-    .then(d => setDeadlines(Array.isArray(d) ? d : (d?.data ?? [])))
-    .catch(() => setDeadlines(MOCK))
+    .then(d => { setDeadlines(Array.isArray(d) ? d : (d?.data ?? [])); setErroCarga(false) })
+    .catch(() => { setDeadlines([]); setErroCarga(true) })
     .finally(() => setLoading(false))
   useEffect(() => { load() }, [])
 
@@ -68,6 +63,12 @@ export default function DeadlinesPage() {
 
   return (
     <div className="p-6 space-y-5 page-enter">
+      {erroCarga && (
+        <div className="card p-4 border border-red-500/40 bg-red-500/5">
+          <p className="text-sm text-red-300 font-medium">Não foi possível carregar os prazos do servidor.</p>
+          <p className="text-[11px] text-[var(--text-muted)] mt-1">A lista abaixo pode estar incompleta. Recarregue a página (Cmd+Shift+R). <b>Nada foi apagado</b> — é só uma falha de conexão.</p>
+        </div>
+      )}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-lg font-semibold text-white">Prazos</h1>
