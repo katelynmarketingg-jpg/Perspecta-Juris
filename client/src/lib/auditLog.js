@@ -3,6 +3,8 @@
 //  Ex.: "Fulano deu baixa no pagamento X", "Ciclana concluiu a tarefa Y".
 //  Por empresa (tenant), com filtros por tipo de atividade.
 // ─────────────────────────────────────────────────────────────────────────
+import api from './api'
+
 const KEY = 'pj_audit_log'
 const lsGet = (k, fb) => { try { return JSON.parse(localStorage.getItem(k) ?? 'null') ?? fb } catch { return fb } }
 const lsSet = (k, v) => localStorage.setItem(k, JSON.stringify(v))
@@ -37,6 +39,8 @@ export function registrar(tipo, descricao, meta = {}) {
     const all = lsGet(KEY, [])
     all.unshift(entry)
     lsSet(KEY, all.slice(0, 2000))
+    // Grava no servidor: autor, IP e data/hora vêm de lá (valor probatório).
+    api.audit.log({ tipo, descricao, meta, resourceId: meta?.id ?? null }).catch(() => {})
     return entry
   } catch { return null }
 }
@@ -59,4 +63,30 @@ export function autoresDistintos() {
   const { tenant } = authState()
   const tid = tenant?.id ?? 'tenant_demo'
   return [...new Set(lsGet(KEY, []).filter(r => (r.tenantId ?? 'tenant_demo') === tid).map(r => r.autor).filter(Boolean))]
+}
+
+// ── Leitura a partir do servidor (fonte oficial) ───────────────────
+// Cai no cache local apenas se estiver sem conexão.
+export async function fetchRegistros() {
+  try {
+    const rows = await api.audit.list({ limit: 1000 })
+    if (Array.isArray(rows)) return rows
+  } catch { /* offline */ }
+  return getRegistros()
+}
+
+// Filtro puro, aplicado sobre a lista já carregada.
+export function filtrarRegistros(rows, { tipo, autor, busca } = {}) {
+  let out = Array.isArray(rows) ? rows : []
+  if (tipo) out = out.filter(r => r.tipo === tipo)
+  if (autor) out = out.filter(r => r.autor === autor)
+  if (busca) {
+    const q = busca.toLowerCase()
+    out = out.filter(r => r.descricao?.toLowerCase().includes(q) || r.autor?.toLowerCase().includes(q))
+  }
+  return out
+}
+
+export function autoresDe(rows) {
+  return [...new Set((rows ?? []).map(r => r.autor).filter(Boolean))]
 }

@@ -1,5 +1,5 @@
-import { useState, useMemo } from 'react'
-import { getRegistros, autoresDistintos, TIPOS_ATIVIDADE, tipoInfo } from '../../lib/auditLog'
+import { useState, useMemo, useEffect } from 'react'
+import { fetchRegistros, filtrarRegistros, autoresDe, TIPOS_ATIVIDADE, tipoInfo } from '../../lib/auditLog'
 import { Card } from '../../components/ui'
 
 const fmt = (iso) => new Date(iso).toLocaleString('pt-BR')
@@ -10,8 +10,13 @@ export default function RegistrosPage() {
   const [autor, setAutor] = useState('')
   const [busca, setBusca] = useState('')
 
-  const registros = useMemo(() => getRegistros({ tipo, autor, busca }), [tipo, autor, busca])
-  const autores = useMemo(() => autoresDistintos(), [])
+  // Os registros vêm do SERVIDOR (fonte oficial, com autor/IP/hora do servidor).
+  const [todos, setTodos] = useState([])
+  const [carregando, setCarregando] = useState(true)
+  useEffect(() => { fetchRegistros().then(r => setTodos(r ?? [])).finally(() => setCarregando(false)) }, [])
+
+  const registros = useMemo(() => filtrarRegistros(todos, { tipo, autor, busca }), [todos, tipo, autor, busca])
+  const autores = useMemo(() => autoresDe(todos), [todos])
 
   // agrupa por dia
   const grupos = useMemo(() => {
