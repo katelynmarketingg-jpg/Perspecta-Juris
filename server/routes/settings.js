@@ -37,6 +37,23 @@ export default async function settingsRoutes(app) {
     return settings.office
   })
 
+  // ── Configurações do escritório (áreas, serviços, honorários) ────────
+  // Guardadas no banco por escritório: sincronizam entre computadores.
+  app.get('/config', auth, async (req) => {
+    const [t] = await db.select().from(tenants).where(eq(tenants.id, req.user.tenantId)).limit(1)
+    return t?.settings?.config ?? {}
+  })
+  app.put('/config', auth, async (req, reply) => {
+    if (req.user.role !== 'admin') return reply.code(403).send({ message: 'Apenas administradores podem alterar as configurações.' })
+    const [t] = await db.select().from(tenants).where(eq(tenants.id, req.user.tenantId)).limit(1)
+    const atual = (t?.settings ?? {}).config ?? {}
+    const novo = (req.body && typeof req.body === 'object') ? req.body : {}
+    const config = { ...atual, ...novo }
+    const settings = { ...(t?.settings ?? {}), config }
+    await db.update(tenants).set({ settings, updatedAt: new Date().toISOString() }).where(eq(tenants.id, req.user.tenantId))
+    return config
+  })
+
   // ── Aceite dos Termos de Uso (valor de prova) ────────────────────────
   // Guarda data/hora e IP observados pelo SERVIDOR — não pelo navegador.
   app.get('/terms', auth, async (req) => {

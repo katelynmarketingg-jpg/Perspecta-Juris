@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react'
 import { useUiStore } from '../../stores/uiStore'
 import api from '../../lib/api'
-import { getOffice, setOffice } from '../../lib/tenant'
-import { pushOffice } from '../../lib/tenantData'
+import { getOffice, setOffice, tkey } from '../../lib/tenant'
+import { pushOffice, saveConfigKey } from '../../lib/tenantData'
 import { getPeticoes } from '../../lib/peticoesModels'
 import {
   Button, Card, Input,
@@ -59,7 +59,7 @@ function ColorPicker({ value, onChange }) {
 // ── AreasTab ──────────────────────────────────────────────────────
 function AreasTab() {
   const { showToast } = useUiStore()
-  const [areas, setAreas] = useState(() => lsGet('pj_local_areas', []))
+  const [areas, setAreas] = useState(() => lsGet(tkey('pj_local_areas'), []))
   const [editing, setEditing] = useState(null) // null | { id?, name, color }
   const [form, setForm] = useState({ name: '', color: PRESET_COLORS[0] })
 
@@ -74,7 +74,7 @@ function AreasTab() {
       showToast('Área criada.', 'success')
     }
     setAreas(next)
-    lsSet('pj_local_areas', next)
+    saveConfigKey('pj_local_areas', next)
     setEditing(null)
     setForm({ name: '', color: PRESET_COLORS[0] })
   }
@@ -82,7 +82,7 @@ function AreasTab() {
   function remove(id) {
     const next = areas.filter(a => a.id !== id)
     setAreas(next)
-    lsSet('pj_local_areas', next)
+    saveConfigKey('pj_local_areas', next)
     showToast('Área removida.', 'success')
   }
 
@@ -225,22 +225,17 @@ const DEFAULT_SERVICES = [
   mkSvc('Consulta Jurídica', 'hourly'),
 ]
 // Espelha os serviços em "tipos de honorário" — assim o processo continua buscando o valor.
-const espelharHonorarios = (services) => lsSet('pj_local_fee_types', services.map(s => ({
+const espelharHonorarios = (services) => saveConfigKey('pj_local_fee_types', services.map(s => ({
   id: s.id, name: s.name, contractType: s.contractType ?? 'fixed',
   amount: s.defaultFee === '' ? null : s.defaultFee, percentage: s.percentage === '' ? null : s.percentage, desc: '',
 })))
 
 function ServicesTab() {
   const { showToast } = useUiStore()
-  const [areas]    = useState(() => lsGet('pj_local_areas', []))
+  const [areas]    = useState(() => lsGet(tkey('pj_local_areas'), []))
   const [services, setServices] = useState(() => {
     // Reset único: começa do zero (remove qualquer lista pré-preenchida anterior)
-    if (!lsGet('pj_services_reset_v1', false)) {
-      lsSet('pj_local_services', [])
-      lsSet('pj_local_fee_types', [])
-      lsSet('pj_services_reset_v1', true)
-    }
-    return lsGet('pj_local_services', [])
+    return lsGet(tkey('pj_local_services'), [])
   })
   const [editing, setEditing]   = useState(null)
   const [form, setForm]         = useState(EMPTY_SVC)
@@ -248,7 +243,7 @@ function ServicesTab() {
   const [filling, setFilling]   = useState(null)        // service object
   const modelos = getPeticoes()
 
-  const persist = (next) => { setServices(next); lsSet('pj_local_services', next); espelharHonorarios(next) }
+  const persist = (next) => { setServices(next); saveConfigKey('pj_local_services', next); espelharHonorarios(next) }
   const updateSvc = (id, patch) => persist(services.map(s => s.id === id ? { ...s, ...patch } : s))
 
   function save() {
@@ -414,7 +409,7 @@ const EMPTY_FEE = { name: '', contractType: 'fixed', amount: '', percentage: '',
 
 function FeeTypesTab() {
   const { showToast } = useUiStore()
-  const [types, setTypes] = useState(() => lsGet('pj_local_fee_types', DEFAULT_FEE_TYPES))
+  const [types, setTypes] = useState(() => lsGet(tkey('pj_local_fee_types'), DEFAULT_FEE_TYPES))
   const [editing, setEditing] = useState(null)
   const [form, setForm]       = useState(EMPTY_FEE)
   const setF = (k) => (e) => setForm(f => ({ ...f, [k]: e.target.value }))
@@ -425,9 +420,9 @@ function FeeTypesTab() {
     let next
     if (editing?.id) { next = types.map(t => t.id === editing.id ? { ...t, ...clean } : t); showToast('Tipo atualizado.', 'success') }
     else { next = [...types, { id: uid(), ...clean }]; showToast('Tipo criado.', 'success') }
-    setTypes(next); lsSet('pj_local_fee_types', next); setEditing(null); setForm(EMPTY_FEE)
+    setTypes(next); saveConfigKey('pj_local_fee_types', next); setEditing(null); setForm(EMPTY_FEE)
   }
-  function remove(id) { const next = types.filter(t => t.id !== id); setTypes(next); lsSet('pj_local_fee_types', next); showToast('Tipo removido.', 'success') }
+  function remove(id) { const next = types.filter(t => t.id !== id); setTypes(next); saveConfigKey('pj_local_fee_types', next); showToast('Tipo removido.', 'success') }
   function startEdit(t) { setEditing(t); setForm({ name: t.name, contractType: t.contractType ?? 'fixed', amount: t.amount ?? '', percentage: t.percentage ?? '', desc: t.desc || '' }) }
 
   const contractLabel = (v) => FEE_CONTRACTS.find(c => c.value === v)?.label ?? '—'
