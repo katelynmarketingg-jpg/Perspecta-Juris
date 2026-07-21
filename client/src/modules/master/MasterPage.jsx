@@ -100,8 +100,25 @@ export default function MasterPage() {
     } catch {} finally { setSaving(false) }
   }
 
+  // Desativar um escritório derruba TODOS os acessos dele — pede confirmação,
+  // porque o selo parece só um rótulo de status e era desativado com 1 clique.
   const toggleActive = async (c) => {
-    await api.master.updateCompany(c.id, { isActive: !c.isActive }).catch(() => {})
+    if (c.isActive) {
+      const ok = window.confirm(
+        `Desativar "${c.name}"?\n\n` +
+        `⚠️ TODOS os logins deste escritório param de funcionar imediatamente — ` +
+        `ninguém consegue entrar até você reativar.`
+      )
+      if (!ok) return
+    }
+    try {
+      await api.master.updateCompany(c.id, { isActive: !c.isActive })
+      alert(c.isActive
+        ? `"${c.name}" foi desativado. Os acessos estão bloqueados.`
+        : `"${c.name}" foi reativado. Os acessos voltaram a funcionar.`)
+    } catch (e) {
+      alert('Não foi possível alterar a situação da empresa. ' + (e?.message ?? ''))
+    }
     loadCompanies()
   }
   const deleteCompany = async (c) => {
