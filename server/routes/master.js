@@ -4,6 +4,7 @@ import { eq, ne, and, sql } from 'drizzle-orm'
 import { db } from '../db/index.js'
 import { tenants, users, clients, processes, refreshTokens } from '../db/schema.js'
 import { getPlans, savePlans } from '../lib/plans.js'
+import { menuAccessFor } from '../lib/permissions.js'
 
 const REFRESH_EXPIRES_DAYS = parseInt(process.env.REFRESH_TOKEN_EXPIRES_DAYS ?? '7')
 
@@ -178,6 +179,7 @@ export default async function masterRoutes(app) {
         id: target.id, name: target.name, email: target.email,
         role: target.role, tenantId: tenant.id,
         avatarUrl: target.avatarUrl, oabNumber: target.oabNumber,
+        menuAccess: menuAccessFor(tenant, target.id, target.role),
       },
       tenant: {
         id: tenant.id, name: tenant.name, slug: tenant.slug, logoUrl: tenant.logoUrl,

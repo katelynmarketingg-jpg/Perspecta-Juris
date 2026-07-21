@@ -578,12 +578,25 @@ function OfficeTab() {
   )
 }
 
+// Abas que podem ser liberadas/bloqueadas por usuário (Dashboard é sempre visível).
+const PERM_TABS = [
+  { to: '/app/atendimento', label: 'Fila de Atendimento' }, { to: '/app/pesquisas', label: 'Pesquisas' },
+  { to: '/app/clients', label: 'Clientes' }, { to: '/app/processes', label: 'Processos' },
+  { to: '/app/movimentacoes', label: 'Movimentações' }, { to: '/app/deadlines', label: 'Prazos' },
+  { to: '/app/tasks', label: 'Tarefas' }, { to: '/app/financial', label: 'Financeiro' },
+  { to: '/app/documents', label: 'Documentos' }, { to: '/app/modelos', label: 'Modelos' },
+  { to: '/app/calculator', label: 'Calculadora' }, { to: '/app/theses', label: 'Legislação' },
+  { to: '/app/automations', label: 'Automações' }, { to: '/app/reports', label: 'Relatórios' },
+  { to: '/app/registros', label: 'Registros' },
+]
+const ALL_TABS = PERM_TABS.map(t => t.to)
+
 // ── UsersTab (cadastro de logins da empresa) ──────────────────────
 function UsersTab() {
   const { showToast } = useUiStore()
   const [users, setUsers] = useState([])
   const [usage, setUsage] = useState(null)
-  const [form, setForm] = useState({ name: '', loginName: '', email: '', password: '', role: 'lawyer' })
+  const [form, setForm] = useState({ name: '', loginName: '', email: '', password: '', role: 'lawyer', menuAccess: null })
   const [editing, setEditing] = useState(null)
   const [loading, setLoading] = useState(true)
 
@@ -602,25 +615,26 @@ function UsersTab() {
 
   const full = !editing && usage && usage.limit != null && (usage.remaining ?? 0) <= 0
 
-  const reset = () => { setForm({ name: '', loginName: '', email: '', password: '', role: 'lawyer' }); setEditing(null) }
+  const reset = () => { setForm({ name: '', loginName: '', email: '', password: '', role: 'lawyer', menuAccess: null }); setEditing(null) }
 
   const save = async () => {
     if (!form.name.trim() || !form.loginName.trim()) { showToast('Preencha nome e login.', 'error'); return }
     if (!editing && !form.password.trim()) { showToast('Defina uma senha.', 'error'); return }
+    const menuAccess = form.role === 'admin' ? null : (form.menuAccess ?? ALL_TABS)
     try {
       if (editing) {
-        const payload = { ...form }; if (!payload.password) delete payload.password
+        const payload = { ...form, menuAccess }; if (!payload.password) delete payload.password
         await api.settings.updateUser(editing, payload)
         showToast('Login atualizado.', 'success')
       } else {
-        await api.settings.createUser(form)
+        await api.settings.createUser({ ...form, menuAccess })
         showToast('Login criado.', 'success')
       }
       reset(); load()
     } catch (e) { showToast(e.message || 'Erro ao salvar.', 'error') }
   }
 
-  const edit = (u) => { setEditing(u.id); setForm({ name: u.name, loginName: u.loginName, email: u.email ?? '', password: '', role: u.role ?? 'lawyer' }) }
+  const edit = (u) => { setEditing(u.id); setForm({ name: u.name, loginName: u.loginName, email: u.email ?? '', password: '', role: u.role ?? 'lawyer', menuAccess: u.menuAccess ?? null }) }
   const remove = async (id) => { await api.settings.deleteUser(id).catch(() => {}); load() }
 
   const set = (k) => (e) => setForm(d => ({ ...d, [k]: e.target.value }))
@@ -656,6 +670,38 @@ function UsersTab() {
           </div>
           <Input label={editing ? 'Nova senha (deixe vazio p/ manter)' : 'Senha *'} type="text" value={form.password} onChange={set('password')} placeholder="••••" />
         </div>
+
+        {form.role === 'admin' ? (
+          <p className="text-[11px] text-[var(--text-muted)]">👑 Administradores têm acesso a <b>todas as abas</b> e às configurações.</p>
+        ) : (
+          <div className="pt-1">
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="text-xs font-medium text-[var(--text-secondary)]">Abas que este login pode acessar</label>
+              <div className="flex gap-2 text-[11px]">
+                <button type="button" onClick={() => setForm(d => ({ ...d, menuAccess: [...ALL_TABS] }))} className="text-accent-400 hover:underline">Marcar todas</button>
+                <button type="button" onClick={() => setForm(d => ({ ...d, menuAccess: [] }))} className="text-[var(--text-muted)] hover:underline">Nenhuma</button>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+              {PERM_TABS.map(t => {
+                const on = (form.menuAccess ?? ALL_TABS).includes(t.to)
+                return (
+                  <label key={t.to} className="flex items-center gap-2 text-xs text-[var(--text-secondary)] cursor-pointer">
+                    <input type="checkbox" checked={on} className="accent-brand-500"
+                      onChange={() => {
+                        const cur = form.menuAccess ?? ALL_TABS
+                        const next = on ? cur.filter(x => x !== t.to) : [...cur, t.to]
+                        setForm(d => ({ ...d, menuAccess: next }))
+                      }} />
+                    {t.label}
+                  </label>
+                )
+              })}
+            </div>
+            <p className="text-[10px] text-[var(--text-muted)] mt-1.5">O Dashboard aparece sempre. Deixe como preferir — o colaborador só verá as abas marcadas.</p>
+          </div>
+        )}
+
         <div className="flex items-center justify-end gap-2">
           {full && <span className="text-[11px] text-red-400 mr-auto">Limite do plano atingido — faça upgrade para adicionar mais logins.</span>}
           {editing && <Button variant="secondary" size="sm" onClick={reset}>Cancelar</Button>}

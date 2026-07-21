@@ -4,6 +4,7 @@ import { eq, and } from 'drizzle-orm'
 import { db } from '../db/index.js'
 import { users, tenants, units } from '../db/schema.js'
 import { planLimitFor, userCount, getPlans } from '../lib/plans.js'
+import { menuAccessFor, setMenuAccess } from '../lib/permissions.js'
 
 export default async function settingsRoutes(app) {
   const auth = { preHandler: [app.authenticate] }
@@ -26,12 +27,13 @@ export default async function settingsRoutes(app) {
   // GET /api/settings/users
   app.get('/users', auth, async (req) => {
     const rows = await db.select({
-      id: users.id, name: users.name, email: users.email,
+      id: users.id, name: users.name, loginName: users.loginName, email: users.email,
       role: users.role, oabNumber: users.oabNumber, oabState: users.oabState,
       phone: users.phone, isActive: users.isActive, lastLoginAt: users.lastLoginAt,
       unitId: users.unitId, avatarUrl: users.avatarUrl, createdAt: users.createdAt,
     }).from(users).where(eq(users.tenantId, req.user.tenantId))
-    return rows
+    const [tenant] = await db.select().from(tenants).where(eq(tenants.id, req.user.tenantId)).limit(1)
+    return rows.map(u => ({ ...u, menuAccess: menuAccessFor(tenant, u.id, u.role) }))
   })
 
   // GET /api/settings/plan-usage — uso de acessos vs. limite do plano
@@ -80,6 +82,7 @@ export default async function settingsRoutes(app) {
       oabNumber, oabState, phone,
       isActive: true, createdAt: now, updatedAt: now,
     })
+    if (req.body.menuAccess !== undefined) await setMenuAccess(req.user.tenantId, id, req.body.menuAccess)
     const [row] = await db.select({
       id: users.id, name: users.name, email: users.email, role: users.role,
     }).from(users).where(eq(users.id, id)).limit(1)
@@ -95,9 +98,10 @@ export default async function settingsRoutes(app) {
       .where(and(eq(users.id, req.params.id), eq(users.tenantId, req.user.tenantId))).limit(1)
     if (!existing) return reply.code(404).send({ message: 'Usuário não encontrado.' })
 
-    const { password, passwordHash: _ph, id: _id, tenantId: _tid, ...updates } = req.body
+    const { password, passwordHash: _ph, id: _id, tenantId: _tid, menuAccess, login: _login, ...updates } = req.body
     if (password) updates.passwordHash = await bcrypt.hash(password, 12)
     await db.update(users).set({ ...updates, updatedAt: new Date().toISOString() }).where(eq(users.id, req.params.id))
+    if (menuAccess !== undefined) await setMenuAccess(req.user.tenantId, req.params.id, menuAccess)
     return { success: true }
   })
 

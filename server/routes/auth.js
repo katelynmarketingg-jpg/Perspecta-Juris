@@ -3,6 +3,7 @@ import { nanoid } from 'nanoid'
 import { eq, and, ilike } from 'drizzle-orm'
 import { db } from '../db/index.js'
 import { users, tenants, refreshTokens } from '../db/schema.js'
+import { menuAccessFor } from '../lib/permissions.js'
 
 const REFRESH_EXPIRES_DAYS = parseInt(process.env.REFRESH_TOKEN_EXPIRES_DAYS ?? '7')
 
@@ -83,13 +84,14 @@ export default async function authRoutes(app) {
       accessToken,
       refreshToken,
       user: {
-        id:        user.id,
-        name:      user.name,
-        email:     user.email,
-        role:      user.role,
-        tenantId:  user.tenantId,
-        avatarUrl: user.avatarUrl,
-        oabNumber: user.oabNumber,
+        id:         user.id,
+        name:       user.name,
+        email:      user.email,
+        role:       user.role,
+        tenantId:   user.tenantId,
+        avatarUrl:  user.avatarUrl,
+        oabNumber:  user.oabNumber,
+        menuAccess: menuAccessFor(tenant, user.id, user.role),
       },
       tenant: {
         id: tenant.id, name: tenant.name, slug: tenant.slug,
@@ -148,6 +150,6 @@ export default async function authRoutes(app) {
                 oabNumber: users.oabNumber, oabState: users.oabState, phone: users.phone })
       .from(users).where(eq(users.id, req.user.userId)).limit(1)
     const [tenant] = await db.select().from(tenants).where(eq(tenants.id, req.user.tenantId)).limit(1)
-    return { user, tenant }
+    return { user: { ...user, menuAccess: menuAccessFor(tenant, user?.id, user?.role) }, tenant }
   })
 }

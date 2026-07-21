@@ -140,10 +140,16 @@ export default function AppShell() {
   }, [location.pathname, navPrefsKey])
 
   const navItems = (() => {
+    // Permissões por usuário: se menuAccess é lista, mostra só as abas liberadas
+    // (Dashboard sempre visível). Admin/master → menuAccess null → tudo.
+    const allowed = user?.menuAccess
+    const base = Array.isArray(allowed)
+      ? baseNav.filter(i => i.to === '/app' || allowed.includes(i.to))
+      : baseNav
     const order = navPrefs.order ?? []
-    const byTo = Object.fromEntries(baseNav.map(i => [i.to, i]))
+    const byTo = Object.fromEntries(base.map(i => [i.to, i]))
     const inOrder = order.map(to => byTo[to]).filter(Boolean)
-    const rest = baseNav.filter(i => !order.includes(i.to))
+    const rest = base.filter(i => !order.includes(i.to))
     return [...inOrder, ...rest]
   })()
   const topNav = navPrefs.position === 'top' && !isMaster
