@@ -35,6 +35,7 @@ const FilaAtendimentoPage = lazy(() => import('./modules/atendimento/FilaAtendim
 
 const SignPage         = lazy(() => import('./modules/sign/SignPage'))
 const PortalLogin      = lazy(() => import('./modules/portal/PortalLogin'))
+const PortalEmPreparacao = lazy(() => import('./modules/portal/PortalEmPreparacao'))
 const PortalApp        = lazy(() => import('./modules/portal/PortalApp').then(m => ({ default: m.default })))
 const PortalDashboard  = lazy(() => import('./modules/portal/PortalDashboard'))
 const PortalProcesses  = lazy(() => import('./modules/portal/PortalProcesses'))
@@ -121,20 +122,12 @@ const router = createBrowserRouter([
     path: '/assinar/:id',
     element: <W Page={SignPage} />,
   },
-  {
-    path: '/portal/login',
-    element: <W Page={PortalLogin} />,
-  },
-  {
-    path: '/portal',
-    element: <W Page={PortalApp} />,
-    children: [
-      { index: true,                    element: <W Page={PortalDashboard} /> },
-      { path: 'processes',              element: <W Page={PortalProcesses} /> },
-      { path: 'documents',              element: <W Page={PortalDocuments} /> },
-      { path: 'messages',               element: <W Page={PortalMessages} /> },
-    ],
-  },
+  // Portal do Cliente: ainda sem backend. As telas exibiam processos, valores
+  // e mensagens FICTÍCIOS — um cliente não pode ver dado inventado sobre o
+  // próprio processo. Até ficar pronto, tudo aponta para um aviso honesto.
+  { path: '/portal/login', element: <W Page={PortalEmPreparacao} /> },
+  { path: '/portal',       element: <W Page={PortalEmPreparacao} /> },
+  { path: '/portal/*',     element: <W Page={PortalEmPreparacao} /> },
   { path: '/', element: <Navigate to="/app" replace /> },
   { path: '*', element: <Navigate to="/app" replace /> },
 ])
