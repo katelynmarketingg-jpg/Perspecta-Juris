@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useAuthStore } from '../stores/authStore'
+import api from '../lib/api'
 
 // Termo de Uso e Responsabilidade — MODELO. Revise com um(a) advogado(a)
 // antes de usar em produção. Aparece no 1º acesso de cada escritório.
@@ -53,10 +54,37 @@ export function precisaAceitarTermos(user) {
 export default function TermosModal({ onAccept }) {
   const user = useAuthStore(s => s.user)
   const [lido, setLido] = useState(false)
+  const [salvando, setSalvando] = useState(false)
+  const [erro, setErro] = useState('')
 
-  const aceitar = () => {
-    localStorage.setItem(`pj_termos_${user?.id}`, JSON.stringify({ versao: TERMOS_VERSAO, aceitoEm: new Date().toISOString(), usuario: user?.name }))
-    onAccept?.()
+  const cachear = (rec) => {
+    try { localStorage.setItem(`pj_termos_${user?.id}`, JSON.stringify(rec)) } catch { /* quota */ }
+  }
+
+  // Se a pessoa já aceitou (em outro computador), o servidor sabe — não pergunta de novo.
+  useEffect(() => {
+    let vivo = true
+    api.settings.terms()
+      .then(rec => {
+        if (!vivo || !rec) return
+        if (rec.versao === TERMOS_VERSAO) { cachear(rec); onAccept?.() }
+      })
+      .catch(() => { /* offline: mostra o termo normalmente */ })
+    return () => { vivo = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // O aceite é gravado NO SERVIDOR (data/hora e IP do servidor) — é isso que
+  // tem valor de prova. O navegador guarda apenas uma cópia para não reperguntar.
+  const aceitar = async () => {
+    setSalvando(true); setErro('')
+    try {
+      const rec = await api.settings.acceptTerms(TERMOS_VERSAO)
+      cachear(rec ?? { versao: TERMOS_VERSAO, aceitoEm: new Date().toISOString(), usuario: user?.name })
+      onAccept?.()
+    } catch (e) {
+      setErro('Não foi possível registrar o aceite no servidor. Verifique a conexão e tente novamente.')
+    } finally { setSalvando(false) }
   }
 
   return (
@@ -75,8 +103,12 @@ export default function TermosModal({ onAccept }) {
             <input type="checkbox" checked={lido} onChange={e => setLido(e.target.checked)} className="mt-0.5 accent-brand-500" />
             Li e aceito os Termos de Uso e a Política de Responsabilidade acima.
           </label>
-          <div className="flex justify-end">
-            <button onClick={aceitar} disabled={!lido} className="btn-primary text-sm disabled:opacity-50">Li e aceito · continuar</button>
+          {erro && <p className="text-[11px] text-red-400">{erro}</p>}
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-[10px] text-[var(--text-muted)]">O aceite é registrado no servidor com data, hora e IP.</p>
+            <button onClick={aceitar} disabled={!lido || salvando} className="btn-primary text-sm disabled:opacity-50">
+              {salvando ? 'Registrando…' : 'Li e aceito · continuar'}
+            </button>
           </div>
         </div>
       </div>

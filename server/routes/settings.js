@@ -37,6 +37,30 @@ export default async function settingsRoutes(app) {
     return settings.office
   })
 
+  // ── Aceite dos Termos de Uso (valor de prova) ────────────────────────
+  // Guarda data/hora e IP observados pelo SERVIDOR — não pelo navegador.
+  app.get('/terms', auth, async (req) => {
+    const [t] = await db.select().from(tenants).where(eq(tenants.id, req.user.tenantId)).limit(1)
+    return t?.settings?.terms?.[req.user.userId] ?? null
+  })
+  app.post('/terms', auth, async (req) => {
+    const [t] = await db.select().from(tenants).where(eq(tenants.id, req.user.tenantId)).limit(1)
+    const [u] = await db.select({ name: users.name, loginName: users.loginName })
+      .from(users).where(eq(users.id, req.user.userId)).limit(1)
+    const registro = {
+      versao:    String(req.body?.versao ?? ''),
+      aceitoEm:  new Date().toISOString(),          // hora do servidor
+      ip:        req.ip ?? null,                    // IP observado pelo servidor
+      userAgent: req.headers['user-agent'] ?? null,
+      usuario:   u?.name ?? null,
+      login:     u?.loginName ?? null,
+    }
+    const anteriores = (t?.settings ?? {}).terms ?? {}
+    const settings = { ...(t?.settings ?? {}), terms: { ...anteriores, [req.user.userId]: registro } }
+    await db.update(tenants).set({ settings, updatedAt: new Date().toISOString() }).where(eq(tenants.id, req.user.tenantId))
+    return registro
+  })
+
   // ── Modelos de documento (petições/contratos) por tenant ─────────────
   app.get('/templates', auth, async (req) => {
     const [t] = await db.select().from(tenants).where(eq(tenants.id, req.user.tenantId)).limit(1)

@@ -218,6 +218,8 @@ const api = {
     units:        ()     => api.get('/api/settings/units'),
     office:       ()     => api.get('/api/settings/office'),
     saveOffice:   (d)    => api.put('/api/settings/office', d),
+    terms:        ()     => api.get('/api/settings/terms'),
+    acceptTerms:  (versao) => api.post('/api/settings/terms', { versao }),
     templates:    ()     => api.get('/api/settings/templates'),
     saveTemplates:(list) => api.put('/api/settings/templates', { templates: list }),
   },
