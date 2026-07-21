@@ -1,5 +1,7 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
+import api from '../../lib/api'
+import { useUiStore } from '../../stores/uiStore'
 import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
 import {
@@ -90,7 +92,8 @@ function SignatureModal({ doc, onClose, onSend }) {
   const [copied, setCopied] = useState(false)
   const [names, setNames] = useState(['', ''])
   const [emails, setEmails] = useState(['', ''])
-  const link = `https://assinar.perspecta.app/${doc.id}`
+  // Link real do próprio sistema (antes apontava para um domínio inexistente).
+  const link = `${window.location.origin}/assinar/${doc.id}`
 
   const copyLink = () => {
     navigator.clipboard?.writeText(link)
@@ -222,10 +225,29 @@ export default function DocumentsPage() {
   const [tab, setTab] = useState('documents')
   const [search, setSearch] = useState('')
   const [activeTags, setActiveTags] = useState([])
-  const [docs, setDocs] = useState(() => lsGet('pj_local_documents', []))
+  const { showToast } = useUiStore()
+  const [docs, setDocs] = useState([])
+  const [loadingDocs, setLoadingDocs] = useState(true)
   const [signatures, setSignatures] = useState(() => lsGet('pj_local_signatures', []))
   const [signatureDoc, setSignatureDoc] = useState(null)
   const [templateModal, setTemplateModal] = useState(null)
+
+  // Documentos vêm do servidor (arquivo real em disco, isolado por escritório).
+  const normalize = (d) => ({
+    ...d,
+    size: d.fileSize ?? d.size ?? 0,
+    type: String(d.type || d.name?.split('.').pop() || '').toLowerCase(),
+    tags: Array.isArray(d.tags) ? d.tags : [],
+    uploadedAt: d.createdAt ?? d.uploadedAt,
+  })
+  const loadDocs = () => {
+    setLoadingDocs(true)
+    return api.documents.list()
+      .then(r => setDocs((Array.isArray(r) ? r : (r?.data ?? [])).map(normalize)))
+      .catch(() => setDocs([]))
+      .finally(() => setLoadingDocs(false))
+  }
+  useEffect(() => { loadDocs() }, [])
 
   const toggleTag = tag => setActiveTags(prev => prev.includes(tag) ? prev.filter(t => t !== tag) : [...prev, tag])
 
@@ -235,31 +257,40 @@ export default function DocumentsPage() {
     return matchSearch && matchTags
   })
 
-  const handleUpload = files => {
-    const newDocs = files.map((f, i) => ({
-      id: uid(),
-      name: f.name,
-      type: f.name.split('.').pop().toLowerCase(),
-      size: f.size,
-      client: null,
-      processTitle: null,
-      tags: [],
-      uploadedAt: new Date().toISOString(),
-      signatureStatus: null,
-    }))
-    setDocs(prev => {
-      const next = [...newDocs, ...prev]
-      lsSet('pj_local_documents', next)
-      return next
-    })
+  // Envia os arquivos DE VERDADE para o servidor (ficam salvos em disco).
+  const handleUpload = async (files) => {
+    const lista = Array.from(files ?? [])
+    if (!lista.length) return
+    const fd = new FormData()
+    lista.forEach(f => fd.append('file', f))
+    try {
+      await api.documents.upload(fd)
+      showToast(lista.length > 1 ? 'Documentos enviados.' : 'Documento enviado.', 'success')
+      loadDocs()
+    } catch (e) {
+      showToast(e?.message || 'Não foi possível enviar o documento.', 'error')
+    }
   }
 
-  const handleDelete = id => {
-    setDocs(prev => {
-      const next = prev.filter(d => d.id !== id)
-      lsSet('pj_local_documents', next)
-      return next
-    })
+  const handleDelete = async (id) => {
+    const d = docs.find(x => x.id === id)
+    if (!window.confirm(`Excluir "${d?.name ?? 'este documento'}"? Essa ação não pode ser desfeita.`)) return
+    try {
+      await api.documents.remove(id)
+      showToast('Documento excluído.', 'success')
+      loadDocs()
+    } catch (e) {
+      showToast(e?.message || 'Não foi possível excluir o documento.', 'error')
+    }
+  }
+
+  const handleDownload = async (d) => {
+    try { await api.documents.download(d.id, d.name) }
+    catch (e) { showToast(e?.message || 'Não foi possível baixar o arquivo.', 'error') }
+  }
+  const handleView = async (d) => {
+    try { await api.documents.view(d.id) }
+    catch (e) { showToast(e?.message || 'Não foi possível abrir o arquivo.', 'error') }
   }
 
   const handleSendSignature = (doc, signatories) => {
@@ -389,10 +420,10 @@ export default function DocumentsPage() {
 
                   {/* Actions */}
                   <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button title="Visualizar" className="p-2 rounded-lg text-[var(--text-muted)] hover:text-white hover:bg-[var(--bg-hover)] transition-colors">
+                    <button onClick={() => handleView(doc)} title="Visualizar" className="p-2 rounded-lg text-[var(--text-muted)] hover:text-white hover:bg-[var(--bg-hover)] transition-colors">
                       <IconEye size={14} />
                     </button>
-                    <button title="Baixar" className="p-2 rounded-lg text-[var(--text-muted)] hover:text-white hover:bg-[var(--bg-hover)] transition-colors">
+                    <button onClick={() => handleDownload(doc)} title="Baixar" className="p-2 rounded-lg text-[var(--text-muted)] hover:text-white hover:bg-[var(--bg-hover)] transition-colors">
                       <IconDownload size={14} />
                     </button>
                     <button onClick={() => setSignatureDoc(doc)} title="Solicitar assinatura" className="p-2 rounded-lg text-[var(--text-muted)] hover:text-accent-400 hover:bg-[var(--bg-active)] transition-colors">

@@ -178,6 +178,35 @@ const api = {
     cashflow: ()     => api.get('/api/financial/cashflow'),
   },
 
+  documents: {
+    list:   (p)  => api.get('/api/documents?' + new URLSearchParams(p ?? {})),
+    upload: (fd) => api.upload('/api/documents/upload', fd),
+    remove: (id) => api.delete(`/api/documents/${id}`),
+    // O arquivo exige token, então não dá para usar link direto: baixamos o blob.
+    blob: async (id) => {
+      const token = getToken()
+      const res = await fetch(`${BASE}/api/documents/${id}/download`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      })
+      if (!res.ok) throw new Error('Não foi possível obter o arquivo.')
+      return res.blob()
+    },
+    download: async (id, name) => {
+      const blob = await api.documents.blob(id)
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url; a.download = name || 'documento'
+      document.body.appendChild(a); a.click(); a.remove()
+      setTimeout(() => URL.revokeObjectURL(url), 4000)
+    },
+    view: async (id) => {
+      const blob = await api.documents.blob(id)
+      const url = URL.createObjectURL(blob)
+      window.open(url, '_blank', 'noopener')
+      setTimeout(() => URL.revokeObjectURL(url), 60000)
+    },
+  },
+
   settings: {
     users:        (p)    => api.get('/api/settings/users?' + new URLSearchParams(p ?? {})),
     planUsage:    ()     => api.get('/api/settings/plan-usage'),
