@@ -180,6 +180,7 @@ const api = {
 
   settings: {
     users:        (p)    => api.get('/api/settings/users?' + new URLSearchParams(p ?? {})),
+    planUsage:    ()     => api.get('/api/settings/plan-usage'),
     createUser:   (d)    => api.post('/api/settings/users', d),
     updateUser:   (id,d) => api.put(`/api/settings/users/${id}`, d),
     deleteUser:   (id)   => api.delete(`/api/settings/users/${id}`),

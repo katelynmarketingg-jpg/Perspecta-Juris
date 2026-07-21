@@ -582,6 +582,7 @@ function OfficeTab() {
 function UsersTab() {
   const { showToast } = useUiStore()
   const [users, setUsers] = useState([])
+  const [usage, setUsage] = useState(null)
   const [form, setForm] = useState({ name: '', loginName: '', email: '', password: '', role: 'lawyer' })
   const [editing, setEditing] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -593,8 +594,13 @@ function UsersTab() {
   ]
   const roleLabel = (r) => ROLES.find(x => x.value === r)?.label ?? r
 
-  const load = () => api.settings.users().then(r => setUsers(Array.isArray(r) ? r : (r?.data ?? []))).catch(() => setUsers([])).finally(() => setLoading(false))
+  const load = () => {
+    api.settings.users().then(r => setUsers(Array.isArray(r) ? r : (r?.data ?? []))).catch(() => setUsers([])).finally(() => setLoading(false))
+    api.settings.planUsage().then(setUsage).catch(() => setUsage(null))
+  }
   useEffect(() => { load() }, [])
+
+  const full = !editing && usage && usage.limit != null && (usage.remaining ?? 0) <= 0
 
   const reset = () => { setForm({ name: '', loginName: '', email: '', password: '', role: 'lawyer' }); setEditing(null) }
 
@@ -623,6 +629,16 @@ function UsersTab() {
     <div className="space-y-5">
       <div className="rounded-lg bg-brand-500/8 border border-brand-500/20 p-3">
         <p className="text-xs text-[var(--text-secondary)]">Cadastre os logins da sua equipe. Cada pessoa acessa com <b>o nome da empresa</b>, o <b>login</b> e a <b>senha</b> definidos aqui.</p>
+        {usage && (
+          <p className="text-xs mt-2 font-medium">
+            Plano <b className="text-accent-400">{usage.planName}</b>:{' '}
+            {usage.limit == null
+              ? <span className="text-emerald-400">acessos ilimitados ({usage.used} em uso)</span>
+              : <span className={(usage.remaining ?? 0) <= 0 ? 'text-red-400' : 'text-[var(--text-secondary)]'}>
+                  {usage.used} de {usage.limit} acessos usados · {(usage.remaining ?? 0) > 0 ? `restam ${usage.remaining}` : 'limite atingido'}
+                </span>}
+          </p>
+        )}
       </div>
 
       {/* Form */}
@@ -640,9 +656,10 @@ function UsersTab() {
           </div>
           <Input label={editing ? 'Nova senha (deixe vazio p/ manter)' : 'Senha *'} type="text" value={form.password} onChange={set('password')} placeholder="••••" />
         </div>
-        <div className="flex justify-end gap-2">
+        <div className="flex items-center justify-end gap-2">
+          {full && <span className="text-[11px] text-red-400 mr-auto">Limite do plano atingido — faça upgrade para adicionar mais logins.</span>}
           {editing && <Button variant="secondary" size="sm" onClick={reset}>Cancelar</Button>}
-          <Button variant="primary" size="sm" onClick={save}>{editing ? 'Salvar' : 'Adicionar login'}</Button>
+          <Button variant="primary" size="sm" onClick={save} disabled={full}>{editing ? 'Salvar' : 'Adicionar login'}</Button>
         </div>
       </Card>
 

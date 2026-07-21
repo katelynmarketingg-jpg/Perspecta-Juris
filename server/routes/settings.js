@@ -3,7 +3,7 @@ import { nanoid } from 'nanoid'
 import { eq, and } from 'drizzle-orm'
 import { db } from '../db/index.js'
 import { users, tenants, units } from '../db/schema.js'
-import { planLimitFor, userCount } from '../lib/plans.js'
+import { planLimitFor, userCount, getPlans } from '../lib/plans.js'
 
 export default async function settingsRoutes(app) {
   const auth = { preHandler: [app.authenticate] }
@@ -32,6 +32,22 @@ export default async function settingsRoutes(app) {
       unitId: users.unitId, avatarUrl: users.avatarUrl, createdAt: users.createdAt,
     }).from(users).where(eq(users.tenantId, req.user.tenantId))
     return rows
+  })
+
+  // GET /api/settings/plan-usage — uso de acessos vs. limite do plano
+  app.get('/plan-usage', auth, async (req) => {
+    const [tenant] = await db.select().from(tenants).where(eq(tenants.id, req.user.tenantId)).limit(1)
+    const limit = await planLimitFor(tenant)          // null = ilimitado
+    const used = await userCount(req.user.tenantId)
+    const plans = await getPlans()
+    const planName = plans.find(p => p.key === tenant?.plan)?.name ?? tenant?.plan ?? '—'
+    return {
+      plan: tenant?.plan ?? null,
+      planName,
+      limit,
+      used,
+      remaining: limit == null ? null : Math.max(0, limit - used),
+    }
   })
 
   // POST /api/settings/users
