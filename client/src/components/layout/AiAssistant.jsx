@@ -9,25 +9,6 @@ const QUICK_ACTIONS = [
   { label: 'Sugerir próxima ação processual',    prompt: 'Com base nos processos em andamento, qual deve ser a próxima ação prioritária?' },
 ]
 
-const MOCK_RESPONSES = {
-  default: 'Entendido! Estou analisando as informações do sistema...\n\nCom base nos dados disponíveis, posso te ajudar com processos, prazos, cálculos jurídicos e sugestões de ações. O que mais você precisa saber?',
-  resumo: 'Você possui **3 processos ativos** no momento:\n\n1. **Apelação Cível** (Silva x ABC) — Aguardando contrarrazões, prazo em 10 dias. Prioridade alta.\n2. **Reclamação Trabalhista** — Audiência em 15/06/2026. Preparar documentos comprobatórios.\n3. **Execução Fiscal** — Aguardando pagamento de custas.\n\n💡 *Recomendo priorizar as contrarrazões da Apelação Cível.*',
-  prazos: 'Prazos críticos nos próximos 7 dias:\n\n🔴 **Urgente (3 dias):** Manifestação sobre laudo pericial — Trabalhista Santos\n🟡 **Esta semana (5 dias):** Juntada de documentos — Apelação Cível\n🟢 **Próxima semana:** Audiência inicial — Divórcio Rodrigues\n\nDeseja que eu crie tarefas automaticamente para cada um?',
-  verbas: 'Para calcular verbas rescisórias, preciso de:\n\n- **Data de admissão** e demissão\n- **Tipo de demissão:** sem justa causa, pedido de demissão ou mútuo acordo\n- **Salário base** (mês de referência)\n- **Média de horas extras** nos últimos 12 meses\n- **FGTS** depositado (saldo atual)\n\nInforme esses dados que faço o cálculo completo com: saldo de salário, 13º proporcional, férias proporcionais + 1/3, aviso prévio e FGTS + multa 40%.',
-  ipca: 'Para correção monetária pelo IPCA:\n\n**Fórmula:** Valor atualizado = Valor original × (IPCA acumulado / 100 + 1)\n\nO IPCA acumulado de Jan/2020 a Dez/2025 foi aproximadamente **42,3%**.\n\nExemplo: R$ 10.000 de Jan/2020 = **R$ 14.230** em Dez/2025.\n\nQual período e valor você quer corrigir?',
-  proxima: 'Analisando seus processos, recomendo:\n\n**Ação prioritária:** Preparar contrarrazões de apelação no processo Silva x ABC — prazo em 10 dias.\n\n**Próximas ações esta semana:**\n1. Juntar documentos no processo trabalhista\n2. Verificar pagamento de custas na execução fiscal\n3. Agendar reunião com cliente antes da audiência de 15/06\n\nDeseja que eu crie um checklist com essas tarefas?',
-}
-
-function getResponse(text) {
-  const t = text.toLowerCase()
-  if (t.includes('resum') || t.includes('process')) return MOCK_RESPONSES.resumo
-  if (t.includes('prazo') || t.includes('urgent')) return MOCK_RESPONSES.prazos
-  if (t.includes('verba') || t.includes('rescis') || t.includes('calcul')) return MOCK_RESPONSES.verbas
-  if (t.includes('ipca') || t.includes('corre')) return MOCK_RESPONSES.ipca
-  if (t.includes('próxim') || t.includes('ação') || t.includes('suger')) return MOCK_RESPONSES.proxima
-  return MOCK_RESPONSES.default
-}
-
 function MessageText({ text }) {
   const parts = text.split('\n')
   return (
@@ -53,14 +34,18 @@ export default function AiAssistant() {
     if (open && !minimized) bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, open, minimized])
 
+  // O assistente ainda NÃO está conectado a uma IA de verdade. Antes ele
+  // devolvia respostas fabricadas (prazos e índices inventados) que pareciam
+  // reais — perigoso num sistema jurídico. Agora avisa com honestidade.
+  const AVISO = 'Ainda não estou conectado a uma inteligência artificial de verdade — este recurso está **em preparação**.\n\nPara não te induzir a erro, prefiro não responder a nada sobre prazos, processos ou cálculos: qualquer resposta minha agora seria inventada.\n\n👉 Use **Prazos** para os prazos reais, **Processos** para o andamento e a **Calculadora** para os cálculos.'
   const sendMessage = async (text) => {
     if (!text.trim() || typing) return
     const userMsg = { id: Date.now(), role: 'user', text: text.trim() }
     setMessages(prev => [...prev, userMsg])
     setInput('')
     setTyping(true)
-    await new Promise(r => setTimeout(r, 900 + Math.random() * 600))
-    setMessages(prev => [...prev, { id: Date.now() + 1, role: 'assistant', text: getResponse(text) }])
+    await new Promise(r => setTimeout(r, 350))
+    setMessages(prev => [...prev, { id: Date.now() + 1, role: 'assistant', text: AVISO }])
     setTyping(false)
   }
 
@@ -178,7 +163,7 @@ export default function AiAssistant() {
                   value={input}
                   onChange={e => setInput(e.target.value)}
                   onKeyDown={handleKey}
-                  placeholder="Pergunte sobre processos, prazos, cálculos..."
+                  placeholder="Assistente em preparação — ainda não responde de verdade"
                   rows={1}
                   className="flex-1 px-3 py-2 rounded-xl bg-[var(--bg-app)] border border-[var(--border)] text-sm text-[var(--text-primary)] resize-none focus:border-brand-500 focus:outline-none placeholder:text-[var(--text-muted)] max-h-20"
                 />
