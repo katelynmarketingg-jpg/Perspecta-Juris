@@ -4,6 +4,7 @@
 // ─────────────────────────────────────────────────────────────────
 
 import { currentTenantId } from './tenant'
+import { getCfg } from './tenantData'
 const LS = 'pj_local_'
 const lsGet = (k, fb) => { try { return JSON.parse(localStorage.getItem(k) ?? 'null') ?? fb } catch { return fb } }
 const lsSet = (k, v)  => localStorage.setItem(k, JSON.stringify(v))
@@ -52,7 +53,7 @@ function inferTribunal(judicialNumber, court) {
 
 // Busca movimentações de um processo específico no DataJud
 async function fetchMovimentos(judicialNumber, tribunal, apiKey) {
-  const key = apiKey || lsGet('pj_cfg_datajud_key', '') || 'cDZHYzlZa0JadVREZDJCendBdUFWZz09cDZHYzlZa0JadVREZDJCendBdUFWZz09'
+  const key = apiKey || getCfg('pj_cfg_datajud_key', '') || 'cDZHYzlZa0JadVREZDJCendBdUFWZz09cDZHYzlZa0JadVREZDJCendBdUFWZz09'
   const res = await fetch(`/datajud/api_publica_${tribunal}/_search`, {
     method: 'POST',
     headers: {
@@ -148,7 +149,7 @@ export async function syncAllProcesses(onProgress) {
 
 // Verifica se deve sincronizar automaticamente (a cada 1h)
 export function shouldAutoSync() {
-  if (lsGet('pj_cfg_autosync', true) === false) return false
+  if (getCfg('pj_cfg_autosync', 'true') === 'false') return false
   const last = localStorage.getItem('pj_datajud_last_sync')
   if (!last) return true
   return (Date.now() - new Date(last).getTime()) > 60 * 60 * 1000 // 1 hora

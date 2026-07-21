@@ -1,3 +1,4 @@
+import { getCfg, setCfg } from './tenantData'
 // ─────────────────────────────────────────────────────────────────────────
 //  Diário Oficial — DJEN (Diário de Justiça Eletrônico Nacional / CNJ)
 //  Consulta pública de intimações e publicações por OAB.
@@ -78,15 +79,15 @@ function normalizar(it) {
 // Config de OAB (compartilha as chaves já usadas na aba Integrações)
 export function getOabConfig() {
   return {
-    oab: localStorage.getItem('pj_cfg_oab') ?? '',
-    uf: localStorage.getItem('pj_cfg_oab_uf') ?? 'RS',
-    nome: localStorage.getItem('pj_cfg_adv_nome') ?? '',
+    oab: getCfg('pj_cfg_oab', ''),
+    uf: getCfg('pj_cfg_oab_uf', 'RS'),
+    nome: getCfg('pj_cfg_adv_nome', ''),
   }
 }
 export function saveOabConfig({ oab, uf, nome }) {
-  if (oab != null) localStorage.setItem('pj_cfg_oab', oab)
-  if (uf != null) localStorage.setItem('pj_cfg_oab_uf', uf)
-  if (nome != null) localStorage.setItem('pj_cfg_adv_nome', nome)
+  if (oab != null) setCfg('pj_cfg_oab', oab)
+  if (uf != null) setCfg('pj_cfg_oab_uf', uf)
+  if (nome != null) setCfg('pj_cfg_adv_nome', nome)
 }
 
 // Marca publicações já vistas / vinculadas (para não repetir)

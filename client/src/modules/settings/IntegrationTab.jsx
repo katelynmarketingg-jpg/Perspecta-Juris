@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { getCfg, setCfg } from '../../lib/tenantData'
 import { useUiStore } from '../../stores/uiStore'
 import { Button, Card, Input, Badge } from '../../components/ui'
 import { STATES_BR } from '../../lib/constants'
@@ -447,9 +448,9 @@ function PortalCard({ portal, oab, oabUF, onImported }) {
 export default function IntegrationTab() {
   const { showToast } = useUiStore()
 
-  const [oab,      setOab]      = useState(() => localStorage.getItem('pj_cfg_oab')     ?? '')
-  const [uf,       setUf]       = useState(() => localStorage.getItem('pj_cfg_oab_uf')  ?? 'RS')
-  const [apiKey,   setApiKey]   = useState(() => localStorage.getItem('pj_cfg_datajud_key') ?? '')
+  const [oab,      setOab]      = useState(() => getCfg('pj_cfg_oab', ''))
+  const [uf,       setUf]       = useState(() => getCfg('pj_cfg_oab_uf', 'RS'))
+  const [apiKey,   setApiKey]   = useState(() => getCfg('pj_cfg_datajud_key', ''))
   const [tribunal, setTribunal] = useState('')
   const [loading,  setLoading]  = useState(false)
   const [results,  setResults]  = useState(null)
@@ -460,7 +461,7 @@ export default function IntegrationTab() {
   const [syncProgress, setSyncProgress] = useState(null)
   const [refreshKey, setRefreshKey] = useState(0)
   const [autoSync, setAutoSync] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('pj_cfg_autosync') ?? 'true') } catch { return true }
+    try { return getCfg('pj_cfg_autosync', 'true') !== 'false' } catch { return true }
   })
 
   const syncInfo = getLastSyncInfo()
@@ -468,7 +469,7 @@ export default function IntegrationTab() {
   const toggleAutoSync = () => {
     const next = !autoSync
     setAutoSync(next)
-    localStorage.setItem('pj_cfg_autosync', JSON.stringify(next))
+    setCfg('pj_cfg_autosync', next ? 'true' : 'false')
   }
 
   const runManualSync = async () => {
@@ -490,9 +491,9 @@ export default function IntegrationTab() {
   }
 
   const saveConfig = () => {
-    localStorage.setItem('pj_cfg_oab', oab)
-    localStorage.setItem('pj_cfg_oab_uf', uf)
-    if (apiKey) localStorage.setItem('pj_cfg_datajud_key', apiKey)
+    setCfg('pj_cfg_oab', oab)
+    setCfg('pj_cfg_oab_uf', uf)
+    if (apiKey) setCfg('pj_cfg_datajud_key', apiKey)
   }
 
   const search = async () => {
@@ -604,13 +605,13 @@ export default function IntegrationTab() {
             label="Número OAB"
             placeholder="123456"
             value={oab}
-            onChange={e => { setOab(e.target.value.replace(/\D/g, '')); localStorage.setItem('pj_cfg_oab', e.target.value.replace(/\D/g, '')) }}
+            onChange={e => { setOab(e.target.value.replace(/\D/g, '')); setCfg('pj_cfg_oab', e.target.value.replace(/\D/g, '')) }}
           />
           <div>
             <p className="text-xs font-medium text-[var(--text-secondary)] mb-1">Estado (UF)</p>
             <select
               value={uf}
-              onChange={e => { setUf(e.target.value); localStorage.setItem('pj_cfg_oab_uf', e.target.value) }}
+              onChange={e => { setUf(e.target.value); setCfg('pj_cfg_oab_uf', e.target.value) }}
               className="w-full px-2.5 py-2 rounded-lg bg-[var(--bg-input)] border border-[var(--border)] text-xs text-[var(--text-primary)] focus:border-brand-500 focus:outline-none"
             >
               {STATES_BR.map(s => <option key={s} value={s}>{s}</option>)}
