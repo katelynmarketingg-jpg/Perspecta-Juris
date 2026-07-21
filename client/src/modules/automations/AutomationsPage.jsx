@@ -37,37 +37,6 @@ const ACTIONS = [
   { value: 'create_document',   label: 'Gerar documento', icon: '📄' },
 ]
 
-const MOCK_RULES = [
-  {
-    id: '1', name: 'Alerta de prazo próximo', enabled: true,
-    trigger: 'deadline_due', condition: 'any', action: 'notify_internal',
-    executions: 12, lastRun: new Date(Date.now() - 86400000 * 2).toISOString(),
-  },
-  {
-    id: '2', name: 'WhatsApp ao novo cliente', enabled: true,
-    trigger: 'client_created', condition: 'any', action: 'send_whatsapp',
-    executions: 4, lastRun: new Date(Date.now() - 86400000 * 5).toISOString(),
-  },
-  {
-    id: '3', name: 'Tarefa para honorário alto', enabled: false,
-    trigger: 'process_created', condition: 'value_gt_5000', action: 'create_task',
-    executions: 2, lastRun: new Date(Date.now() - 86400000 * 20).toISOString(),
-  },
-  {
-    id: '4', name: 'E-mail ao assinar contrato', enabled: true,
-    trigger: 'document_signed', condition: 'any', action: 'send_email',
-    executions: 7, lastRun: new Date(Date.now() - 86400000 * 1).toISOString(),
-  },
-]
-
-const MOCK_LOGS = [
-  { id: '1', ruleId: '1', ruleName: 'Alerta de prazo próximo', status: 'success', entity: 'Prazo — Silva x ABC', at: new Date(Date.now() - 86400000 * 2).toISOString() },
-  { id: '2', ruleId: '2', ruleName: 'WhatsApp ao novo cliente', status: 'success', entity: 'Cliente — João Ferreira', at: new Date(Date.now() - 86400000 * 5).toISOString() },
-  { id: '3', ruleId: '4', ruleName: 'E-mail ao assinar contrato', status: 'success', entity: 'Contrato — Rodrigues Imobiliária', at: new Date(Date.now() - 86400000 * 1).toISOString() },
-  { id: '4', ruleId: '1', ruleName: 'Alerta de prazo próximo', status: 'error', entity: 'Prazo — Santos Trabalhista', at: new Date(Date.now() - 86400000 * 3).toISOString() },
-  { id: '5', ruleId: '3', ruleName: 'Tarefa para honorário alto', status: 'success', entity: 'Processo — Execução Fiscal', at: new Date(Date.now() - 86400000 * 20).toISOString() },
-]
-
 const triggerLabel = v  => TRIGGERS.find(t => t.value === v)?.label ?? v
 const condLabel    = v  => CONDITIONS.find(c => c.value === v)?.label ?? v
 const actionLabel  = v  => ACTIONS.find(a => a.value === v)?.label ?? v
@@ -146,8 +115,8 @@ function RuleModal({ rule, onClose, onSave }) {
 
 export default function AutomationsPage() {
   const [tab, setTab]     = useState('rules')
-  const [rules, setRules] = useState(MOCK_RULES)
-  const [logs]            = useState(MOCK_LOGS)
+  const [rules, setRules] = useState([])
+  const [logs]            = useState([])
   const [modal, setModal] = useState(null) // null | 'new' | rule-object
 
   const toggleRule = (id) => {
@@ -172,14 +141,29 @@ export default function AutomationsPage() {
     <div className="p-6 space-y-5 page-enter">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <div>
+        <div className="flex items-center gap-3">
           <h1 className="text-lg font-semibold text-white">Automações</h1>
-          <p className="text-xs text-[var(--text-muted)] mt-0.5">{activeCount} regra{activeCount !== 1 ? 's' : ''} ativa{activeCount !== 1 ? 's' : ''}</p>
+          <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/15 border border-amber-500/30 text-amber-400 text-[10px] font-semibold uppercase tracking-wide">
+            <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+            em preparação
+          </span>
         </div>
-        <button onClick={() => setModal('new')} className="btn-primary flex items-center gap-2">
+        <button disabled title="As automações ainda não estão ativas."
+          className="btn-primary flex items-center gap-2 opacity-50 cursor-not-allowed">
           <IconPlus size={15} />
           Nova Regra
         </button>
+      </div>
+
+      {/* Aviso honesto: nada é executado ainda */}
+      <div className="card p-4 border border-amber-500/30 bg-amber-500/5">
+        <p className="text-sm text-amber-300 font-medium">Este módulo ainda não está ativo.</p>
+        <p className="text-[11px] text-[var(--text-muted)] mt-1 leading-relaxed">
+          As automações (avisar prazo, mandar WhatsApp ao cadastrar cliente, criar tarefa…) estão
+          <b> em desenvolvimento</b> e <b>nenhuma regra é executada</b> por enquanto. Preferimos avisar a
+          deixar você confiar numa automação que não roda. Enquanto isso, os avisos de prazo continuam
+          aparecendo normalmente em <b>Prazos</b> e nas bolinhas do topo.
+        </p>
       </div>
 
       {/* Stats */}
