@@ -637,7 +637,17 @@ function UsersTab() {
   }
 
   const edit = (u) => { setEditing(u.id); setForm({ name: u.name, loginName: u.loginName, email: u.email ?? '', password: '', role: u.role ?? 'lawyer', menuAccess: u.menuAccess ?? null }) }
-  const remove = async (id) => { await api.settings.deleteUser(id).catch(() => {}); load() }
+  const remove = async (id) => {
+    const u = users.find(x => x.id === id)
+    if (!window.confirm(`Excluir o acesso de "${u?.name ?? 'este login'}"? A pessoa perde o acesso imediatamente.`)) return
+    try {
+      await api.settings.deleteUser(id)
+      showToast('Acesso excluído.', 'success')
+    } catch (e) {
+      showToast(e.message || 'Não foi possível excluir este acesso.', 'error')
+    }
+    load()
+  }
 
   const set = (k) => (e) => setForm(d => ({ ...d, [k]: e.target.value }))
 

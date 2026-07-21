@@ -132,6 +132,30 @@ export default async function settingsRoutes(app) {
   })
 
   // GET /api/settings/units
+  // DELETE /api/settings/users/:id — remove um acesso do escritório
+  app.delete('/users/:id', auth, async (req, reply) => {
+    if (req.user.role !== 'admin') return reply.code(403).send({ message: 'Apenas administradores podem excluir acessos.' })
+    if (req.params.id === req.user.userId) return reply.code(400).send({ message: 'Você não pode excluir o seu próprio acesso.' })
+
+    const [alvo] = await db.select().from(users)
+      .where(and(eq(users.id, req.params.id), eq(users.tenantId, req.user.tenantId))).limit(1)
+    if (!alvo) return reply.code(404).send({ message: 'Acesso não encontrado.' })
+    if (alvo.role === 'master') return reply.code(403).send({ message: 'O acesso master não pode ser excluído.' })
+
+    // não deixa o escritório ficar sem nenhum administrador
+    if (alvo.role === 'admin') {
+      const admins = await db.select({ id: users.id }).from(users)
+        .where(and(eq(users.tenantId, req.user.tenantId), eq(users.role, 'admin')))
+      if (admins.length <= 1) {
+        return reply.code(400).send({ message: 'Este é o único administrador do escritório — crie outro antes de excluí-lo.' })
+      }
+    }
+
+    await db.delete(users).where(eq(users.id, req.params.id))
+    await setMenuAccess(req.user.tenantId, req.params.id, null) // limpa permissões guardadas
+    return reply.code(204).send()
+  })
+
   app.get('/units', auth, async (req) => {
     return db.select().from(units).where(eq(units.tenantId, req.user.tenantId))
   })
