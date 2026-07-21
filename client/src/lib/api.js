@@ -187,6 +187,10 @@ const api = {
     tenant:       ()     => api.get('/api/settings/tenant'),
     updateTenant: (d)    => api.put('/api/settings/tenant', d),
     units:        ()     => api.get('/api/settings/units'),
+    office:       ()     => api.get('/api/settings/office'),
+    saveOffice:   (d)    => api.put('/api/settings/office', d),
+    templates:    ()     => api.get('/api/settings/templates'),
+    saveTemplates:(list) => api.put('/api/settings/templates', { templates: list }),
   },
 
   master: {

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useUiStore } from '../../stores/uiStore'
 import api from '../../lib/api'
 import { getOffice, setOffice } from '../../lib/tenant'
+import { pushOffice } from '../../lib/tenantData'
 import { getPeticoes } from '../../lib/peticoesModels'
 import {
   Button, Card, Input,
@@ -511,7 +512,8 @@ function OfficeTab() {
   }
 
   function save() {
-    setOffice(data)
+    setOffice(data)       // cache local (por escritório)
+    pushOffice(data)      // grava no banco (sincroniza entre computadores)
     showToast('Dados salvos.', 'success')
   }
 

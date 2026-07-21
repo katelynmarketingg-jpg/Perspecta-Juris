@@ -6,6 +6,7 @@
 // ─────────────────────────────────────────────────────────────────────────
 
 import { tkey } from './tenant'
+import { pushTemplates } from './tenantData'
 // Modelos personalizados são escopados por escritório (tenant) — um escritório
 // nunca enxerga os modelos de outro, mesmo no mesmo navegador.
 const KEY = () => tkey('pj_peticoes')
@@ -343,6 +344,12 @@ OAB/{{advogado.oab_uf}} nº {{advogado.oab}}`,
 ]
 
 // ── CRUD (defaults + modelos do usuário) ────────────────────────────────────
+// Cada alteração grava no cache local E no banco (write-through), pra
+// sincronizar entre computadores e manter isolado por escritório.
+function persist(list) {
+  lsSet(KEY(), list)
+  pushTemplates(list)
+}
 export function getPeticoes() {
   const custom = lsGet(KEY(), [])
   return [...PETICOES_PADRAO, ...custom]
@@ -350,14 +357,14 @@ export function getPeticoes() {
 export function savePeticao(p) {
   const custom = lsGet(KEY(), [])
   if (p.id && custom.some(x => x.id === p.id)) {
-    lsSet(KEY(), custom.map(x => x.id === p.id ? { ...x, ...p } : x))
+    persist(custom.map(x => x.id === p.id ? { ...x, ...p } : x))
     return p
   }
   const novo = { ...p, id: p.id || uid(), readonly: false, createdAt: new Date().toISOString() }
-  lsSet(KEY(), [...custom, novo])
+  persist([...custom, novo])
   return novo
 }
 export function deletePeticao(id) {
   const custom = lsGet(KEY(), [])
-  lsSet(KEY(), custom.filter(x => x.id !== id))
+  persist(custom.filter(x => x.id !== id))
 }

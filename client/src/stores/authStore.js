@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import api, { setTokens, clearTokens } from '../lib/api'
+import { hydrateTenantData } from '../lib/tenantData'
 
 export const useAuthStore = create(
   persist(
@@ -17,6 +18,7 @@ export const useAuthStore = create(
           const data = await api.auth.login(empresa, nome, senha)
           setTokens({ access: data.accessToken, refresh: data.refreshToken })
           set({ user: data.user, tenant: data.tenant, loading: false })
+          hydrateTenantData()
           return data
         } catch (err) {
           set({ error: err.message, loading: false })
@@ -44,6 +46,7 @@ export const useAuthStore = create(
         localStorage.setItem('pj_master_backup', JSON.stringify(backup))
         setTokens({ access: data.accessToken, refresh: data.refreshToken })
         set({ user: data.user, tenant: data.tenant, impersonating: true })
+        hydrateTenantData()
         return data
       },
 
@@ -56,6 +59,7 @@ export const useAuthStore = create(
           if (b.access) setTokens({ access: b.access, refresh: b.refresh })
           localStorage.removeItem('pj_master_backup')
           set({ user: b.user, tenant: b.tenant, impersonating: false })
+          hydrateTenantData()
           return true
         } catch { return false }
       },
@@ -64,6 +68,7 @@ export const useAuthStore = create(
         try {
           const data = await api.auth.me()
           set({ user: data.user, tenant: data.tenant })
+          hydrateTenantData()
         } catch {
           clearTokens()
           set({ user: null, tenant: null })

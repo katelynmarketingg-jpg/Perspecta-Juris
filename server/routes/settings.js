@@ -24,6 +24,32 @@ export default async function settingsRoutes(app) {
     return row
   })
 
+  // ── Dados do escritório (logo, timbrado, endereço, PIX…) por tenant ──
+  app.get('/office', auth, async (req) => {
+    const [t] = await db.select().from(tenants).where(eq(tenants.id, req.user.tenantId)).limit(1)
+    return t?.settings?.office ?? {}
+  })
+  app.put('/office', auth, async (req, reply) => {
+    if (req.user.role !== 'admin') return reply.code(403).send({ message: 'Apenas administradores podem alterar o escritório.' })
+    const [t] = await db.select().from(tenants).where(eq(tenants.id, req.user.tenantId)).limit(1)
+    const settings = { ...(t?.settings ?? {}), office: (req.body && typeof req.body === 'object') ? req.body : {} }
+    await db.update(tenants).set({ settings, updatedAt: new Date().toISOString() }).where(eq(tenants.id, req.user.tenantId))
+    return settings.office
+  })
+
+  // ── Modelos de documento (petições/contratos) por tenant ─────────────
+  app.get('/templates', auth, async (req) => {
+    const [t] = await db.select().from(tenants).where(eq(tenants.id, req.user.tenantId)).limit(1)
+    return t?.settings?.templates ?? []
+  })
+  app.put('/templates', auth, async (req, reply) => {
+    const list = Array.isArray(req.body?.templates) ? req.body.templates : []
+    const [t] = await db.select().from(tenants).where(eq(tenants.id, req.user.tenantId)).limit(1)
+    const settings = { ...(t?.settings ?? {}), templates: list }
+    await db.update(tenants).set({ settings, updatedAt: new Date().toISOString() }).where(eq(tenants.id, req.user.tenantId))
+    return list
+  })
+
   // GET /api/settings/users
   app.get('/users', auth, async (req) => {
     const rows = await db.select({
