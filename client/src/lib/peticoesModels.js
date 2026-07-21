@@ -5,7 +5,10 @@
 //  manualmente pelo advogado.
 // ─────────────────────────────────────────────────────────────────────────
 
-const KEY = 'pj_peticoes'
+import { tkey } from './tenant'
+// Modelos personalizados são escopados por escritório (tenant) — um escritório
+// nunca enxerga os modelos de outro, mesmo no mesmo navegador.
+const KEY = () => tkey('pj_peticoes')
 const lsGet = (k, fb) => { try { return JSON.parse(localStorage.getItem(k) ?? 'null') ?? fb } catch { return fb } }
 const lsSet = (k, v) => localStorage.setItem(k, JSON.stringify(v))
 const uid = () => 'pet_' + Math.random().toString(36).slice(2, 10)
@@ -341,20 +344,20 @@ OAB/{{advogado.oab_uf}} nº {{advogado.oab}}`,
 
 // ── CRUD (defaults + modelos do usuário) ────────────────────────────────────
 export function getPeticoes() {
-  const custom = lsGet(KEY, [])
+  const custom = lsGet(KEY(), [])
   return [...PETICOES_PADRAO, ...custom]
 }
 export function savePeticao(p) {
-  const custom = lsGet(KEY, [])
+  const custom = lsGet(KEY(), [])
   if (p.id && custom.some(x => x.id === p.id)) {
-    lsSet(KEY, custom.map(x => x.id === p.id ? { ...x, ...p } : x))
+    lsSet(KEY(), custom.map(x => x.id === p.id ? { ...x, ...p } : x))
     return p
   }
   const novo = { ...p, id: p.id || uid(), readonly: false, createdAt: new Date().toISOString() }
-  lsSet(KEY, [...custom, novo])
+  lsSet(KEY(), [...custom, novo])
   return novo
 }
 export function deletePeticao(id) {
-  const custom = lsGet(KEY, [])
-  lsSet(KEY, custom.filter(x => x.id !== id))
+  const custom = lsGet(KEY(), [])
+  lsSet(KEY(), custom.filter(x => x.id !== id))
 }
