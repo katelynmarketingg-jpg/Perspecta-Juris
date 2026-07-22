@@ -5,6 +5,7 @@
 
 import { currentTenantId } from './tenant'
 import { getCfg } from './tenantData'
+import api from './api'
 const LS = 'pj_local_'
 const lsGet = (k, fb) => { try { return JSON.parse(localStorage.getItem(k) ?? 'null') ?? fb } catch { return fb } }
 const lsSet = (k, v)  => localStorage.setItem(k, JSON.stringify(v))
@@ -52,23 +53,17 @@ function inferTribunal(judicialNumber, court) {
 }
 
 // Busca movimentações de um processo específico no DataJud
-async function fetchMovimentos(judicialNumber, tribunal, apiKey) {
-  const key = apiKey || getCfg('pj_cfg_datajud_key', '') || 'cDZHYzlZa0JadVREZDJCendBdUFWZz09cDZHYzlZa0JadVREZDJCendBdUFWZz09'
-  const res = await fetch(`/datajud/api_publica_${tribunal}/_search`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `APIKey ${key}`,
-    },
-    body: JSON.stringify({
+async function fetchMovimentos(judicialNumber, tribunal) {
+  // Vai pelo servidor (/api/datajud): antes chamava '/datajud/...', que só
+  // existe no modo de desenvolvimento — em produção falhava em silêncio.
+  try {
+    const json = await api.post(`/api/datajud/${tribunal}/_search`, {
       query: { match: { numeroProcesso: judicialNumber } },
       size: 1,
-      _source: ['movimentos','numeroProcesso'],
-    }),
-  })
-  if (!res.ok) return []
-  const json = await res.json()
-  return json.hits?.hits?.[0]?._source?.movimentos ?? []
+      _source: ['movimentos', 'numeroProcesso'],
+    })
+    return json?.hits?.hits?.[0]?._source?.movimentos ?? []
+  } catch { return [] }
 }
 
 // Sincroniza um processo: traz movimentações novas e persiste

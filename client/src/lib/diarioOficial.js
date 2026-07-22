@@ -6,7 +6,6 @@ import { getCfg, setCfg } from './tenantData'
 //  um backend que faça o mesmo proxy (evita CORS).
 // ─────────────────────────────────────────────────────────────────────────
 
-const BASE = '/comunica/api/v1'
 
 // yyyy-mm-dd de N dias atrás
 const isoDaysAgo = (n) => new Date(Date.now() - n * 86400000).toISOString().slice(0, 10)
@@ -54,8 +53,15 @@ export async function fetchPublicacoes({ oab, uf, dataInicio, dataFim, nome, num
     params.set('ufOab', uf)
     if (nome) params.set('nomeAdvogado', nome)
   }
-  const res = await fetch(`${BASE}/comunicacao?${params.toString()}`, { headers: { Accept: 'application/json' } })
-  if (!res.ok) throw new Error(`DJEN retornou ${res.status}. Tente novamente mais tarde.`)
+  // Passa pelo servidor (/api/diario/publicacoes). O caminho '/comunica' só
+  // existe no modo de desenvolvimento e quebrava em produção.
+  const res = await fetch(`/api/diario/publicacoes?${params.toString()}`, {
+    headers: {
+      Accept: 'application/json',
+      ...(localStorage.getItem('pj_access_token') ? { Authorization: `Bearer ${localStorage.getItem('pj_access_token')}` } : {}),
+    },
+  })
+  if (!res.ok) throw new Error(`Diário retornou ${res.status}. Tente novamente mais tarde.`)
   const data = await res.json()
   const itens = data?.items ?? data?.content ?? data ?? []
   return (Array.isArray(itens) ? itens : []).map(normalizar)

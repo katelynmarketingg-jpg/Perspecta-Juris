@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { getCfg, setCfg } from '../../lib/tenantData'
+import api from '../../lib/api'
 import { useUiStore } from '../../stores/uiStore'
 import { Button, Card, Input, Badge } from '../../components/ui'
 import { STATES_BR } from '../../lib/constants'
@@ -85,38 +86,24 @@ function guessArea(assuntos = []) {
 }
 
 // ── DataJud search ────────────────────────────────────────────────
-async function searchDatajud(oab, uf, tribunal, apiKey) {
+async function searchDatajud(oab, uf, tribunal) {
   const index = tribunal || UF_TO_TRIBUNAL[uf] || 'tjsp'
-  const key   = apiKey || 'cDZHYzlZa0JadVREZDJCendBdUFWZz09cDZHYzlZa0JadVREZDJCendBdUFWZz09'
-
-  const res = await fetch(`/datajud/api_publica_${index}/_search`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `APIKey ${key}`,
-    },
-    body: JSON.stringify({
-      query: {
-        bool: {
-          must: [
-            { match: { 'advogados.oabNumero': oab } },
-            { match: { 'advogados.oabEstado':  uf  } },
-          ],
-        },
+  // Passa pelo servidor (/api/datajud): antes chamava '/datajud/...', que só
+  // existe no modo de desenvolvimento — em produção não funcionava.
+  const json = await api.post(`/api/datajud/${index}/_search`, {
+    query: {
+      bool: {
+        must: [
+          { match: { 'advogados.oabNumero': oab } },
+          { match: { 'advogados.oabEstado': uf } },
+        ],
       },
-      size: 100,
-      sort: [{ dataAjuizamento: { order: 'desc' } }],
-      _source: ['numeroProcesso','classe','assuntos','tribunal','dataAjuizamento','grau','movimentos','partes','sistema'],
-    }),
+    },
+    size: 100,
+    sort: [{ dataAjuizamento: { order: 'desc' } }],
+    _source: ['numeroProcesso', 'classe', 'assuntos', 'tribunal', 'dataAjuizamento', 'grau', 'movimentos', 'partes', 'sistema'],
   })
-
-  if (!res.ok) {
-    const txt = await res.text().catch(() => '')
-    throw new Error(`DataJud ${res.status}: ${txt.slice(0, 120)}`)
-  }
-
-  const json = await res.json()
-  return json.hits?.hits ?? []
+  return json?.hits?.hits ?? []
 }
 
 // ── Map DataJud hit → process ─────────────────────────────────────
@@ -504,7 +491,7 @@ export default function IntegrationTab() {
     setSelected(new Set())
     saveConfig()
     try {
-      const hits = await searchDatajud(oab.trim(), uf, tribunal, apiKey)
+      const hits = await searchDatajud(oab.trim(), uf, tribunal)
       setResults(hits)
       if (hits.length === 0) setError('Nenhum processo encontrado para essa OAB nesse tribunal.')
     } catch (e) {
