@@ -9,6 +9,7 @@ import {
   IconTrash, IconEdit, IconCheck, IconX, IconBriefcase, IconTag, IconDollar, IconExternalLink, IconUsers, IconGrid, IconPlus,
 } from '../../components/ui'
 import IntegrationTab from './IntegrationTab'
+import ResgateTab from './ResgateTab'
 
 // ── helpers ──────────────────────────────────────────────────────
 const uid = () => Math.random().toString(36).slice(2, 9) + Math.random().toString(36).slice(2, 9)
@@ -830,6 +831,7 @@ const TABS = [
   { key: 'appearance',   label: 'Aparência',         icon: IconGrid },
   { key: 'office',       label: 'Escritório',        icon: IconTag },
   { key: 'integrations', label: 'Integrações',       icon: IconExternalLink },
+  { key: 'resgate',      label: 'Recuperar dados',   icon: IconGrid },
 ]
 
 export default function SettingsPage() {
@@ -870,6 +872,7 @@ export default function SettingsPage() {
       {tab === 'appearance'   && <AppearanceTab />}
       {tab === 'office'       && <OfficeTab />}
       {tab === 'integrations' && <IntegrationTab />}
+      {tab === 'resgate'      && <ResgateTab />}
     </div>
   )
 }

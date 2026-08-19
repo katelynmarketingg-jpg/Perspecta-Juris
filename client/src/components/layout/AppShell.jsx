@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { NavLink, useNavigate, useLocation, Outlet } from 'react-router-dom'
 import AiAssistant from './AiAssistant'
-import api from '../../lib/api'
+import api, { estaOffline, ouvirConexao } from '../../lib/api'
 import { useAuthStore } from '../../stores/authStore'
 import BrandLogo from '../BrandLogo'
 import { useUiStore } from '../../stores/uiStore'
@@ -56,6 +56,10 @@ export default function AppShell() {
   const [myTasks, setMyTasks] = useState(0)
   const [mostrarTermos, setMostrarTermos] = useState(() => precisaAceitarTermos(user))
   useEffect(() => { setMostrarTermos(precisaAceitarTermos(user)) }, [user?.id])
+
+  // Conexão com o servidor — o api.js avisa quando cai e quando volta.
+  const [offline, setOffline] = useState(() => estaOffline())
+  useEffect(() => ouvirConexao(setOffline), [])
 
   const { theme, toggleTheme, applyTheme, showToast } = useUiStore()
   useEffect(() => { applyTheme() }, [])
@@ -387,6 +391,19 @@ export default function AppShell() {
             </>
           )}
         </header>
+
+        {/* Aviso de conexão — a pessoa PRECISA saber que está vendo cache */}
+        {offline && (
+          <div className="flex items-start gap-2 px-4 py-2.5 bg-amber-500/15 border-b border-amber-500/40 text-amber-200">
+            <span className="text-base leading-none mt-0.5">⚠️</span>
+            <div className="text-xs leading-relaxed">
+              <b>Sem conexão com o servidor.</b> Você está vendo dados guardados neste
+              navegador, que podem estar desatualizados — e <b>nada que você salvar agora
+              será gravado</b>. Espere a conexão voltar antes de cadastrar ou alterar
+              qualquer coisa.
+            </div>
+          </div>
+        )}
 
         {/* Page content */}
         <main className="flex-1 overflow-hidden">

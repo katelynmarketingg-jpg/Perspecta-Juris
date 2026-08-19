@@ -32,6 +32,16 @@ if (IS_PROD) {
     console.error('❌ Configuração insegura — abortando:\n  - ' + fatal.join('\n  - '))
     process.exit(1)
   }
+
+  // Sem CLIENT_ORIGIN o CORS abaixo cai em `true`, que reflete QUALQUER origem.
+  // Não é fatal (o app usa Bearer token, não cookie), mas é porta aberta à toa.
+  if (!process.env.CLIENT_ORIGIN) {
+    console.warn(
+      '\n⚠️  CLIENT_ORIGIN não definida — o CORS vai aceitar qualquer origem.\n' +
+      '   Defina CLIENT_ORIGIN com o endereço do site (ex.: https://perspecta-juris.onrender.com)\n' +
+      '   nas variáveis de ambiente do Render para fechar essa porta.\n'
+    )
+  }
 }
 
 const app = Fastify({

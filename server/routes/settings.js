@@ -5,6 +5,7 @@ import { db } from '../db/index.js'
 import { users, tenants, units } from '../db/schema.js'
 import { planLimitFor, userCount, getPlans } from '../lib/plans.js'
 import { menuAccessFor, setMenuAccess } from '../lib/permissions.js'
+import { validarSenha } from '../lib/senha.js'
 
 export default async function settingsRoutes(app) {
   const auth = { preHandler: [app.authenticate] }
@@ -16,9 +17,29 @@ export default async function settingsRoutes(app) {
   })
 
   // PUT /api/settings/tenant
+  // Allowlist explícita: o admin do escritório mexe na aparência e no nome,
+  // nada além disso. Antes o corpo inteiro caía num spread, então bastava
+  // mandar {"plan":"enterprise"} para furar o limite de acessos do plano —
+  // e {"isActive":false} para derrubar o próprio escritório. Plano, situação
+  // e slug só mudam pelo painel master (/api/master/*).
+  const CAMPOS_EDITAVEIS_TENANT = ['name', 'logoUrl', 'primaryColor']
+
   app.put('/tenant', auth, async (req, reply) => {
     if (req.user.role !== 'admin') return reply.code(403).send({ message: 'Apenas administradores podem alterar o escritório.' })
-    const { id: _id, createdAt: _ca, ...updates } = req.body
+
+    const body = (req.body && typeof req.body === 'object') ? req.body : {}
+    const updates = {}
+    for (const campo of CAMPOS_EDITAVEIS_TENANT) {
+      if (body[campo] !== undefined) updates[campo] = body[campo]
+    }
+
+    if (Object.keys(updates).length === 0) {
+      return reply.code(400).send({
+        message: 'Nada para alterar.',
+        camposPermitidos: CAMPOS_EDITAVEIS_TENANT,
+      })
+    }
+
     await db.update(tenants).set({ ...updates, updatedAt: new Date().toISOString() }).where(eq(tenants.id, req.user.tenantId))
     const [row] = await db.select().from(tenants).where(eq(tenants.id, req.user.tenantId)).limit(1)
     return row
@@ -135,7 +156,14 @@ export default async function settingsRoutes(app) {
       }
     }
 
-    const { name, email, password, role, oabNumber, oabState, phone, login } = req.body
+    const { name, email, password, role, oabNumber, oabState, phone, login } = req.body ?? {}
+
+    if (!String(name ?? '').trim()) {
+      return reply.code(400).send({ message: 'Informe o nome do colaborador.' })
+    }
+    const erroSenha = validarSenha(password)
+    if (erroSenha) return reply.code(400).send({ message: erroSenha })
+
     const passwordHash = await bcrypt.hash(password, 12)
     const now = new Date().toISOString()
     const id = nanoid()
@@ -166,7 +194,11 @@ export default async function settingsRoutes(app) {
     if (!existing) return reply.code(404).send({ message: 'Usuário não encontrado.' })
 
     const { password, passwordHash: _ph, id: _id, tenantId: _tid, menuAccess, login: _login, ...updates } = req.body
-    if (password) updates.passwordHash = await bcrypt.hash(password, 12)
+    if (password !== undefined) {
+      const erroSenha = validarSenha(password)
+      if (erroSenha) return reply.code(400).send({ message: erroSenha })
+      updates.passwordHash = await bcrypt.hash(password, 12)
+    }
     await db.update(users).set({ ...updates, updatedAt: new Date().toISOString() }).where(eq(users.id, req.params.id))
     if (menuAccess !== undefined) await setMenuAccess(req.user.tenantId, req.params.id, menuAccess)
     return { success: true }
