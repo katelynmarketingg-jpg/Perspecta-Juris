@@ -2,18 +2,12 @@ import bcrypt from 'bcryptjs'
 import { nanoid } from 'nanoid'
 import { eq, ne, and, sql } from 'drizzle-orm'
 import { db } from '../db/index.js'
-import { tenants, users, clients, processes, refreshTokens } from '../db/schema.js'
+import { tenants, users, clients, processes } from '../db/schema.js'
 import { getPlans, savePlans } from '../lib/plans.js'
 import { menuAccessFor } from '../lib/permissions.js'
 import { getBranding, setBranding } from '../lib/branding.js'
-
-const REFRESH_EXPIRES_DAYS = parseInt(process.env.REFRESH_TOKEN_EXPIRES_DAYS ?? '7')
-
-function refreshExpiry() {
-  const d = new Date()
-  d.setDate(d.getDate() + REFRESH_EXPIRES_DAYS)
-  return d.toISOString()
-}
+import { issueRefreshToken } from '../lib/refreshTokens.js'
+import { validarSenha } from '../lib/senha.js'
 
 function slugify(s) {
   return (s ?? '')
@@ -78,9 +72,11 @@ export default async function masterRoutes(app) {
   // POST /api/master/companies — cria escritório + usuário admin dele
   app.post('/companies', master, async (req, reply) => {
     const b = req.body ?? {}
-    if (!b.name?.trim() || !b.adminLogin?.trim() || !b.adminPassword?.trim()) {
-      return reply.code(400).send({ message: 'Nome da empresa, login e senha do administrador são obrigatórios.' })
+    if (!b.name?.trim() || !b.adminLogin?.trim()) {
+      return reply.code(400).send({ message: 'Nome da empresa e login do administrador são obrigatórios.' })
     }
+    const erroSenha = validarSenha(b.adminPassword)
+    if (erroSenha) return reply.code(400).send({ message: erroSenha })
 
     const now = new Date().toISOString()
     const id = 'tnt_' + nanoid(12)
@@ -166,16 +162,7 @@ export default async function masterRoutes(app) {
 
     const payload = { userId: target.id, tenantId: tenant.id, role: target.role }
     const accessToken  = app.jwt.sign(payload)
-    const refreshToken = nanoid(64)
-    const tokenHash    = await bcrypt.hash(refreshToken, 8)
-
-    await db.insert(refreshTokens).values({
-      id: nanoid(),
-      userId: target.id,
-      tokenHash,
-      expiresAt: refreshExpiry(),
-      createdAt: new Date().toISOString(),
-    })
+    const refreshToken = await issueRefreshToken(target.id)
 
     return reply.send({
       accessToken,

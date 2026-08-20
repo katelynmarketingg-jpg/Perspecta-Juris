@@ -38,13 +38,19 @@ export const users = pgTable('users', {
   tenantIdx: index('users_tenant_idx').on(t.tenantId),
 }))
 
+// token_hash guarda o SHA-256 (hex) do refresh token — determinístico, para
+// permitir busca por igualdade. Ver server/lib/refreshTokens.js.
 export const refreshTokens = pgTable('refresh_tokens', {
   id:        text('id').primaryKey(),
   userId:    text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   tokenHash: text('token_hash').notNull(),
   expiresAt: text('expires_at').notNull(),
   createdAt: text('created_at').notNull(),
-})
+}, t => ({
+  hashIdx:    uniqueIndex('refresh_tokens_hash_uidx').on(t.tokenHash),
+  userIdx:    index('refresh_tokens_user_idx').on(t.userId),
+  expiresIdx: index('refresh_tokens_expires_idx').on(t.expiresAt),
+}))
 
 // ── Units / Filiais ───────────────────────────────────────────
 export const units = pgTable('units', {

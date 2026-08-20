@@ -31,6 +31,15 @@ const metodoLabel = v => METODOS_RECEB.find(m => m.value === v)?.label ?? v
 
 const lsGet = (k, fb) => { try { return JSON.parse(localStorage.getItem(k) ?? 'null') ?? fb } catch { return fb } }
 const lsSet = (k, v)  => localStorage.setItem(k, JSON.stringify(v))
+
+// Senha inicial do Portal do Cliente. Antes o padrão era '001' — fixo, e igual
+// para todos os clientes de todos os escritórios. Agora nasce aleatória.
+function senhaPortalAleatoria() {
+  const alfabeto = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789' // sem O/0/I/l
+  const bytes = new Uint32Array(10)
+  crypto.getRandomValues(bytes)
+  return Array.from(bytes, n => alfabeto[n % alfabeto.length]).join('')
+}
 const uid   = () => Math.random().toString(36).slice(2,9) + Math.random().toString(36).slice(2,9)
 
 const empty = {
@@ -1806,7 +1815,7 @@ export default function ClientPage() {
                         <h3 className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wide">🔐 Acesso ao Portal do Cliente</h3>
                         <label className="flex items-center gap-1.5 text-[11px] text-[var(--text-secondary)] cursor-pointer">
                           <input type="checkbox" checked={!!data.portalEnabled}
-                            onChange={e => setData(d => ({ ...d, portalEnabled: e.target.checked, portalPassword: e.target.checked && !d.portalPassword ? '001' : d.portalPassword }))}
+                            onChange={e => setData(d => ({ ...d, portalEnabled: e.target.checked, portalPassword: e.target.checked && !d.portalPassword ? senhaPortalAleatoria() : d.portalPassword }))}
                             className="accent-brand-500" />
                           Habilitar
                         </label>
@@ -1815,8 +1824,8 @@ export default function ClientPage() {
                         <>
                           <p className="text-[11px] text-[var(--text-muted)]">O cliente entra em <b>/portal</b> com <b>CPF, e-mail ou nome</b> + a senha abaixo. Use quando o cliente não conseguir acessar sozinho.</p>
                           <div className="flex items-end gap-2">
-                            <div className="flex-1"><Input label="Senha do portal" value={data.portalPassword} onChange={set('portalPassword')} placeholder="Ex.: 001" /></div>
-                            <Button variant="secondary" size="sm" onClick={() => setData(d => ({ ...d, portalPassword: Math.random().toString(36).slice(2, 8) }))}>Gerar</Button>
+                            <div className="flex-1"><Input label="Senha do portal" value={data.portalPassword} onChange={set('portalPassword')} placeholder="mín. 8 caracteres" /></div>
+                            <Button variant="secondary" size="sm" onClick={() => setData(d => ({ ...d, portalPassword: senhaPortalAleatoria() }))}>Gerar</Button>
                           </div>
                           <p className="text-[10px] text-[var(--text-muted)]">Login do cliente: <b>{data.cpfCnpj || data.email || data.name || '—'}</b> · lembre de <b>Salvar</b>.</p>
                         </>

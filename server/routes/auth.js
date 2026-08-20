@@ -1,17 +1,12 @@
 import bcrypt from 'bcryptjs'
-import { nanoid } from 'nanoid'
 import { eq, and, ilike } from 'drizzle-orm'
 import { db } from '../db/index.js'
-import { users, tenants, refreshTokens } from '../db/schema.js'
+import { users, tenants } from '../db/schema.js'
 import { menuAccessFor } from '../lib/permissions.js'
-
-const REFRESH_EXPIRES_DAYS = parseInt(process.env.REFRESH_TOKEN_EXPIRES_DAYS ?? '7')
-
-function refreshExpiry() {
-  const d = new Date()
-  d.setDate(d.getDate() + REFRESH_EXPIRES_DAYS)
-  return d.toISOString()
-}
+import {
+  issueRefreshToken, findRefreshToken, revokeRefreshToken,
+  revokeAllForUser, purgeExpiredTokens, isExpired,
+} from '../lib/refreshTokens.js'
 
 export default async function authRoutes(app) {
   // POST /api/auth/login  — empresa + nome + senha
@@ -67,18 +62,12 @@ export default async function authRoutes(app) {
     // Update last login
     await db.update(users).set({ lastLoginAt: new Date().toISOString() }).where(eq(users.id, user.id))
 
+    // Limpeza oportunista dos tokens já vencidos (não bloqueia o login).
+    await purgeExpiredTokens()
+
     const payload = { userId: user.id, tenantId: user.tenantId, role: user.role }
     const accessToken  = app.jwt.sign(payload)
-    const refreshToken = nanoid(64)
-    const tokenHash    = await bcrypt.hash(refreshToken, 8)
-
-    await db.insert(refreshTokens).values({
-      id: nanoid(),
-      userId: user.id,
-      tokenHash,
-      expiresAt: refreshExpiry(),
-      createdAt: new Date().toISOString(),
-    })
+    const refreshToken = await issueRefreshToken(user.id)
 
     return reply.send({
       accessToken,
@@ -107,27 +96,36 @@ export default async function authRoutes(app) {
     },
   }, async (req, reply) => {
     const { refreshToken } = req.body
-    const tokens = await db.select().from(refreshTokens)
-    const match = tokens.find(async t => await bcrypt.compare(refreshToken, t.tokenHash))
 
-    if (!match || new Date(match.expiresAt) < new Date()) {
+    // Busca a linha EXATA deste token (igualdade sobre o hash, com índice).
+    // O código anterior usava Array.find com um predicado async: uma função
+    // async devolve sempre uma Promise (truthy), então o find casava sempre
+    // a PRIMEIRA linha da tabela — qualquer string virava um token válido do
+    // dono daquela linha. Era uma falha de autenticação, não um detalhe.
+    const match = await findRefreshToken(refreshToken)
+
+    if (!match || isExpired(match)) {
+      if (match) await revokeRefreshToken(match.id)
       return reply.code(401).send({ message: 'Refresh token inválido ou expirado.' })
     }
 
     const [user] = await db.select().from(users).where(eq(users.id, match.userId)).limit(1)
-    if (!user?.isActive) return reply.code(401).send({ message: 'Usuário inativo.' })
+    if (!user?.isActive) {
+      // Usuário desativado: derruba todas as sessões dele.
+      await revokeAllForUser(match.userId)
+      return reply.code(401).send({ message: 'Usuário inativo.' })
+    }
 
-    await db.delete(refreshTokens).where(eq(refreshTokens.id, match.id))
+    // O escritório pode ter sido desativado depois que a sessão começou.
+    const [tenant] = await db.select().from(tenants).where(eq(tenants.id, user.tenantId)).limit(1)
+    if (!tenant?.isActive) {
+      await revokeAllForUser(user.id)
+      return reply.code(401).send({ message: 'Empresa inativa.' })
+    }
 
-    const newRefreshToken = nanoid(64)
-    const tokenHash = await bcrypt.hash(newRefreshToken, 8)
-    await db.insert(refreshTokens).values({
-      id: nanoid(),
-      userId: user.id,
-      tokenHash,
-      expiresAt: refreshExpiry(),
-      createdAt: new Date().toISOString(),
-    })
+    // Rotação: o token usado morre e um novo nasce.
+    await revokeRefreshToken(match.id)
+    const newRefreshToken = await issueRefreshToken(user.id)
 
     const payload = { userId: user.id, tenantId: user.tenantId, role: user.role }
     return reply.send({
@@ -138,7 +136,7 @@ export default async function authRoutes(app) {
 
   // POST /api/auth/logout
   app.post('/logout', { preHandler: [app.authenticate] }, async (req, reply) => {
-    await db.delete(refreshTokens).where(eq(refreshTokens.userId, req.user.userId))
+    await revokeAllForUser(req.user.userId)
     return reply.code(204).send()
   })
 

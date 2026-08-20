@@ -12,7 +12,11 @@ services:
       - key: PORT
         value: "8788"
       - key: DATABASE_URL
-        sync: false           # set manually in Render dashboard (Neon.tech URL)
+        sync: false           # defina no painel do Render: a URI do Postgres (Supabase)
+      # Endereço público do site. Sem isto o CORS aceita qualquer origem.
+      # Ex.: https://perspecta-juris.onrender.com
+      - key: CLIENT_ORIGIN
+        sync: false
       - key: JWT_SECRET
         generateValue: true
       - key: FILES_DIR

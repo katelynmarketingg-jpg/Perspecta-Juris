@@ -23,33 +23,14 @@ function curTenant() {
   } catch { return DEMO }
 }
 
-// ── Seed inicial: empresa admin (master) + primeiro escritório ─────────
-// Faz upsert por id (não apaga seus dados) — garante os logins mesmo se já
-// houver semeadura antiga no navegador.
-function seedAuth() {
-  const now = new Date().toISOString()
-
-  // Empresas (tenants)
-  const tens = table('tenants')
-  const ensureTenant = (t) => { if (!tens.find(x => x.id === t.id)) tens.push({ createdAt: now, updatedAt: now, ...t }) }
-  ensureTenant({ id: 'tnt_master', name: 'Perspecta Admin',        slug: 'admin',     cnpj: '',                    plan: 'master',       isActive: true })
-  ensureTenant({ id: DEMO,         name: 'Perspecta',              slug: 'perspecta', cnpj: '00.000.000/0001-00',  plan: 'professional', isActive: true })
-  ensureTenant({ id: 'tnt_kn',     name: 'KN Advocacia Criminal',  slug: 'kn',        cnpj: '',                    plan: 'professional', isActive: true })
-  saveTable('tenants', tens)
-
-  // Usuários (upsert por id — atualiza login/senha sem tocar em outros usuários)
-  const us = table('users')
-  const upsertUser = (u) => { const i = us.findIndex(x => x.id === u.id); if (i >= 0) us[i] = { ...us[i], ...u }; else us.push({ createdAt: now, ...u }) }
-  // Master do sistema (administra TODOS os acessos / cria escritórios) — separado
-  upsertUser({ id: 'usr_master',   tenantId: 'tnt_master', name: 'Administradora', loginName: 'admin', email: 'admin@perspecta.com', role: 'master', password: '001' })
-  // SEU login (escritório Perspecta)
-  upsertUser({ id: 'user_katelyn', tenantId: DEMO,         name: 'Katelyn',        loginName: 'kat',   email: 'kat@perspecta.com',   role: 'admin',  password: '001' })
-  // Escritório KN Advocacia Criminal — Karen e Nathi (podem editar depois)
-  upsertUser({ id: 'usr_karen',    tenantId: 'tnt_kn',     name: 'Karen',          loginName: 'karen', email: 'karen@kn.adv.br',     role: 'admin',  password: '001' })
-  upsertUser({ id: 'usr_nathi',    tenantId: 'tnt_kn',     name: 'Nathi',          loginName: 'nathi', email: 'nathi@kn.adv.br',     role: 'admin',  password: '001' })
-  saveTable('users', us)
-}
-seedAuth()
+// ── Sem usuários de demonstração ──────────────────────────────────────
+// Aqui existia um seedAuth() que gravava quatro contas com senha '001' em
+// texto puro (inclusive uma com papel 'master') no localStorage de QUALQUER
+// visitante, e ainda ia junto no bundle de produção. Somado ao fallback de
+// login que existia no api.js, dava para entrar numa sessão falsa de
+// administradora sem credencial nenhuma.
+// Autenticação agora é exclusivamente do servidor: o localDb serve apenas
+// como cache de LEITURA dos dados do escritório já logado.
 
 const tenants = () => table('tenants')
 const usersT  = () => table('users')
@@ -93,82 +74,15 @@ export function localHandle(path, method = 'GET', body = null) {
   const q = new URLSearchParams(qs ?? '')
   let m
 
-  // ── Auth ────────────────────────────────────────────────────
-  if (url === '/api/auth/login' && method === 'POST') {
-    const { empresa, nome, senha } = body ?? {}
-    const emp = (empresa ?? '').trim().toLowerCase()
-    const candidatos = usersT().filter(u =>
-      u.loginName.toLowerCase() === (nome ?? '').trim().toLowerCase() && u.password === senha
+  // ── Auth e Master: NÃO existem localmente ────────────────────
+  // Login, refresh e criação de empresa/usuário são exclusivos do servidor.
+  // O api.js já não encaminha essas rotas para cá; este guarda-costas existe
+  // para o caso de alguém religar o fallback sem perceber o que isso implica.
+  if (url.startsWith('/api/auth/') || url.startsWith('/api/master/')) {
+    throw Object.assign(
+      new Error('Sem conexão com o servidor. Entrar e administrar empresas exige o servidor on-line.'),
+      { status: 503, semConexao: true },
     )
-    let user = null
-    for (const c of candidatos) {
-      const tn = tenants().find(t => t.id === c.tenantId)
-      if (!emp || tn?.name.toLowerCase() === emp || tn?.slug === emp) { user = c; break }
-    }
-    if (!user)
-      throw Object.assign(new Error('Empresa, nome ou senha inválidos.'), { status: 401 })
-    const tenant = tenants().find(t => t.id === user.tenantId)
-    if (tenant && tenant.isActive === false)
-      throw Object.assign(new Error('Empresa desativada. Contate o administrador.'), { status: 403 })
-    setSession({ userId: user.id, tenantId: user.tenantId, role: user.role })
-    return {
-      accessToken:  `mock_${user.id}_${Date.now()}`,
-      refreshToken: `mock_r_${user.id}_${Date.now()}`,
-      user:   { id: user.id, name: user.name, role: user.role, email: user.email, tenantId: user.tenantId },
-      tenant,
-    }
-  }
-  if (url === '/api/auth/me') {
-    let s = session()
-    if (!s) {
-      try { const p = JSON.parse(localStorage.getItem('pj_auth') ?? 'null'); if (p?.state?.user?.id) s = { userId: p.state.user.id, tenantId: p.state.tenant?.id ?? p.state.user.tenantId } } catch {}
-    }
-    const user = usersT().find(u => u.id === s?.userId)
-      ?? usersT().find(u => u.tenantId === DEMO && u.role !== 'master')
-      ?? usersT()[0]
-    const tenant = tenants().find(t => t.id === (s?.tenantId ?? user?.tenantId)) ?? tenants().find(t => t.id === DEMO)
-    return { user, tenant }
-  }
-  if (url === '/api/auth/logout'  && method === 'POST') { localStorage.removeItem('pj_session'); return null }
-  if (url === '/api/auth/refresh' && method === 'POST') {
-    const s = session()
-    return {
-      accessToken:  `mock_${s?.userId ?? 'u'}_${Date.now()}`,
-      refreshToken: `mock_r_${s?.userId ?? 'u'}_${Date.now()}`,
-    }
-  }
-
-  // ── Master (administrador do sistema) — empresas ─────────────
-  if (url === '/api/master/companies') {
-    if (method === 'GET') {
-      return tenants().filter(t => t.id !== 'tnt_master').map(t => ({
-        ...t,
-        usersCount:     usersT().filter(u => u.tenantId === t.id).length,
-        clientsCount:   table('clients').filter(c => (c.tenantId ?? DEMO) === t.id).length,
-        processesCount: table('processes').filter(p => (p.tenantId ?? DEMO) === t.id).length,
-      }))
-    }
-    if (method === 'POST') {
-      const now = new Date().toISOString()
-      const id = 'tnt_' + uid()
-      const slug = (body.slug ?? body.name ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
-      const tenant = { id, name: body.name, slug, cnpj: body.cnpj ?? '', plan: body.plan ?? 'starter', isActive: true, createdAt: now, updatedAt: now }
-      saveTable('tenants', [...tenants(), tenant])
-      // usuário administrador da nova empresa
-      saveTable('users', [...usersT(), {
-        id: 'usr_' + uid(), tenantId: id,
-        name: body.adminName ?? 'Administrador',
-        loginName: body.adminLogin ?? body.name,
-        email: body.adminEmail ?? '',
-        role: 'admin', password: body.adminPassword ?? '123', createdAt: now,
-      }])
-      return { ...tenant, usersCount: 1, clientsCount: 0, processesCount: 0 }
-    }
-  }
-  if ((m = url.match(/^\/api\/master\/companies\/([^/]+)$/))) {
-    const id = m[1]
-    if (method === 'PUT')    return updateRow('tenants', id, body)
-    if (method === 'DELETE') { removeRow('tenants', id); saveTable('users', usersT().filter(u => u.tenantId !== id)); return null }
   }
 
   // ── Clients ─────────────────────────────────────────────────

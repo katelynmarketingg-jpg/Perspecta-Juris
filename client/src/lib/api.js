@@ -2,6 +2,45 @@ import { localHandle } from './localDb'
 
 const BASE = import.meta.env.VITE_API_URL ?? ''
 
+// ─────────────────────────────────────────────────────────────────────────
+//  Modo offline — regra de ouro
+//
+//  LEITURA (GET) pode cair no cache local quando o servidor não responde:
+//  é melhor ver o que já se tinha do que uma tela em branco.
+//
+//  ESCRITA (POST/PUT/PATCH/DELETE) NUNCA cai no local. Antes caía, em
+//  silêncio: com o servidor fora do ar a pessoa cadastrava clientes,
+//  lançamentos e prazos o dia inteiro achando que estava tudo salvo, e
+//  nada chegava ao banco. Num sistema com prazo processual isso é o pior
+//  defeito possível. Agora a escrita falha alto e a tela avisa.
+// ─────────────────────────────────────────────────────────────────────────
+const METODOS_DE_ESCRITA = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
+
+// Estado de conexão observado, para a interface poder avisar.
+let servidorInacessivel = false
+const ouvintes = new Set()
+
+export function estaOffline() { return servidorInacessivel }
+export function ouvirConexao(fn) { ouvintes.add(fn); return () => ouvintes.delete(fn) }
+
+function marcarConexao(inacessivel) {
+  if (servidorInacessivel === inacessivel) return
+  servidorInacessivel = inacessivel
+  ouvintes.forEach(fn => { try { fn(inacessivel) } catch { /* ignora */ } })
+}
+
+// Erro de escrita sem servidor — a UI trata como "NÃO foi salvo".
+export class SemConexaoError extends Error {
+  constructor(metodo, path) {
+    super('Sem conexão com o servidor — este dado NÃO foi salvo. Verifique a internet e tente de novo.')
+    this.name = 'SemConexaoError'
+    this.semConexao = true
+    this.naoSalvo = true
+    this.metodo = metodo
+    this.path = path
+  }
+}
+
 function getToken() {
   return localStorage.getItem('pj_access_token')
 }
@@ -35,6 +74,13 @@ async function refreshAccessToken() {
 
 async function request(path, opts = {}) {
   const token = getToken()
+  const metodo = (opts.method ?? 'GET').toUpperCase()
+  const ehEscrita = METODOS_DE_ESCRITA.has(metodo)
+  // Login e refresh JAMAIS caem no local: uma sessão falsa é pior que
+  // nenhuma sessão — a pessoa acha que entrou e trabalha fora do banco.
+  const ehAuth = path.includes('/api/auth/login') || path.includes('/api/auth/refresh')
+  const podeCairNoLocal = !ehEscrita && !ehAuth && path.startsWith('/api')
+
   const headers = {
     ...(opts.body && !(opts.body instanceof FormData) ? { 'Content-Type': 'application/json' } : {}),
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -50,31 +96,37 @@ async function request(path, opts = {}) {
         : opts.body ? JSON.stringify(opts.body) : undefined,
     })
   } catch {
-    // Network error — backend unreachable, use local fallback
-    return localHandle(path, opts.method ?? 'GET', opts.body ?? null)
+    // Servidor inalcançável (rede caiu, DNS, servidor fora do ar).
+    marcarConexao(true)
+    if (podeCairNoLocal) return localHandle(path, metodo, opts.body ?? null)
+    throw new SemConexaoError(metodo, path)
   }
 
-  // Backend/proxy failure (Vite returns 5xx — often an HTML error page —
-  // when the API server is unreachable). This app is offline-first, so any
-  // 5xx on an /api route falls back to the local database instead of failing.
+  // 5xx numa rota /api: pode ser erro real do backend (JSON com message) ou
+  // o servidor fora do ar devolvendo uma página de erro HTML.
   if (res.status >= 500 && res.status < 600 && path.startsWith('/api')) {
     const text = await res.text().catch(() => '')
-    // Real backend JSON error (has a parseable message) → surface it.
-    // Empty body, HTML proxy error, or dev mode → treat as "backend down".
     let parsed = null
-    try { parsed = JSON.parse(text) } catch { /* not JSON */ }
-    const looksLikeRealError = parsed && typeof parsed === 'object' && parsed.message && !import.meta.env.DEV
-    if (!looksLikeRealError) {
-      return localHandle(path, opts.method ?? 'GET', opts.body ?? null)
+    try { parsed = JSON.parse(text) } catch { /* não é JSON */ }
+
+    if (parsed?.message) {
+      // Erro real do backend — mostra a mensagem dele, não engole.
+      marcarConexao(false)
+      throw Object.assign(new Error(parsed.message), { status: res.status, data: parsed })
     }
-    throw Object.assign(new Error(parsed.message ?? 'request_failed'), { status: res.status, data: parsed })
+
+    // Sem JSON = servidor indisponível (proxy/erro HTML/cold start).
+    marcarConexao(true)
+    if (podeCairNoLocal) return localHandle(path, metodo, opts.body ?? null)
+    throw new SemConexaoError(metodo, path)
   }
 
-  // Auto-refresh on 401 — exceto nos próprios endpoints de auth.
+  marcarConexao(false)
+
+  // Auto-refresh no 401 — exceto nos próprios endpoints de auth.
   // Um 401 do /login significa "credenciais inválidas", não "sessão expirada":
   // tratar como sessão expirada aqui esconde o erro real do usuário.
-  const isAuthEndpoint = path.includes('/api/auth/login') || path.includes('/api/auth/refresh')
-  if (res.status === 401 && !isAuthEndpoint) {
+  if (res.status === 401 && !ehAuth) {
     try {
       if (!refreshPromise) {
         refreshPromise = refreshAccessToken().finally(() => { refreshPromise = null })
