@@ -7,6 +7,7 @@ import {
   issueRefreshToken, findRefreshToken, revokeRefreshToken,
   revokeAllForUser, purgeExpiredTokens, isExpired,
 } from '../lib/refreshTokens.js'
+import { emitirEventoPerspecta } from '../lib/perspecta-webhook.js'
 
 export default async function authRoutes(app) {
   // POST /api/auth/login  — empresa + nome + senha
@@ -33,6 +34,10 @@ export default async function authRoutes(app) {
       .limit(1)
 
     if (!tenant?.isActive) {
+      emitirEventoPerspecta('login.novo', {
+        empresa_ref: null, usuario_email: null, ip: req.ip,
+        resultado: 'falha', motivo: 'empresa_nao_encontrada',
+      })
       return reply.code(401).send({ message: 'Empresa não encontrada ou inativa.' })
     }
 
@@ -53,14 +58,27 @@ export default async function authRoutes(app) {
       .limit(1)
 
     if (!user?.isActive) {
+      emitirEventoPerspecta('login.novo', {
+        empresa_ref: tenant.id, usuario_email: user?.email ?? null, ip: req.ip,
+        resultado: 'falha', motivo: 'usuario_inativo_ou_nao_encontrado',
+      })
       return reply.code(401).send({ message: 'Credenciais inválidas.' })
     }
 
     const valid = await bcrypt.compare(senha, user.passwordHash)
-    if (!valid) return reply.code(401).send({ message: 'Credenciais inválidas.' })
+    if (!valid) {
+      emitirEventoPerspecta('login.novo', {
+        empresa_ref: tenant.id, usuario_email: user.email ?? null, ip: req.ip,
+        resultado: 'falha', motivo: 'senha_incorreta',
+      })
+      return reply.code(401).send({ message: 'Credenciais inválidas.' })
+    }
 
     // Update last login
     await db.update(users).set({ lastLoginAt: new Date().toISOString() }).where(eq(users.id, user.id))
+    emitirEventoPerspecta('login.novo', {
+      empresa_ref: tenant.id, usuario_email: user.email ?? null, ip: req.ip, resultado: 'sucesso',
+    })
 
     // Limpeza oportunista dos tokens já vencidos (não bloqueia o login).
     await purgeExpiredTokens()
