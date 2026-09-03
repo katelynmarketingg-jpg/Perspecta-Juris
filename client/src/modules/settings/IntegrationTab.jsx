@@ -271,13 +271,24 @@ function PortalCard({ portal, oab, oabUF, onImported }) {
     setSelected(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
   }
 
-  const doImport = () => {
-    if (!procs || selected.size === 0) return
+  const [importando, setImportando] = useState(false)
+  const doImport = async () => {
+    if (!procs || selected.size === 0 || importando) return
+    setImportando(true)
     const toImport = procs.filter(p => selected.has(p.judicialNumber))
-    const { added } = importTribunalProcesses(toImport)
-    showToast(`${added} processo${added !== 1 ? 's' : ''} importado${added !== 1 ? 's' : ''} do ${portal.label}.`, 'success')
-    setSelected(new Set())
-    onImported?.()
+    try {
+      const { added, falhas } = await importTribunalProcesses(toImport)
+      if (added > 0) showToast(`${added} processo${added !== 1 ? 's' : ''} do ${portal.label} salvo${added !== 1 ? 's' : ''} no banco.`, 'success')
+      if (falhas?.length) showToast(`${falhas.length} não puderam ser importados: ${falhas[0]}`, 'error', 9000)
+      if (!added && !falhas?.length) showToast('Nada novo — já estavam cadastrados.', 'info')
+      setSelected(new Set())
+      await carregarExistentes()
+      onImported?.()
+    } catch (e) {
+      showToast(e?.message ?? 'Falha ao importar.', 'error', 9000)
+    } finally {
+      setImportando(false)
+    }
   }
 
   // Números já cadastrados NO BANCO (antes vinha do localStorage).
