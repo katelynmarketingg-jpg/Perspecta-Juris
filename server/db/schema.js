@@ -369,6 +369,23 @@ export const automationLogs = pgTable('automation_logs', {
   ranAt:          text('ran_at').notNull(),
 })
 
+// ── Usage Events (medição de consumo por escritório) ──────────
+// Base para cobrar por cota. Antes não existia contador nenhum: não havia
+// como saber quantas consultas ao DataJud um escritório fez no mês.
+// Uma linha por evento; a agregação é feita na consulta.
+export const usageEvents = pgTable('usage_events', {
+  id:        text('id').primaryKey(),
+  tenantId:  text('tenant_id').notNull(),
+  kind:      text('kind').notNull(),   // datajud_query | djen_query | document_bytes | ai_tokens | user_created
+  qty:       real('qty').notNull().default(1),
+  meta:      jsonb('meta'),
+  userId:    text('user_id'),
+  createdAt: text('created_at').notNull(),
+}, t => ({
+  tenantKindIdx: index('usage_tenant_kind_idx').on(t.tenantId, t.kind, t.createdAt),
+  createdIdx:    index('usage_created_idx').on(t.createdAt),
+}))
+
 // ── Audit Logs ────────────────────────────────────────────────
 export const auditLogs = pgTable('audit_logs', {
   id:         text('id').primaryKey(),

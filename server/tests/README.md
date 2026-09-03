@@ -34,25 +34,34 @@ node server/index.mjs &
 
 ## Rodar
 
-```bash
-# Servidor: auth, allowlist do tenant, validação de senha
-node server/tests/etapa0.integracao.mjs
+Rodam direto (só servidor):
 
-# Cliente: ferramenta de resgate do localStorage.
-# Precisa de bundle porque o código do cliente usa imports sem extensão (Vite).
-node_modules/.bin/esbuild server/tests/etapa0.resgate.mjs \
-  --bundle --platform=node --format=esm --outfile=/tmp/resgate.bundle.mjs \
-  --define:import.meta.env.VITE_API_URL='"http://127.0.0.1:8799"' \
-  --define:import.meta.env.DEV=false
-node /tmp/resgate.bundle.mjs
+```bash
+node server/tests/etapa0.integracao.mjs   # auth, allowlist do tenant, senha
+node server/tests/etapa1.financeiro.mjs   # financeiro unificado
+node server/tests/etapa3.consumo.mjs      # medidor de consumo
 ```
 
-Ambos saem com código 0 se tudo passar.
+Precisam de bundle, porque exercitam código do cliente (imports sem extensão,
+resolvidos pelo Vite):
 
-**Atenção:** os dois testes escrevem no banco apontado por `DATABASE_URL` e
-`etapa0.integracao.mjs` cria tenants/usuários fixos. Rode sempre contra um banco
-descartável, nunca contra produção. `etapa0.integracao.mjs` só roda uma vez por
-banco limpo (os ids são fixos); recrie o banco para repetir.
+```bash
+for t in etapa0.resgate etapa2.datajud; do
+  node_modules/.bin/esbuild server/tests/$t.mjs \
+    --bundle --platform=node --format=esm --outfile=.b.mjs \
+    --define:import.meta.env.VITE_API_URL='"http://127.0.0.1:8799"' \
+    --define:import.meta.env.DEV=false \
+    --external:bcryptjs --external:postgres --external:drizzle-orm --external:nanoid
+  node .b.mjs; rm -f .b.mjs
+done
+```
+
+Total atual: **79 asserções**. Cada suíte sai com código 0 se passar.
+
+**Atenção:** os testes escrevem no banco apontado por `DATABASE_URL`. Rode
+sempre contra um banco descartável, **nunca contra produção**. Cada suíte apaga
+os próprios fixtures no começo, então dá para repetir à vontade e rodar todas em
+sequência no mesmo banco.
 
 ## O que o `etapa0.integracao.mjs` prova
 

@@ -15,6 +15,11 @@ const { tenants, users, financialEntries } = await import('../db/schema.js')
 const { eq } = await import('drizzle-orm')
 const now = new Date().toISOString()
 
+// Fixtures com id fixo: apaga o que uma execução anterior deixou, para a
+// suíte poder rodar de novo no mesmo banco (o cascade leva os dados junto).
+const { inArray } = await import('drizzle-orm')
+await db.delete(tenants).where(inArray(tenants.id, ['tnt_fin', 'tnt_outro']))
+
 const TID = 'tnt_fin', UID = 'usr_fin'
 await db.insert(tenants).values({ id: TID, slug: 'fin', name: 'Escritorio Financeiro', plan: 'enterprise', isActive: true, settings: {}, createdAt: now, updatedAt: now })
 await db.insert(users).values({ id: UID, tenantId: TID, name: 'Ana', loginName: 'ana',

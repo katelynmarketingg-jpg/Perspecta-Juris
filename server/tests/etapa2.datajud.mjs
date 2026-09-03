@@ -24,6 +24,11 @@ const { tenants, users, clients, processes, processMovements } = await import('.
 const { eq } = await import('drizzle-orm')
 const now = new Date().toISOString()
 
+// Fixtures com id fixo: apaga o que uma execução anterior deixou, para a
+// suíte poder rodar de novo no mesmo banco (o cascade leva os dados junto).
+const { inArray } = await import('drizzle-orm')
+await db.delete(tenants).where(inArray(tenants.id, ['tnt_dj']))
+
 const TID = 'tnt_dj'
 await db.insert(tenants).values({ id: TID, slug: 'dj', name: 'Escritorio DataJud', plan: 'enterprise', isActive: true, settings: {}, createdAt: now, updatedAt: now })
 await db.insert(users).values({ id: 'usr_dj', tenantId: TID, name: 'Rita', loginName: 'rita',

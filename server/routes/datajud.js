@@ -5,6 +5,7 @@
 import { eq } from 'drizzle-orm'
 import { db } from '../db/index.js'
 import { tenants } from '../db/schema.js'
+import { registrarUso, TIPOS } from '../lib/usage.js'
 
 const DATAJUD = 'https://api-publica.datajud.cnj.jus.br'
 const CHAVE_PADRAO = 'cDZHYzlZa0JadVREZDJCendBdUFWZz09cDZHYzlZa0JadVREZDJCendBdUFWZz09'
@@ -33,6 +34,11 @@ export default async function datajudRoutes(app) {
     }
 
     const chave = (await chaveDoEscritorio(req.user.tenantId)) || process.env.DATAJUD_KEY || CHAVE_PADRAO
+
+    // Medidor de consumo. Conta a INTENÇÃO de consultar (antes do fetch):
+    // é isso que gasta cota no CNJ, dê certo ou não. Nunca derruba a consulta.
+    await registrarUso(req.user.tenantId, TIPOS.DATAJUD, 1, { tribunal }, req.user.userId)
+
     try {
       const res = await fetch(`${DATAJUD}/api_publica_${tribunal}/_search`, {
         method: 'POST',

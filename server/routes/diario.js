@@ -3,6 +3,8 @@
 //  Evita CORS no navegador em produção.
 // ─────────────────────────────────────────────────────────────────────────
 
+import { registrarUso, TIPOS } from '../lib/usage.js'
+
 const DJEN = 'https://comunicaapi.pje.jus.br/api/v1/comunicacao'
 const isoDaysAgo = (n) => new Date(Date.now() - n * 86400000).toISOString().slice(0, 10)
 
@@ -39,6 +41,9 @@ export default async function diarioRoutes(app) {
       params.set('ufOab', uf)
       if (nome) params.set('nomeAdvogado', nome)
     }
+
+    await registrarUso(req.user.tenantId, TIPOS.DJEN, 1,
+      { oab: oab ?? null, uf: uf ?? null, processo: numeroProcesso ?? null }, req.user.userId)
 
     try {
       const res = await fetch(`${DJEN}?${params.toString()}`, { headers: { Accept: 'application/json' } })

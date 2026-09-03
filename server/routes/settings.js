@@ -6,6 +6,7 @@ import { users, tenants, units } from '../db/schema.js'
 import { planLimitFor, userCount, getPlans } from '../lib/plans.js'
 import { menuAccessFor, setMenuAccess } from '../lib/permissions.js'
 import { validarSenha } from '../lib/senha.js'
+import { registrarUso, TIPOS } from '../lib/usage.js'
 
 export default async function settingsRoutes(app) {
   const auth = { preHandler: [app.authenticate] }
@@ -178,6 +179,7 @@ export default async function settingsRoutes(app) {
       isActive: true, createdAt: now, updatedAt: now,
     })
     if (req.body.menuAccess !== undefined) await setMenuAccess(req.user.tenantId, id, req.body.menuAccess)
+    await registrarUso(req.user.tenantId, TIPOS.USUARIO, 1, { role: role ?? 'advogado' }, req.user.userId)
     const [row] = await db.select({
       id: users.id, name: users.name, email: users.email, role: users.role,
     }).from(users).where(eq(users.id, id)).limit(1)
