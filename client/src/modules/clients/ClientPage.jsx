@@ -600,7 +600,7 @@ function corpoBoleto(entry, client, office) {
     `Referente a: ${entry.description}`,
     `Valor: ${formatCurrency(entry.amount ?? 0)}`,
     entry.dueDate ? `Vencimento: ${formatDate(entry.dueDate)}` : null,
-    entry.parcela ? `Parcela: ${entry.parcela.num} de ${entry.parcela.total}` : null,
+    entry.installmentOf ? `Parcela: ${entry.installmentOf} de ${entry.installmentTotal}` : null,
     '',
     'FORMA DE PAGAMENTO',
     office.pixKey ? `PIX: ${office.pixKey}` : null,
@@ -612,11 +612,13 @@ function corpoBoleto(entry, client, office) {
 }
 
 // Imprime o(s) boleto(s) de um lançamento — se for parcela, imprime o grupo todo.
-function imprimirBoletos(entry, client) {
+function imprimirBoletos(entry, client, todos = []) {
   const office = getOffice()
-  const all = lsGet('pj_local_financial_entries', [])
-  const grupo = entry.groupId ? all.filter(f => f.groupId === entry.groupId) : [entry]
-  const corpos = grupo.sort((a, b) => (a.parcela?.num ?? 0) - (b.parcela?.num ?? 0)).map(e => corpoBoleto(e, client, office))
+  // O grupo de parcelas vem da lista já carregada do banco (antes vinha do
+  // localStorage, que era o único lugar onde os lançamentos existiam).
+  const grupo = entry.groupId ? todos.filter(f => f.groupId === entry.groupId) : []
+  const lista = grupo.length ? grupo : [entry]
+  const corpos = lista.sort((a, b) => (a.installmentOf ?? 0) - (b.installmentOf ?? 0)).map(e => corpoBoleto(e, client, office))
   printDocumentos(corpos, { titulo: `Boleto — ${client.name || ''}` })
 }
 
@@ -629,7 +631,8 @@ function BaixaModal({ entry, clientName, onDone, onClose }) {
 
   const confirmar = () => {
     const v = parseFloat(String(valor).replace(',', '.')) || (entry.amount ?? 0)
-    onDone(entry.id, { status: 'paid', paidAt: new Date(dataReceb + 'T12:00:00').toISOString(), receivedVia: metodo, receivedAmount: v, needsReview: false })
+    // O pai chama POST /entries/:id/pay — o servidor grava status, data e valor.
+    onDone(entry.id, { paidDate: dataReceb, receivedVia: metodo, receivedAmount: v })
     registrar('pagamento', `deu baixa no pagamento "${entry.description}" (${formatCurrency(v)} · via ${metodoLabel(metodo)})`, { cliente: clientName, entryId: entry.id })
     showToast('Baixa registrada.', 'success')
     onClose()
@@ -699,47 +702,63 @@ function PaymentModal({ clientId, clientName, processes, entry, onSaved, onClose
 
   const gerarLink = () => showToast('Integração com Asaas/banco para gerar link automaticamente em breve. Por ora, cole o link manualmente.', 'info', 5000)
 
-  const save = () => {
+  const [salvando, setSalvando] = useState(false)
+
+  // Grava no BANCO. Antes gravava em pj_local_financial_entries (localStorage):
+  // era por isso que a tela Financeiro e os Relatórios — que leem o Postgres —
+  // nunca enxergavam nada lançado aqui.
+  const save = async () => {
     if (!form.description || !form.amount) { showToast('Preencha descrição e valor.', 'error'); return }
-    const all = lsGet('pj_local_financial_entries', [])
+    if (salvando) return
+    setSalvando(true)
+
     const base = {
-      tenantId: currentTenantId(), clientId, type: form.type, description: form.description,
-      processId: form.processId, status: form.status, formaPagamento: form.formaPagamento,
-      paymentMethod: form.paymentMethod, paymentLink: form.paymentLink, notes: form.notes,
-      updatedAt: new Date().toISOString(),
+      clientId, type: form.type, description: form.description,
+      processId: form.processId || null, status: form.status,
+      formaPagamento: form.formaPagamento, paymentMethod: form.paymentMethod,
+      paymentLink: form.paymentLink, notes: form.notes,
     }
 
-    if (editing) {
-      const next = all.map(f => f.id === entry.id ? { ...f, ...base, amount: valorNum, dueDate: form.dueDate } : f)
-      lsSet('pj_local_financial_entries', next)
-      registrar('pagamento', `editou o lançamento "${form.description}" (${formatCurrency(valorNum)})`, { cliente: clientName, entryId: entry.id })
-      showToast('Lançamento atualizado.', 'success')
-      onSaved(); onClose(); return
-    }
-
-    let novos = []
-    if (parcelado && nParc > 1) {
-      const groupId = 'grp_' + uid()
-      const first = form.dueDate ? new Date(form.dueDate + 'T00:00:00') : new Date()
-      const centavos = Math.round(valorNum * 100)
-      const base_c = Math.floor(centavos / nParc)
-      for (let i = 0; i < nParc; i++) {
-        const d = new Date(first); d.setMonth(d.getMonth() + i)
-        const c = i === nParc - 1 ? centavos - base_c * (nParc - 1) : base_c  // última parcela ajusta centavos
-        novos.push({
-          id: 'fin_' + uid(), ...base, needsReview: false,
-          amount: c / 100, description: `${form.description} (${i + 1}/${nParc})`,
-          dueDate: d.toISOString().slice(0, 10), parcela: { num: i + 1, total: nParc }, groupId,
-          createdAt: new Date().toISOString(),
-        })
+    try {
+      if (editing) {
+        await api.financial.update(entry.id, { ...base, amount: valorNum, dueDate: form.dueDate })
+        registrar('pagamento', `editou o lançamento "${form.description}" (${formatCurrency(valorNum)})`, { cliente: clientName, entryId: entry.id })
+        showToast('Lançamento atualizado.', 'success')
+        onSaved(); onClose(); return
       }
-    } else {
-      novos.push({ id: 'fin_' + uid(), ...base, needsReview: false, amount: valorNum, dueDate: form.dueDate, createdAt: new Date().toISOString() })
+
+      let criados
+      if (parcelado && nParc > 1) {
+        const groupId = 'grp_' + uid()
+        const first = form.dueDate ? new Date(form.dueDate + 'T00:00:00') : new Date()
+        const centavos = Math.round(valorNum * 100)
+        const base_c = Math.floor(centavos / nParc)
+        const lote = []
+        for (let i = 0; i < nParc; i++) {
+          const d = new Date(first); d.setMonth(d.getMonth() + i)
+          const c = i === nParc - 1 ? centavos - base_c * (nParc - 1) : base_c  // última parcela ajusta centavos
+          lote.push({
+            ...base, needsReview: false,
+            amount: c / 100, description: `${form.description} (${i + 1}/${nParc})`,
+            dueDate: d.toISOString().slice(0, 10),
+            installmentOf: i + 1, installmentTotal: nParc, groupId,
+          })
+        }
+        // Uma transação só: ou entram todas as parcelas, ou nenhuma.
+        criados = await api.financial.createLote(lote)
+      } else {
+        criados = [await api.financial.create({ ...base, needsReview: false, amount: valorNum, dueDate: form.dueDate })]
+      }
+
+      const n = Array.isArray(criados) ? criados.length : 1
+      registrar('pagamento', `criou ${n > 1 ? `${n} parcelas de` : 'o lançamento'} "${form.description}" (${formatCurrency(valorNum)})`, { cliente: clientName, entryId: criados?.[0]?.id })
+      showToast(n > 1 ? `${n} parcelas criadas.` : 'Lançamento criado.', 'success')
+      onSaved(); onClose()
+    } catch (err) {
+      showToast(err?.message ?? 'Não foi possível salvar o lançamento.', 'error', 7000)
+    } finally {
+      setSalvando(false)
     }
-    lsSet('pj_local_financial_entries', [...all, ...novos])
-    registrar('pagamento', `criou ${novos.length > 1 ? `${novos.length} parcelas de` : 'o lançamento'} "${form.description}" (${formatCurrency(valorNum)})`, { cliente: clientName, entryId: novos[0].id })
-    showToast(novos.length > 1 ? `${novos.length} parcelas criadas.` : 'Lançamento criado.', 'success')
-    onSaved(); onClose()
   }
 
   const inputCls = 'w-full px-3 py-2 rounded-lg bg-[var(--bg-input)] border border-[var(--border)] text-sm text-[var(--text-primary)] focus:border-brand-500 focus:outline-none'
@@ -1514,8 +1533,7 @@ export default function ClientPage() {
       .then(([c, p]) => { setClient(c); setData({ ...empty, ...c }); setProcesses(Array.isArray(p) ? p : []) })
       .catch(() => { showToast('Cliente não encontrado.', 'error'); navigate('/app/clients') })
       .finally(() => setLoading(false))
-    const allFin = lsGet('pj_local_financial_entries', [])
-    setFinancial(allFin.filter(f => f.clientId === id))
+    reloadFinancial()
     refreshOpenTasks()
   }, [id])
 
@@ -1580,23 +1598,45 @@ export default function ClientPage() {
   const totalExito    = financialExito.reduce((s,f) => s+(f.estimativa??0), 0)
   const aOrganizar    = financialNormais.filter(f => f.needsReview).length
 
-  // Persiste alterações de um lançamento (data, status, organizado)
-  const updateEntry = (entryId, patch) => {
-    const all = lsGet('pj_local_financial_entries', [])
-    const next = all.map(f => f.id === entryId ? { ...f, ...patch, updatedAt: new Date().toISOString() } : f)
-    lsSet('pj_local_financial_entries', next)
-    setFinancial(next.filter(f => f.clientId === id))
+  // Recarrega a lista a partir do BANCO (após criar/editar/parcelar/dar baixa).
+  const reloadFinancial = async () => {
+    try {
+      const r = await api.financial.entries({ clientId: id, limit: 500 })
+      setFinancial(Array.isArray(r) ? r : (r?.data ?? []))
+    } catch (err) {
+      showToast(err?.message ?? 'Não foi possível carregar os pagamentos.', 'error')
+    }
   }
 
-  // Remove um lançamento
-  const removeEntry = (entryId) => {
-    const next = lsGet('pj_local_financial_entries', []).filter(f => f.id !== entryId)
-    lsSet('pj_local_financial_entries', next)
-    setFinancial(next.filter(f => f.clientId === id))
+  // Persiste alterações de um lançamento (data, status, organizado) no banco.
+  const updateEntry = async (entryId, patch) => {
+    try {
+      await api.financial.update(entryId, patch)
+      await reloadFinancial()
+    } catch (err) {
+      showToast(err?.message ?? 'Não foi possível salvar a alteração.', 'error', 7000)
+    }
   }
 
-  // Recarrega a lista a partir do localStorage (após criar/editar/parcelar)
-  const reloadFinancial = () => setFinancial(lsGet('pj_local_financial_entries', []).filter(f => f.clientId === id))
+  // Dá baixa (registra o recebimento) no banco.
+  const pagarEntry = async (entryId, dados) => {
+    try {
+      await api.financial.pay(entryId, dados)
+      await reloadFinancial()
+    } catch (err) {
+      showToast(err?.message ?? 'Não foi possível registrar o recebimento.', 'error', 7000)
+    }
+  }
+
+  // Remove um lançamento do banco.
+  const removeEntry = async (entryId) => {
+    try {
+      await api.financial.remove(entryId)
+      await reloadFinancial()
+    } catch (err) {
+      showToast(err?.message ?? 'Não foi possível excluir o lançamento.', 'error', 7000)
+    }
+  }
 
   // ── Navegação por gesto: swipe horizontal (trackpad 2 dedos / toque) troca de aba ──
   const contentRef = useRef(null)
@@ -2025,7 +2065,7 @@ export default function ClientPage() {
                               <button onClick={() => { updateEntry(f.id, { status: 'pending', paidAt: null, receivedVia: null, receivedAmount: null }); registrar('pagamento', `estornou a baixa de "${f.description}"`, { cliente: data.name, entryId: f.id }) }}
                                 className="text-[11px] px-2 py-1 rounded-md bg-amber-500/15 text-amber-400 hover:bg-amber-500/25">↩ Estornar</button>
                             )}
-                            <button onClick={() => imprimirBoletos(f, data)}
+                            <button onClick={() => imprimirBoletos(f, data, financial)}
                               className="text-[11px] px-2 py-1 rounded-md bg-[var(--bg-hover)] text-[var(--text-secondary)] hover:bg-[var(--bg-input)]">🖨️ Imprimir boleto{f.groupId ? 's' : ''}</button>
                             {f.type !== 'payable' && (
                               <button onClick={() => setCobrar(f)}
@@ -2109,7 +2149,7 @@ export default function ClientPage() {
         />
       )}
       {baixaEntry && (
-        <BaixaModal entry={baixaEntry} clientName={data.name} onDone={updateEntry} onClose={() => setBaixaEntry(null)} />
+        <BaixaModal entry={baixaEntry} clientName={data.name} onDone={pagarEntry} onClose={() => setBaixaEntry(null)} />
       )}
       {cobrar && (
         <CobrarModal entry={cobrar} client={data} onClose={() => setCobrar(null)} />

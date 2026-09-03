@@ -224,7 +224,10 @@ const api = {
   financial: {
     entries:  (p)    => api.get('/api/financial/entries?' + new URLSearchParams(p ?? {})),
     create:   (d)    => api.post('/api/financial/entries', d),
+    // Cria todas as parcelas numa transação só — tudo ou nada.
+    createLote: (list) => api.post('/api/financial/entries/lote', { entries: list }),
     update:   (id,d) => api.put(`/api/financial/entries/${id}`, d),
+    remove:   (id, grupo) => api.delete(`/api/financial/entries/${id}${grupo ? '?grupo=1' : ''}`),
     pay:      (id,d) => api.post(`/api/financial/entries/${id}/pay`, d),
     summary:  ()     => api.get('/api/financial/summary'),
     cashflow: ()     => api.get('/api/financial/cashflow'),

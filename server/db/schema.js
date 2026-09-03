@@ -229,7 +229,9 @@ export const financialEntries = pgTable('financial_entries', {
   id:              text('id').primaryKey(),
   tenantId:        text('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),
   type:            text('type').notNull(),               // 'receivable' | 'payable'
-  category:        text('category').notNull(),
+  // A aba Pagamentos e a cobrança do processo não pedem categoria ao usuário.
+  // Sem default, todo lançamento vindo dessas telas estourava NOT NULL.
+  category:        text('category').notNull().default('geral'),
   description:     text('description').notNull(),
   amount:          real('amount').notNull(),
   status:          text('status').notNull().default('pending'),
@@ -246,8 +248,19 @@ export const financialEntries = pgTable('financial_entries', {
   recurrenceEnd:   text('recurrence_end'),
   parentEntryId:   text('parent_entry_id'),
   notes:           text('notes'),
-  installmentOf:   integer('installment_of'),
-  installmentTotal:integer('installment_total'),
+  installmentOf:   integer('installment_of'),     // nº desta parcela
+  installmentTotal:integer('installment_total'),  // total de parcelas
+  // ── Campos que viviam só no navegador (pj_local_financial_entries) ──
+  groupId:         text('group_id'),              // agrupa as parcelas de um mesmo lançamento
+  needsReview:     boolean('needs_review').notNull().default(false), // gerado pelo processo, a conferir
+  feeKind:         text('fee_kind'),              // 'exito' = estimativa, fica fora do caixa
+  formaPagamento:  text('forma_pagamento'),       // avista | parcelado | link | mensal
+  paymentLink:     text('payment_link'),
+  receivedVia:     text('received_via'),          // como o dinheiro entrou (pix, cartão…)
+  receivedAmount:  real('received_amount'),       // quanto entrou de fato
+  percentage:      real('percentage'),            // % do honorário de êxito
+  estimativa:      real('estimativa'),            // valor estimado "se ganhar"
+  createdViaProcess: boolean('created_via_process').notNull().default(false),
   createdBy:       text('created_by').references(() => users.id),
   createdAt:       text('created_at').notNull(),
   updatedAt:       text('updated_at').notNull(),
