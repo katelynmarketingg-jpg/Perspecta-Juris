@@ -1,10 +1,11 @@
 import { nanoid } from 'nanoid'
-import { createWriteStream, existsSync, mkdirSync } from 'fs'
+import { createWriteStream, existsSync, mkdirSync, statSync } from 'fs'
 import { join, extname } from 'path'
 import { pipeline } from 'stream/promises'
 import { eq, and, desc } from 'drizzle-orm'
 import { db } from '../db/index.js'
 import { documents } from '../db/schema.js'
+import { registrarUso, TIPOS } from '../lib/usage.js'
 
 const FILES_BASE = process.env.FILES_DIR ?? './data/files'
 
@@ -40,6 +41,12 @@ export default async function documentRoutes(app) {
         const filePath = join(destDir, `${fileId}${ext}`)
         await pipeline(part.file, createWriteStream(filePath))
 
+        // Tamanho real, lido do disco depois de gravar. Antes usava
+        // part.file.bytesRead, que nem sempre existe no stream do multipart e
+        // gravava 0 — o que tornava impossível medir GB por escritório.
+        let fileSize = 0
+        try { fileSize = statSync(filePath).size } catch { /* fica 0 */ }
+
         const now = new Date().toISOString()
         const docId = nanoid()
         await db.insert(documents).values({
@@ -47,7 +54,7 @@ export default async function documentRoutes(app) {
           name: part.filename,
           mimeType: part.mimetype,
           filePath: `${tid}/${fileId}${ext}`,
-          fileSize: part.file.bytesRead ?? 0,
+          fileSize,
           type: fields.type ?? null,
           processId: fields.processId ?? null,
           clientId:  fields.clientId ?? null,
@@ -57,6 +64,9 @@ export default async function documentRoutes(app) {
         })
         const [doc] = await db.select().from(documents).where(eq(documents.id, docId)).limit(1)
         uploadedDocs.push(doc)
+
+        // Medidor de armazenamento.
+        await registrarUso(tid, TIPOS.DOCUMENTO, fileSize, { nome: part.filename }, req.user.userId)
       } else {
         fields[part.fieldname] = part.value
       }

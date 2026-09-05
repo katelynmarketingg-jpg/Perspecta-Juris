@@ -111,26 +111,32 @@ export async function listTribunalSessions() {
   }
 }
 
-// Importa processos do tribunal para o localStorage local
-export function importTribunalProcesses(processes) {
-  const LS_KEY = 'pj_local_processes'
-  const lsProc = lsGet(LS_KEY, [])
-  const existingNums = new Set(lsProc.map(p => p.judicialNumber).filter(Boolean))
-
-  const uid = () => Math.random().toString(36).slice(2, 9) + Math.random().toString(36).slice(2, 9)
-
-  const toAdd = processes.filter(p => p.judicialNumber && !existingNums.has(p.judicialNumber))
-    .map(p => ({
-      id: 'proc_' + uid(),
-      tenantId: currentTenantId(),
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      ...p,
-    }))
-
-  if (toAdd.length > 0) {
-    lsSet(LS_KEY, [...lsProc, ...toAdd])
+// Importa para o BANCO os processos trazidos do portal do tribunal.
+// Antes gravava em pj_local_processes (localStorage): o que o scraper trazia
+// existia só naquele navegador e nunca chegava ao servidor.
+export async function importTribunalProcesses(processes) {
+  let existentes = []
+  try {
+    const r = await api.processes.list({ limit: 500 })
+    existentes = Array.isArray(r) ? r : (r?.data ?? [])
+  } catch {
+    throw new Error('Sem conexão com o servidor — nenhum processo foi importado.')
   }
+  const jaTem = new Set(existentes.map(p => p.judicialNumber).filter(Boolean))
 
-  return { added: toAdd.length, skipped: processes.length - toAdd.length }
+  let added = 0, skipped = 0
+  const falhas = []
+  for (const p of processes) {
+    if (!p.judicialNumber || jaTem.has(p.judicialNumber)) { skipped++; continue }
+    try {
+      // id/tenantId/datas são do servidor.
+      const { id: _i, tenantId: _t, createdAt: _c, updatedAt: _u, ...campos } = p
+      await api.processes.create(campos)
+      jaTem.add(p.judicialNumber)
+      added++
+    } catch (e) {
+      falhas.push(`${p.judicialNumber}: ${e?.message ?? 'erro'}`)
+    }
+  }
+  return { added, skipped, falhas }
 }

@@ -8,6 +8,7 @@ import { menuAccessFor } from '../lib/permissions.js'
 import { getBranding, setBranding } from '../lib/branding.js'
 import { issueRefreshToken } from '../lib/refreshTokens.js'
 import { validarSenha } from '../lib/senha.js'
+import { consumoAgregado, inicioDoMes, registrarUso, TIPOS } from '../lib/usage.js'
 import { emitirEventoPerspecta } from '../lib/perspecta-webhook.js'
 
 function slugify(s) {
@@ -45,6 +46,32 @@ export default async function masterRoutes(app) {
       return reply.code(400).send({ message: 'Envie { plans: [...] }.' })
     }
     return await savePlans(req.body.plans)
+  })
+
+  // ── Consumo por escritório ────────────────────────────────────
+  // GET /api/master/usage?from=&to=  → o que cada escritório gastou.
+  // É a base para cobrar por cota; antes não existia contador nenhum.
+  app.get('/usage', master, async (req) => {
+    const { from, to } = req.query
+    const desde = from ?? inicioDoMes()
+    const linhas = await consumoAgregado({ from: desde, to })
+
+    // Agrupa por escritório, com o nome junto para a tela não precisar cruzar.
+    const nomes = Object.fromEntries(
+      (await db.select({ id: tenants.id, name: tenants.name, plan: tenants.plan }).from(tenants))
+        .map(t => [t.id, t]),
+    )
+    const porTenant = {}
+    for (const l of linhas) {
+      const t = (porTenant[l.tenantId] ??= {
+        tenantId: l.tenantId,
+        name: nomes[l.tenantId]?.name ?? '(escritório removido)',
+        plan: nomes[l.tenantId]?.plan ?? null,
+        uso: {},
+      })
+      t.uso[l.kind] = { total: l.total, eventos: l.eventos }
+    }
+    return { desde, ate: to ?? null, escritorios: Object.values(porTenant) }
   })
 
   // ── Marca do sistema (logo, favicon, cor) ────────────────────
@@ -114,6 +141,8 @@ export default async function masterRoutes(app) {
       createdAt:    now,
       updatedAt:    now,
     })
+
+    await registrarUso(id, TIPOS.USUARIO, 1, { origem: 'nova-empresa', role: 'admin' })
 
     const [tenant] = await db.select().from(tenants).where(eq(tenants.id, id)).limit(1)
     emitirEventoPerspecta('cadastro.novo', {

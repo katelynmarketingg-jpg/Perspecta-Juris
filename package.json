@@ -7,7 +7,7 @@
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
     "dev:server": "node --watch server/index.mjs",
     "dev:client": "vite client --port 3001",
-    "build": "vite build client --outDir dist",
+    "build": "vite build client --outDir ../dist --emptyOutDir",
     "start": "node server/index.mjs",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "node server/db/migrate.mjs",

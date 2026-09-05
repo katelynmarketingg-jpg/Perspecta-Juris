@@ -36,28 +36,32 @@ function gerarDebitos({ cobranca, feeAmount, entrada, parcelas, primeiroVenc }, 
   const nowISO = new Date().toISOString()
   const venc0 = primeiroVenc || new Date().toISOString().slice(0, 10)
   const nParc = Math.max(1, parseInt(parcelas) || 1)
-  const mk = (amount, dueDate, label) => ({
-    id: 'fin_' + uid(), tenantId: currentTenantId(), clientId, processId,
+  // Sem id/tenantId/datas: quem gera isso é o servidor.
+  const groupId = nParc > 1 || cobranca === 'entrada' ? 'grp_' + uid() : null
+  const mk = (amount, dueDate, label, num, total) => ({
+    clientId, processId,
     type: 'receivable', status: 'pending',
     description: `Honorários — ${processTitle}${label ? ` (${label})` : ''}`,
     amount: Math.round(amount * 100) / 100, dueDate,
     needsReview: true, createdViaProcess: true,
-    createdAt: nowISO, updatedAt: nowISO,
+    formaPagamento: cobranca,
+    ...(groupId ? { groupId } : {}),
+    ...(num ? { installmentOf: num, installmentTotal: total } : {}),
   })
   const out = []
   if (cobranca === 'avista') {
     out.push(mk(total, venc0, 'à vista'))
   } else if (cobranca === 'parcelado') {
     const val = total / nParc
-    for (let i = 0; i < nParc; i++) out.push(mk(val, addMonthsISO(venc0, i), `${i + 1}/${nParc}`))
+    for (let i = 0; i < nParc; i++) out.push(mk(val, addMonthsISO(venc0, i), `${i + 1}/${nParc}`, i + 1, nParc))
   } else if (cobranca === 'entrada') {
     const ent = numBR(entrada)
     if (ent > 0) out.push(mk(ent, venc0, 'entrada'))
     const restante = total - ent
     const val = restante / nParc
-    for (let i = 0; i < nParc; i++) out.push(mk(val, addMonthsISO(venc0, i + 1), `parcela ${i + 1}/${nParc}`))
+    for (let i = 0; i < nParc; i++) out.push(mk(val, addMonthsISO(venc0, i + 1), `parcela ${i + 1}/${nParc}`, i + 1, nParc))
   } else if (cobranca === 'mensal') {
-    for (let i = 0; i < nParc; i++) out.push(mk(total, addMonthsISO(venc0, i), `mês ${i + 1}/${nParc}`))
+    for (let i = 0; i < nParc; i++) out.push(mk(total, addMonthsISO(venc0, i), `mês ${i + 1}/${nParc}`, i + 1, nParc))
   }
   return out
 }
@@ -69,14 +73,15 @@ function gerarExito({ feeType, feePercentage, feeExitoEstimativa, feeNotes }, { 
   const est = numBR(feeExitoEstimativa)
   const nowISO = new Date().toISOString()
   return {
-    id: 'fin_' + uid(), tenantId: currentTenantId(), clientId, processId,
+    clientId, processId,
     type: 'receivable', feeKind: 'exito', status: 'exito',
     description: `Honorários de êxito${pct ? ` (${pct}%)` : ''} — ${processTitle}`,
     percentage: pct || null,
     estimativa: est > 0 ? est : null,   // estimativa "se ganhar"
     amount: 0,                           // não conta em Recebido/A receber nem nos relatórios
-    dueDate: '', needsReview: false, createdViaProcess: true,
-    notes: feeNotes || '', createdAt: nowISO, updatedAt: nowISO,
+    dueDate: nowISO.slice(0, 10),        // due_date é NOT NULL no banco
+    needsReview: false, createdViaProcess: true,
+    notes: feeNotes || '',
   }
 }
 
@@ -169,9 +174,21 @@ export default function ProcessForm() {
         if (numBR(data.feeAmount) > 0) { const d = gerarDebitos(data, ctx); novos.push(...d); nDebitos = d.length }
         const exito = gerarExito(data, ctx)
         if (exito) { novos.push(exito); temExito = true }
+        // Grava no BANCO, numa transação só. Antes ia para
+        // pj_local_financial_entries (localStorage) e nunca chegava ao
+        // Financeiro nem aos Relatórios, que leem o Postgres.
         if (novos.length) {
-          const all = lsGet('pj_local_financial_entries', [])
-          lsSet('pj_local_financial_entries', [...all, ...novos])
+          try {
+            await api.financial.createLote(novos)
+          } catch (err) {
+            // O processo já foi criado; avisar em vez de fingir que deu tudo certo.
+            nDebitos = 0; temExito = false
+            showToast(
+              `Processo salvo, mas os lançamentos de honorários NÃO foram gravados: ${err?.message ?? 'erro'}. ` +
+              'Crie-os pela aba Pagamentos do cliente.',
+              'error', 10000,
+            )
+          }
         }
       }
 

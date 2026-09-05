@@ -229,7 +229,9 @@ export const financialEntries = pgTable('financial_entries', {
   id:              text('id').primaryKey(),
   tenantId:        text('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),
   type:            text('type').notNull(),               // 'receivable' | 'payable'
-  category:        text('category').notNull(),
+  // A aba Pagamentos e a cobrança do processo não pedem categoria ao usuário.
+  // Sem default, todo lançamento vindo dessas telas estourava NOT NULL.
+  category:        text('category').notNull().default('geral'),
   description:     text('description').notNull(),
   amount:          real('amount').notNull(),
   status:          text('status').notNull().default('pending'),
@@ -246,8 +248,19 @@ export const financialEntries = pgTable('financial_entries', {
   recurrenceEnd:   text('recurrence_end'),
   parentEntryId:   text('parent_entry_id'),
   notes:           text('notes'),
-  installmentOf:   integer('installment_of'),
-  installmentTotal:integer('installment_total'),
+  installmentOf:   integer('installment_of'),     // nº desta parcela
+  installmentTotal:integer('installment_total'),  // total de parcelas
+  // ── Campos que viviam só no navegador (pj_local_financial_entries) ──
+  groupId:         text('group_id'),              // agrupa as parcelas de um mesmo lançamento
+  needsReview:     boolean('needs_review').notNull().default(false), // gerado pelo processo, a conferir
+  feeKind:         text('fee_kind'),              // 'exito' = estimativa, fica fora do caixa
+  formaPagamento:  text('forma_pagamento'),       // avista | parcelado | link | mensal
+  paymentLink:     text('payment_link'),
+  receivedVia:     text('received_via'),          // como o dinheiro entrou (pix, cartão…)
+  receivedAmount:  real('received_amount'),       // quanto entrou de fato
+  percentage:      real('percentage'),            // % do honorário de êxito
+  estimativa:      real('estimativa'),            // valor estimado "se ganhar"
+  createdViaProcess: boolean('created_via_process').notNull().default(false),
   createdBy:       text('created_by').references(() => users.id),
   createdAt:       text('created_at').notNull(),
   updatedAt:       text('updated_at').notNull(),
@@ -355,6 +368,23 @@ export const automationLogs = pgTable('automation_logs', {
   output:         jsonb('output'),
   ranAt:          text('ran_at').notNull(),
 })
+
+// ── Usage Events (medição de consumo por escritório) ──────────
+// Base para cobrar por cota. Antes não existia contador nenhum: não havia
+// como saber quantas consultas ao DataJud um escritório fez no mês.
+// Uma linha por evento; a agregação é feita na consulta.
+export const usageEvents = pgTable('usage_events', {
+  id:        text('id').primaryKey(),
+  tenantId:  text('tenant_id').notNull(),
+  kind:      text('kind').notNull(),   // datajud_query | djen_query | document_bytes | ai_tokens | user_created
+  qty:       real('qty').notNull().default(1),
+  meta:      jsonb('meta'),
+  userId:    text('user_id'),
+  createdAt: text('created_at').notNull(),
+}, t => ({
+  tenantKindIdx: index('usage_tenant_kind_idx').on(t.tenantId, t.kind, t.createdAt),
+  createdIdx:    index('usage_created_idx').on(t.createdAt),
+}))
 
 // ── Audit Logs ────────────────────────────────────────────────
 export const auditLogs = pgTable('audit_logs', {

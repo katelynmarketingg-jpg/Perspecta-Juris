@@ -1,0 +1,1 @@
+ALTER TABLE "financial_entries" ALTER COLUMN "category" SET DEFAULT 'geral';

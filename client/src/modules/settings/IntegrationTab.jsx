@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { getCfg, setCfg } from '../../lib/tenantData'
 import api from '../../lib/api'
 import { useUiStore } from '../../stores/uiStore'
@@ -128,56 +128,54 @@ function hitToProcess(hit) {
   }
 }
 
-// ── Import DataJud hits to localDb ────────────────────────────────
-function lsGet(key, fb) { try { return JSON.parse(localStorage.getItem(key) ?? 'null') ?? fb } catch { return fb } }
-function lsSet(key, v)  { localStorage.setItem(key, JSON.stringify(v)) }
-const uidFn = () => Math.random().toString(36).slice(2,9) + Math.random().toString(36).slice(2,9)
+// ── Importa os processos achados no DataJud PARA O BANCO ──────────
+// Antes isto gravava em pj_local_processes / pj_local_movements: os processos
+// importados existiam só naquele navegador e nunca chegavam ao servidor.
+async function importDatajudHits(hits) {
+  // O que já existe no banco, para não duplicar por número CNJ.
+  let existentes = []
+  try {
+    const r = await api.processes.list({ limit: 500 })
+    existentes = Array.isArray(r) ? r : (r?.data ?? [])
+  } catch (e) {
+    throw new Error('Sem conexão com o servidor — nada foi importado.')
+  }
+  const jaTem = new Set(existentes.map(p => p.judicialNumber).filter(Boolean))
 
-function importDatajudHits(hits) {
-  const procs = lsGet('pj_local_processes', [])
-  const movs  = lsGet('pj_local_movements', [])
-  const existing = new Set(procs.map(p => p.judicialNumber))
   let imported = 0
+  const falhas = []
 
-  hits.forEach(hit => {
+  for (const hit of hits) {
     const p = hitToProcess(hit)
-    if (existing.has(p.judicialNumber)) return
-    const id = uidFn()
-    const num = `P${String(procs.length + imported + 1).padStart(4,'0')}`
-    const row = {
-      id, tenantId: currentTenantId(),
-      internalNumber: num,
-      createdAt: new Date().toISOString(),
-      ...p,
+    if (!p.judicialNumber || jaTem.has(p.judicialNumber)) continue
+
+    const { _movimentos, ...campos } = p
+    try {
+      const criado = await api.processes.create(campos)
+      jaTem.add(p.judicialNumber)
+      imported++
+
+      for (const m of (_movimentos ?? [])) {
+        try {
+          await api.processes.addMovement(criado.id, {
+            description: m.nome ?? m.descricao ?? 'Movimentação',
+            date: (m.dataHora ?? new Date().toISOString()).slice(0, 10),
+            type: 'system', author: 'DataJud / CNJ', isPublic: false,
+          })
+        } catch { /* movimentação isolada: não derruba a importação */ }
+      }
+
+      await api.processes.addMovement(criado.id, {
+        description: `Processo importado via DataJud — ${p.court}`,
+        date: new Date().toISOString().slice(0, 10),
+        type: 'system', author: 'Sistema', isPublic: false,
+      }).catch(() => {})
+    } catch (e) {
+      falhas.push(`${p.judicialNumber}: ${e?.message ?? 'erro'}`)
     }
-    delete row._movimentos
-    procs.push(row)
-    existing.add(p.judicialNumber)
-    imported++
+  }
 
-    ;(p._movimentos ?? []).forEach(m => {
-      movs.push({
-        id: uidFn(), tenantId: currentTenantId(), processId: id,
-        description: m.nome ?? m.descricao ?? 'Movimentação',
-        date: (m.dataHora ?? new Date().toISOString()).slice(0, 10),
-        type: 'system', author: 'DataJud / CNJ',
-        isPublic: false, isAutomatic: true,
-        createdAt: m.dataHora ?? new Date().toISOString(),
-      })
-    })
-
-    movs.push({
-      id: uidFn(), tenantId: 'tenant_demo', processId: id,
-      description: `Processo importado via DataJud — ${p.court}`,
-      date: new Date().toISOString().slice(0, 10),
-      type: 'system', author: 'Sistema', isPublic: false, isAutomatic: true,
-      createdAt: new Date().toISOString(),
-    })
-  })
-
-  lsSet('pj_local_processes', procs)
-  lsSet('pj_local_movements', movs)
-  return imported
+  return { imported, falhas }
 }
 
 // ── MovimentsPreview ──────────────────────────────────────────────
@@ -273,16 +271,36 @@ function PortalCard({ portal, oab, oabUF, onImported }) {
     setSelected(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
   }
 
-  const doImport = () => {
-    if (!procs || selected.size === 0) return
+  const [importando, setImportando] = useState(false)
+  const doImport = async () => {
+    if (!procs || selected.size === 0 || importando) return
+    setImportando(true)
     const toImport = procs.filter(p => selected.has(p.judicialNumber))
-    const { added } = importTribunalProcesses(toImport)
-    showToast(`${added} processo${added !== 1 ? 's' : ''} importado${added !== 1 ? 's' : ''} do ${portal.label}.`, 'success')
-    setSelected(new Set())
-    onImported?.()
+    try {
+      const { added, falhas } = await importTribunalProcesses(toImport)
+      if (added > 0) showToast(`${added} processo${added !== 1 ? 's' : ''} do ${portal.label} salvo${added !== 1 ? 's' : ''} no banco.`, 'success')
+      if (falhas?.length) showToast(`${falhas.length} não puderam ser importados: ${falhas[0]}`, 'error', 9000)
+      if (!added && !falhas?.length) showToast('Nada novo — já estavam cadastrados.', 'info')
+      setSelected(new Set())
+      await carregarExistentes()
+      onImported?.()
+    } catch (e) {
+      showToast(e?.message ?? 'Falha ao importar.', 'error', 9000)
+    } finally {
+      setImportando(false)
+    }
   }
 
-  const existingNums = new Set(lsGet('pj_local_processes', []).map(p => p.judicialNumber))
+  // Números já cadastrados NO BANCO (antes vinha do localStorage).
+  const [existingNums, setExistingNums] = useState(new Set())
+  const carregarExistentes = async () => {
+    try {
+      const r = await api.processes.list({ limit: 500 })
+      const lista = Array.isArray(r) ? r : (r?.data ?? [])
+      setExistingNums(new Set(lista.map(p => p.judicialNumber).filter(Boolean)))
+    } catch { /* offline: some o aviso de "já cadastrado", não quebra a busca */ }
+  }
+  useEffect(() => { carregarExistentes() }, [])
 
   return (
     <Card className="overflow-hidden">
@@ -451,7 +469,9 @@ export default function IntegrationTab() {
     try { return getCfg('pj_cfg_autosync', 'true') !== 'false' } catch { return true }
   })
 
-  const syncInfo = getLastSyncInfo()
+  // Quantos processos com CNJ existem no banco (getLastSyncInfo agora consulta a API).
+  const [syncInfo, setSyncInfo] = useState({ lastSync: null, processCount: 0 })
+  useEffect(() => { getLastSyncInfo().then(setSyncInfo).catch(() => {}) }, [refreshKey])
 
   const toggleAutoSync = () => {
     const next = !autoSync
@@ -511,21 +531,44 @@ export default function IntegrationTab() {
 
   const selectAll = () => {
     if (!results) return
-    const existing = new Set(lsGet('pj_local_processes', []).map(p => p.judicialNumber))
-    const importable = results.filter(h => !existing.has(h._source?.numeroProcesso))
+    const importable = results.filter(h => !existingNums.has(h._source?.numeroProcesso))
     setSelected(new Set(importable.map(h => h._id)))
   }
 
-  const doImport = () => {
-    if (!results || selected.size === 0) return
+  const [importando, setImportando] = useState(false)
+  const doImport = async () => {
+    if (!results || selected.size === 0 || importando) return
+    setImportando(true)
     const toImport = results.filter(h => selected.has(h._id))
-    const count = importDatajudHits(toImport)
-    showToast(`${count} processo${count !== 1 ? 's' : ''} importado${count !== 1 ? 's' : ''} com sucesso.`, 'success')
-    setSelected(new Set())
-    setRefreshKey(k => k + 1)
+    try {
+      const { imported, falhas } = await importDatajudHits(toImport)
+      if (imported > 0) {
+        showToast(`${imported} processo${imported !== 1 ? 's' : ''} importado${imported !== 1 ? 's' : ''} para o banco.`, 'success')
+      }
+      if (falhas.length) {
+        showToast(`${falhas.length} não puderam ser importados: ${falhas[0]}`, 'error', 9000)
+      }
+      if (!imported && !falhas.length) showToast('Nada novo para importar — já estavam no banco.', 'info')
+      setSelected(new Set())
+      setRefreshKey(k => k + 1)
+      await carregarExistentes()
+    } catch (e) {
+      showToast(e?.message ?? 'Falha ao importar.', 'error', 9000)
+    } finally {
+      setImportando(false)
+    }
   }
 
-  const existingNums = new Set(lsGet('pj_local_processes', []).map(p => p.judicialNumber))
+  // Números já cadastrados NO BANCO (antes vinha do localStorage).
+  const [existingNums, setExistingNums] = useState(new Set())
+  const carregarExistentes = async () => {
+    try {
+      const r = await api.processes.list({ limit: 500 })
+      const lista = Array.isArray(r) ? r : (r?.data ?? [])
+      setExistingNums(new Set(lista.map(p => p.judicialNumber).filter(Boolean)))
+    } catch { /* offline: some o aviso de "já cadastrado", não quebra a busca */ }
+  }
+  useEffect(() => { carregarExistentes() }, [refreshKey])
 
   return (
     <div className="space-y-6">

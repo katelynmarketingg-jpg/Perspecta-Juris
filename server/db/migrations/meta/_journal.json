@@ -15,6 +15,27 @@
       "when": 1787169645944,
       "tag": "0001_slimy_pandemic",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1787257734355,
+      "tag": "0002_safe_doctor_faustus",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1788449692954,
+      "tag": "0003_far_morg",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1788461030143,
+      "tag": "0004_numerous_vermin",
+      "breakpoints": true
     }
   ]
 }

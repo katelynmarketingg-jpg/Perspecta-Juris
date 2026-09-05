@@ -1,15 +1,12 @@
 // ─────────────────────────────────────────────────────────────────
-// DataJud Sync — consulta movimentações novas para processos com
-// número CNJ e persiste automaticamente no localStorage.
+// DataJud Sync — consulta movimentações novas para os processos com número
+// CNJ cadastrados NO BANCO e grava as novidades no banco, via API.
 // ─────────────────────────────────────────────────────────────────
 
-import { currentTenantId } from './tenant'
 import { getCfg } from './tenantData'
 import api from './api'
-const LS = 'pj_local_'
-const lsGet = (k, fb) => { try { return JSON.parse(localStorage.getItem(k) ?? 'null') ?? fb } catch { return fb } }
+const AUTOR_DATAJUD = 'DataJud / CNJ'
 const lsSet = (k, v)  => localStorage.setItem(k, JSON.stringify(v))
-const uid   = () => Math.random().toString(36).slice(2,9) + Math.random().toString(36).slice(2,9)
 
 // Mapa tribunal (campo court salvo no processo) → índice DataJud
 const COURT_TO_INDEX = {
@@ -66,7 +63,9 @@ async function fetchMovimentos(judicialNumber, tribunal) {
   } catch { return [] }
 }
 
-// Sincroniza um processo: traz movimentações novas e persiste
+// Sincroniza um processo: traz movimentações novas e persiste NO BANCO.
+// Antes lia e gravava em pj_local_movements (localStorage): nada do que o
+// DataJud trazia chegava ao servidor, e sumia ao trocar de navegador.
 async function syncProcess(process) {
   const tribunal = inferTribunal(process.judicialNumber, process.court)
   if (!tribunal || !process.judicialNumber) return 0
@@ -77,46 +76,56 @@ async function syncProcess(process) {
   } catch {
     return 0
   }
-
   if (!movimentos.length) return 0
 
-  const existing = lsGet(LS + 'movements', [])
-  const knownDates = new Set(
-    existing
-      .filter(m => m.processId === process.id && m.author === 'DataJud / CNJ')
-      .map(m => `${m.date}|${m.description}`)
+  // O que já está no banco para este processo, para não duplicar.
+  let existentes = []
+  try {
+    const r = await api.processes.movements(process.id)
+    existentes = Array.isArray(r) ? r : (r?.data ?? [])
+  } catch {
+    return 0   // sem saber o que já existe, não grava: duplicar é pior.
+  }
+  const conhecidas = new Set(
+    existentes
+      .filter(m => m.author === AUTOR_DATAJUD)
+      .map(m => `${(m.date ?? '').slice(0, 10)}|${m.description}`)
   )
 
-  const toAdd = movimentos
-    .filter(m => {
-      const date = (m.dataHora ?? '').slice(0, 10)
-      const desc = m.nome ?? m.descricao ?? ''
-      return !knownDates.has(`${date}|${desc}`)
-    })
+  const novas = movimentos
     .map(m => ({
-      id: uid(),
-      tenantId: currentTenantId(),
-      processId: process.id,
       description: m.nome ?? m.descricao ?? 'Movimentação',
       date: (m.dataHora ?? new Date().toISOString()).slice(0, 10),
       type: 'system',
-      author: 'DataJud / CNJ',
+      author: AUTOR_DATAJUD,
       isPublic: false,
-      isAutomatic: true,
-      createdAt: m.dataHora ?? new Date().toISOString(),
     }))
+    .filter(m => !conhecidas.has(`${m.date}|${m.description}`))
 
-  if (toAdd.length > 0) {
-    lsSet(LS + 'movements', [...existing, ...toAdd])
+  let gravadas = 0
+  for (const mov of novas) {
+    try {
+      await api.processes.addMovement(process.id, mov)
+      gravadas++
+    } catch {
+      // Falhou esta: segue para a próxima; o total reflete o que entrou.
+    }
   }
-
-  return toAdd.length
+  return gravadas
 }
 
 // Sincroniza todos os processos com número CNJ cadastrados
 export async function syncAllProcesses(onProgress) {
-  const processes = lsGet(LS + 'processes', [])
-  const withCnj   = processes.filter(p => p.judicialNumber?.match(/\d{7}-\d{2}\.\d{4}/))
+  // Processos vêm do BANCO (antes vinham do localStorage — só sincronizava o
+  // que estivesse naquele navegador).
+  let processes = []
+  try {
+    const r = await api.processes.list({ limit: 500 })
+    processes = Array.isArray(r) ? r : (r?.data ?? [])
+  } catch {
+    return { synced: 0, newMovements: 0, semConexao: true }
+  }
+  const withCnj = processes.filter(p => p.judicialNumber?.match(/\d{7}-\d{2}\.\d{4}/))
 
   if (!withCnj.length) return { synced: 0, newMovements: 0 }
 
@@ -150,8 +159,13 @@ export function shouldAutoSync() {
   return (Date.now() - new Date(last).getTime()) > 60 * 60 * 1000 // 1 hora
 }
 
-export function getLastSyncInfo() {
+export async function getLastSyncInfo() {
   const last = localStorage.getItem('pj_datajud_last_sync')
-  const processes = lsGet(LS + 'processes', []).filter(p => p.judicialNumber?.match(/\d{7}-\d{2}\.\d{4}/))
-  return { lastSync: last ? new Date(last) : null, processCount: processes.length }
+  let processCount = 0
+  try {
+    const r = await api.processes.list({ limit: 500 })
+    const lista = Array.isArray(r) ? r : (r?.data ?? [])
+    processCount = lista.filter(p => p.judicialNumber?.match(/\d{7}-\d{2}\.\d{4}/)).length
+  } catch { /* offline: mostra 0 */ }
+  return { lastSync: last ? new Date(last) : null, processCount }
 }
