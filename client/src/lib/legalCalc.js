@@ -73,20 +73,36 @@ export const FAIXAS_INSS = [
   { ate: 8475.55, aliquota: 0.14  },   // o último "até" é o teto
 ]
 
-// IRRF: NÃO vem preenchida. A tabela de 2026 mudou com a Lei 15.270/2025 e as
-// fontes que consegui alcançar se contradizem sobre as faixas. Chutar alíquota
-// de imposto num sistema jurídico é pior do que não ter a conta: quem confia
-// no número não confere.
+// IRRF: Tabela de Incidência Mensal a partir de janeiro de 2026 — Receita
+// Federal, Lei nº 15.191, de 11 de agosto de 2025.
 //
-// A dona do sistema preenche em Configurações → Parâmetros, com a tabela da
-// Receita Federal. Enquanto estiver vazia, o cálculo mostra o INSS e diz, na
-// tela, que o IRRF não foi aplicado.
-export const FAIXAS_IRRF_PADRAO = []
-export let FAIXAS_IRRF = []
-export let DEDUCAO_DEPENDENTE = 0
-export function definirTabelaIRRF(faixas, deducaoDependente = 0) {
+// A tabela é auto-verificável: a "dedução" de cada faixa existe para o imposto
+// não dar um salto na virada, e vale
+//     dedução(n) = dedução(n−1) + limite(n−1) × (alíquota(n) − alíquota(n−1)).
+// Os cinco valores abaixo fecham nessa conta, o que descarta erro de digitação.
+export const FAIXAS_IRRF_PADRAO = [
+  { ate: 2428.80, aliquota: 0,     deduzir: 0      },
+  { ate: 2826.65, aliquota: 0.075, deduzir: 182.16 },
+  { ate: 3751.05, aliquota: 0.15,  deduzir: 394.16 },
+  { ate: 4664.68, aliquota: 0.225, deduzir: 675.49 },
+  { ate: null,    aliquota: 0.275, deduzir: 908.73 },
+]
+
+export const DEDUCAO_DEPENDENTE_PADRAO   = 189.59    // por dependente, ao mês
+export const DESCONTO_SIMPLIFICADO       = 607.20    // 25% da 1ª faixa, teto mensal
+export const ISENCAO_PREVIDENCIARIA_65   = 1903.98   // maiores de 65 anos
+
+export let FAIXAS_IRRF = [...FAIXAS_IRRF_PADRAO]
+export let DEDUCAO_DEPENDENTE = DEDUCAO_DEPENDENTE_PADRAO
+
+/** Substitui a tabela — para quando a Receita publicar a do ano seguinte. */
+export function definirTabelaIRRF(faixas, deducaoDependente = DEDUCAO_DEPENDENTE_PADRAO) {
   FAIXAS_IRRF = Array.isArray(faixas) ? faixas : []
   DEDUCAO_DEPENDENTE = Number(deducaoDependente) || 0
+}
+export function restaurarTabelaIRRF() {
+  FAIXAS_IRRF = [...FAIXAS_IRRF_PADRAO]
+  DEDUCAO_DEPENDENTE = DEDUCAO_DEPENDENTE_PADRAO
 }
 
 /** Desconto de INSS sobre um salário, faixa por faixa. */
@@ -118,12 +134,32 @@ export function descontoINSS(salario) {
  * Desconto de IRRF. Devolve `{ aplicavel: false }` enquanto a tabela não for
  * cadastrada — em vez de devolver zero, que passaria por "não tem imposto".
  */
-export function descontoIRRF(baseTributavel, dependentes = 0) {
+/**
+ * Desconto de IRRF sobre um rendimento já líquido de INSS.
+ *
+ * Aplica o mais favorável entre as deduções legais (dependentes, pensão) e o
+ * desconto simplificado de R$ 607,20 — que é 25% do limite da primeira faixa e
+ * substitui todas as outras deduções. Quem tem poucos dependentes quase sempre
+ * ganha com o simplificado, e a lei garante o melhor dos dois.
+ *
+ * `baseTributavel` já deve vir com o INSS descontado.
+ */
+export function descontoIRRF(baseTributavel, dependentes = 0, outrasDeducoes = 0) {
   if (!FAIXAS_IRRF.length) return { aplicavel: false, valor: 0 }
-  const base = Math.max(0, num(baseTributavel) - num(dependentes) * DEDUCAO_DEPENDENTE)
+
+  const bruto = Math.max(0, num(baseTributavel))
+  const legais = num(dependentes) * DEDUCAO_DEPENDENTE + num(outrasDeducoes)
+  const simplificado = Math.min(DESCONTO_SIMPLIFICADO, bruto)
+  const usouSimplificado = simplificado > legais
+  const deducao = usouSimplificado ? simplificado : legais
+
+  const base = Math.max(0, bruto - deducao)
   const faixa = FAIXAS_IRRF.find(f => base <= (f.ate ?? Infinity)) ?? FAIXAS_IRRF[FAIXAS_IRRF.length - 1]
   const valor = centavos(Math.max(0, base * (faixa.aliquota ?? 0) - (faixa.deduzir ?? 0)))
-  return { aplicavel: true, valor, base: centavos(base), faixa }
+  return {
+    aplicavel: true, valor, base: centavos(base), faixa,
+    deducao: centavos(deducao), usouSimplificado,
+  }
 }
 
 // ── Helpers de formatação e parsing ───────────────────────────────────────

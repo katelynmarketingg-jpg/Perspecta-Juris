@@ -84,8 +84,14 @@ if ((await movsDe(INATIVO)).length === 0) ok('escritório inativo foi pulado')
 else bad(`escritório inativo recebeu ${(await movsDe(INATIVO)).length}`)
 
 console.log('\n── 3. Processo sem número CNJ não vira consulta ──')
-if (r1.consultados === 2) ok('2 consultas ao CNJ (o processo sem CNJ não contou)')
-else bad(`consultados = ${r1.consultados} (esperava 2)`)
+// Conta pelos ESCRITÓRIOS DESTA SUÍTE, não pelo total do job: rodando as
+// suítes em sequência no mesmo banco, os processos das outras entram na conta
+// global e o número muda conforme a ordem.
+const consultasDe = async (tid) => (await db.select().from(usageEvents)
+  .where(and(eq(usageEvents.tenantId, tid), eq(usageEvents.kind, 'datajud_query')))).length
+const consultasAB = await consultasDe(A) + await consultasDe(B)
+if (consultasAB === 2) ok('2 consultas ao CNJ nos escritórios da suíte (o processo sem CNJ não contou)')
+else bad(`A+B somam ${consultasAB} consultas (esperava 2)`)
 if (consultas.some(u => u.includes('api_publica_tjsp')) && consultas.some(u => u.includes('api_publica_trt4')))
   ok('tribunal inferido certo: tjsp pela sigla, trt4 pelo número CNJ')
 else bad(`tribunais consultados: ${consultas.join(', ')}`)
@@ -110,9 +116,12 @@ globalThis.fetch = responder([
   { nome: 'Juntada de petição',      dataHora: '2026-08-05T14:30:00' },
   { nome: 'Sentença publicada',      dataHora: '2026-09-04T09:00:00' },
 ])
-const r3 = await rodarSync()
-if (r3.novas === 2) ok('só a nova entrou, nos 2 escritórios')
-else bad(`importou ${r3.novas} (esperava 2)`)
+const antesA = (await movsDe(A)).length, antesB = (await movsDe(B)).length
+await rodarSync()
+const ganhoA = (await movsDe(A)).length - antesA
+const ganhoB = (await movsDe(B)).length - antesB
+if (ganhoA === 1 && ganhoB === 1) ok('só a nova entrou, uma em cada escritório da suíte')
+else bad(`A ganhou ${ganhoA} e B ganhou ${ganhoB} (esperava 1 e 1)`)
 
 console.log('\n── 7. TRAVA: duas instâncias ao mesmo tempo não duplicam ──')
 await db.delete(jobLocks).where(eq(jobLocks.id, 'datajud_sync'))

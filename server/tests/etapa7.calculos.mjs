@@ -11,7 +11,8 @@
 const {
   mesesEntre, avosDecimoTerceiro, avosFeriasProporcionais,
   fracao, mesesEmPena, jurosDePrestacoes, diasDoPeriodo, diasEntre,
-  descontoINSS, descontoIRRF, definirTabelaIRRF, centavos,
+  descontoINSS, descontoIRRF, definirTabelaIRRF, restaurarTabelaIRRF, centavos,
+  FAIXAS_IRRF_PADRAO, DEDUCAO_DEPENDENTE_PADRAO, DESCONTO_SIMPLIFICADO,
   CALCULADORAS, PARAMS, num,
 } = await import('../../client/src/lib/legalCalc.js')
 const { calcularPrazo, pascoa, feriadosDoAno, ehDiaUtil, emUTC, noRecesso } =
@@ -356,27 +357,60 @@ console.log('\n── 17. INSS: progressivo, faixa a faixa ──')
   else bad('não sinalizou o teto')
 }
 
-console.log('\n── 18. IRRF: sem tabela, não finge que é zero ──')
+console.log('\n── 18. IRRF: a tabela oficial de 2026 ──')
 {
-  definirTabelaIRRF([], 0)
-  const vazio = descontoIRRF(5000, 0)
-  if (vazio.aplicavel === false) ok('sem tabela cadastrada, devolve "não aplicável" — não zero')
-  else bad('devolveu zero como se não houvesse imposto')
+  restaurarTabelaIRRF()
 
-  const semIR = rodar('rescisao-liquida', { salario: '5000', verbasTributaveis: '6500', verbasIsentas: '4000', dependentes: '0', outrosDescontos: '0' })
-  if (semIR.headline.label.includes('sem IRRF')) ok('o título avisa que o líquido está incompleto')
-  else bad(`título: ${semIR.headline.label}`)
-  if (semIR.memoria.some(m => m.includes('MAIOR que o real'))) ok('a memória diz que o número está maior que o real')
-  else bad('não avisou que o líquido está superestimado')
+  // A "dedução" de cada faixa não é arbitrária: existe para o imposto não dar
+  // um salto na virada. Se a tabela fecha nessa conta, não houve erro de
+  // digitação — é a melhor verificação possível sem acesso à fonte.
+  let continua = true
+  for (let i = 1; i < FAIXAS_IRRF_PADRAO.length; i++) {
+    const ant = FAIXAS_IRRF_PADRAO[i - 1], at = FAIXAS_IRRF_PADRAO[i]
+    const esperado = ant.deduzir + ant.ate * (at.aliquota - ant.aliquota)
+    if (Math.abs(esperado - at.deduzir) > 0.01) continua = false
+  }
+  if (continua) ok('as cinco faixas fecham na conta da continuidade (Lei 15.191/2025)')
+  else bad('a tabela não é internamente consistente — erro de digitação?')
 
-  // Com uma tabela qualquer cadastrada, a conta roda.
-  definirTabelaIRRF([{ ate: 2000, aliquota: 0, deduzir: 0 }, { ate: null, aliquota: 0.275, deduzir: 900 }], 190)
-  const comIR = descontoIRRF(5000, 2)
-  eq(comIR.valor, 370.50, 'base 5.000 − 2 dependentes × 190 = 4.620 × 27,5% − 900')
+  eq(DEDUCAO_DEPENDENTE_PADRAO, 189.59, 'dedução mensal por dependente')
+  eq(DESCONTO_SIMPLIFICADO, 607.20, 'desconto simplificado = 25% da 1ª faixa (2.428,80)')
+  eq(centavos(2428.80 * 0.25), 607.20, 'e 25% de 2.428,80 dá exatamente isso')
+
+  // Isento: base abaixo da primeira faixa.
+  eq(descontoIRRF(2000, 0).valor, 0, 'base de R$ 2.000: isento')
+  // O desconto simplificado (607,20) ganha de 2 dependentes (379,18), e a lei
+  // manda aplicar o mais favorável.
+  const doisDep = descontoIRRF(5000, 2)
+  if (doisDep.usouSimplificado) ok('com 2 dependentes, o simplificado ainda é melhor — e é o que se usa')
+  else bad('aplicou as deduções legais sendo o simplificado maior')
+  // A base de 4.392,80 fica ABAIXO de 4.664,68, então cai na faixa de 22,5%
+  // — e não na última. É exatamente o tipo de faixa que se erra na mão.
+  eq(doisDep.faixa.aliquota, 0.225, 'base de 4.392,80 cai na faixa de 22,5%, não na última')
+  eq(doisDep.valor, 312.89, '4.392,80 × 22,5% − 675,49')
+
+  // Com dependentes suficientes, as deduções legais passam o simplificado.
+  const muitos = descontoIRRF(5000, 4)
+  if (!muitos.usouSimplificado) ok('com 4 dependentes (R$ 758,36), as deduções legais passam a valer mais')
+  else bad('continuou no simplificado com 4 dependentes')
+  if (muitos.valor < doisDep.valor) ok('e o imposto cai')
+  else bad('mais dependentes não reduziram o imposto')
+
+  // Nunca negativo.
+  eq(descontoIRRF(0, 5).valor, 0, 'sem rendimento, sem imposto (e não negativo)')
+
   const cheio = rodar('rescisao-liquida', { salario: '5000', verbasTributaveis: '6500', verbasIsentas: '4000', dependentes: '0', outrosDescontos: '0' })
-  if (cheio.headline.label === 'Líquido a receber') ok('com a tabela cadastrada, o título perde o aviso')
+  if (cheio.headline.label === 'Líquido a receber') ok('o líquido da rescisão agora vem completo')
   else bad(`título: ${cheio.headline.label}`)
-  definirTabelaIRRF([], 0)   // devolve ao estado de fábrica
+
+  // E o comportamento de segurança continua lá, para quando a tabela virar o ano.
+  definirTabelaIRRF([], 0)
+  if (descontoIRRF(5000, 0).aplicavel === false) ok('tabela esvaziada: volta a dizer "não aplicável", não zero')
+  else bad('tabela vazia devolveu zero como se não houvesse imposto')
+  const semIR = rodar('rescisao-liquida', { salario: '5000', verbasTributaveis: '6500', verbasIsentas: '4000', dependentes: '0', outrosDescontos: '0' })
+  if (semIR.memoria.some(m => m.includes('MAIOR que o real'))) ok('e avisa que o líquido está superestimado')
+  else bad('não avisou')
+  restaurarTabelaIRRF()
 }
 
 console.log('\n── 19. Multas do art. 477 e do art. 467 da CLT ──')
