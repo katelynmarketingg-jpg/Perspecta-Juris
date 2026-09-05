@@ -6,7 +6,17 @@ import { users, tenants, units } from '../db/schema.js'
 import { planLimitFor, userCount, getPlans } from '../lib/plans.js'
 import { menuAccessFor, setMenuAccess } from '../lib/permissions.js'
 import { validarSenha } from '../lib/senha.js'
-import { registrarUso, TIPOS } from '../lib/usage.js'
+import { criarAcesso, revogarAcesso, ErroDeRegra } from '../services/provisionamento.js'
+
+// Erro de regra do serviço → HTTP. As mesmas regras valem para a porta
+// /api/admin/*, que chama as mesmas funções.
+const responder = async (reply, fn) => {
+  try { return await fn() }
+  catch (err) {
+    if (err instanceof ErroDeRegra) return reply.code(err.status).send({ message: err.message })
+    throw err
+  }
+}
 
 export default async function settingsRoutes(app) {
   const auth = { preHandler: [app.authenticate] }
@@ -142,49 +152,16 @@ export default async function settingsRoutes(app) {
   })
 
   // POST /api/settings/users
-  app.post('/users', auth, async (req, reply) => {
+  app.post('/users', auth, async (req, reply) => responder(reply, async () => {
     if (!['admin'].includes(req.user.role)) return reply.code(403).send({ message: 'Permissão insuficiente.' })
 
-    // Limite de acessos do plano do escritório.
-    const [tenant] = await db.select().from(tenants).where(eq(tenants.id, req.user.tenantId)).limit(1)
-    const limit = await planLimitFor(tenant)
-    if (limit != null) {
-      const atual = await userCount(req.user.tenantId)
-      if (atual >= limit) {
-        return reply.code(403).send({
-          message: `Limite do plano atingido (${atual}/${limit} acessos). Faça upgrade do plano para adicionar mais usuários.`,
-        })
-      }
-    }
-
-    const { name, email, password, role, oabNumber, oabState, phone, login } = req.body ?? {}
-
-    if (!String(name ?? '').trim()) {
-      return reply.code(400).send({ message: 'Informe o nome do colaborador.' })
-    }
-    const erroSenha = validarSenha(password)
-    if (erroSenha) return reply.code(400).send({ message: erroSenha })
-
-    const passwordHash = await bcrypt.hash(password, 12)
-    const now = new Date().toISOString()
-    const id = nanoid()
-    // login_name é obrigatório (usado no login). Deriva de "login" ou do e-mail.
-    const loginName = String(login ?? (email ?? '').split('@')[0] ?? '')
-      .toLowerCase().trim().replace(/\s+/g, '') || ('user' + id.slice(0, 6))
-    await db.insert(users).values({
-      id, tenantId: req.user.tenantId,
-      name, loginName, email: email ? email.toLowerCase().trim() : null, passwordHash,
-      role: role ?? 'advogado',
-      oabNumber, oabState, phone,
-      isActive: true, createdAt: now, updatedAt: now,
+    // Limite de plano, senha, login único e contagem de consumo ficam no
+    // serviço — é o mesmo caminho que a Central percorre.
+    const criado = await criarAcesso(req.user.tenantId, req.body ?? {}, {
+      origem: 'configuracoes', criadoPor: req.user.userId,
     })
-    if (req.body.menuAccess !== undefined) await setMenuAccess(req.user.tenantId, id, req.body.menuAccess)
-    await registrarUso(req.user.tenantId, TIPOS.USUARIO, 1, { role: role ?? 'advogado' }, req.user.userId)
-    const [row] = await db.select({
-      id: users.id, name: users.name, email: users.email, role: users.role,
-    }).from(users).where(eq(users.id, id)).limit(1)
-    return reply.code(201).send(row)
-  })
+    return reply.code(201).send(criado)
+  }))
 
   // PUT /api/settings/users/:id
   app.put('/users/:id', auth, async (req, reply) => {
@@ -208,28 +185,11 @@ export default async function settingsRoutes(app) {
 
   // GET /api/settings/units
   // DELETE /api/settings/users/:id — remove um acesso do escritório
-  app.delete('/users/:id', auth, async (req, reply) => {
+  app.delete('/users/:id', auth, async (req, reply) => responder(reply, async () => {
     if (req.user.role !== 'admin') return reply.code(403).send({ message: 'Apenas administradores podem excluir acessos.' })
-    if (req.params.id === req.user.userId) return reply.code(400).send({ message: 'Você não pode excluir o seu próprio acesso.' })
-
-    const [alvo] = await db.select().from(users)
-      .where(and(eq(users.id, req.params.id), eq(users.tenantId, req.user.tenantId))).limit(1)
-    if (!alvo) return reply.code(404).send({ message: 'Acesso não encontrado.' })
-    if (alvo.role === 'master') return reply.code(403).send({ message: 'O acesso master não pode ser excluído.' })
-
-    // não deixa o escritório ficar sem nenhum administrador
-    if (alvo.role === 'admin') {
-      const admins = await db.select({ id: users.id }).from(users)
-        .where(and(eq(users.tenantId, req.user.tenantId), eq(users.role, 'admin')))
-      if (admins.length <= 1) {
-        return reply.code(400).send({ message: 'Este é o único administrador do escritório — crie outro antes de excluí-lo.' })
-      }
-    }
-
-    await db.delete(users).where(eq(users.id, req.params.id))
-    await setMenuAccess(req.user.tenantId, req.params.id, null) // limpa permissões guardadas
+    await revogarAcesso(req.user.tenantId, req.params.id, { proprioUsuario: req.user.userId })
     return reply.code(204).send()
-  })
+  }))
 
   app.get('/units', auth, async (req) => {
     return db.select().from(units).where(eq(units.tenantId, req.user.tenantId))

@@ -1,35 +1,16 @@
-import bcrypt from 'bcryptjs'
-import { nanoid } from 'nanoid'
-import { eq, ne, and, sql } from 'drizzle-orm'
+import { eq, ne } from 'drizzle-orm'
 import { db } from '../db/index.js'
-import { tenants, users, clients, processes } from '../db/schema.js'
+import { tenants, users } from '../db/schema.js'
 import { getPlans, savePlans } from '../lib/plans.js'
 import { menuAccessFor } from '../lib/permissions.js'
 import { getBranding, setBranding } from '../lib/branding.js'
 import { issueRefreshToken } from '../lib/refreshTokens.js'
-import { validarSenha } from '../lib/senha.js'
-import { consumoAgregado, inicioDoMes, registrarUso, TIPOS } from '../lib/usage.js'
+import { consumoAgregado, inicioDoMes } from '../lib/usage.js'
 import { emitirEventoPerspecta } from '../lib/perspecta-webhook.js'
-
-function slugify(s) {
-  return (s ?? '')
-    .toString()
-    .toLowerCase()
-    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-|-$/g, '')
-}
-
-// Contagens por tenant (usuários/clientes/processos) em 3 agregações.
-async function counts() {
-  const [u, c, p] = await Promise.all([
-    db.select({ t: users.tenantId,     n: sql`count(*)::int` }).from(users).groupBy(users.tenantId),
-    db.select({ t: clients.tenantId,   n: sql`count(*)::int` }).from(clients).groupBy(clients.tenantId),
-    db.select({ t: processes.tenantId, n: sql`count(*)::int` }).from(processes).groupBy(processes.tenantId),
-  ])
-  const map = arr => Object.fromEntries(arr.map(r => [r.t, r.n]))
-  return { u: map(u), c: map(c), p: map(p) }
-}
+// As regras de criar escritório vivem no serviço: a porta /api/admin/* usada
+// pela Perspecta Central chama exatamente as mesmas funções. Duas cópias
+// seriam, na prática, duas regras — e uma ficaria para trás.
+import { criarEscritorio, contagens as counts, ErroDeRegra } from '../services/provisionamento.js'
 
 export default async function masterRoutes(app) {
   // Todas as rotas exigem papel 'master'.
@@ -99,55 +80,17 @@ export default async function masterRoutes(app) {
 
   // POST /api/master/companies — cria escritório + usuário admin dele
   app.post('/companies', master, async (req, reply) => {
-    const b = req.body ?? {}
-    if (!b.name?.trim() || !b.adminLogin?.trim()) {
-      return reply.code(400).send({ message: 'Nome da empresa e login do administrador são obrigatórios.' })
+    let tenant
+    try {
+      ({ tenant } = await criarEscritorio(req.body ?? {}, { origem: 'nova-empresa' }))
+    } catch (err) {
+      if (err instanceof ErroDeRegra) return reply.code(err.status).send({ message: err.message })
+      throw err
     }
-    const erroSenha = validarSenha(b.adminPassword)
-    if (erroSenha) return reply.code(400).send({ message: erroSenha })
 
-    const now = new Date().toISOString()
-    const id = 'tnt_' + nanoid(12)
-
-    let slug = slugify(b.slug ?? b.name)
-    if (!slug) slug = 'escritorio-' + nanoid(6)
-    const [dupe] = await db.select().from(tenants).where(eq(tenants.slug, slug)).limit(1)
-    if (dupe) slug = `${slug}-${nanoid(4)}`
-
-    // login único dentro do tenant (aqui é o primeiro usuário, então só normaliza)
-    const loginName = b.adminLogin.trim().toLowerCase()
-
-    await db.insert(tenants).values({
-      id,
-      slug,
-      name:      b.name.trim(),
-      plan:      b.plan ?? 'starter',
-      isActive:  true,
-      settings:  { cnpj: b.cnpj ?? '' },
-      createdAt: now,
-      updatedAt: now,
-    })
-
-    const passwordHash = await bcrypt.hash(b.adminPassword, 12)
-    await db.insert(users).values({
-      id:           'usr_' + nanoid(12),
-      tenantId:     id,
-      name:         b.adminName?.trim() || 'Administrador',
-      loginName,
-      email:        b.adminEmail ?? null,
-      passwordHash,
-      role:         'admin',
-      isActive:     true,
-      createdAt:    now,
-      updatedAt:    now,
-    })
-
-    await registrarUso(id, TIPOS.USUARIO, 1, { origem: 'nova-empresa', role: 'admin' })
-
-    const [tenant] = await db.select().from(tenants).where(eq(tenants.id, id)).limit(1)
     emitirEventoPerspecta('cadastro.novo', {
-      empresa_ref: id, nome: tenant.name, plano: tenant.plan,
-      cnpj: tenant.settings?.cnpj ?? '', admin_email: b.adminEmail ?? null,
+      empresa_ref: tenant.id, nome: tenant.name, plano: tenant.plan,
+      cnpj: tenant.settings?.cnpj ?? '', admin_email: req.body?.adminEmail ?? null,
     })
     return reply.code(201).send({
       ...tenant,
