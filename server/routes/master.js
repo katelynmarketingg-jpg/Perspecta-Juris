@@ -9,6 +9,7 @@ import { getBranding, setBranding } from '../lib/branding.js'
 import { issueRefreshToken } from '../lib/refreshTokens.js'
 import { validarSenha } from '../lib/senha.js'
 import { consumoAgregado, inicioDoMes, registrarUso, TIPOS } from '../lib/usage.js'
+import { emitirEventoPerspecta } from '../lib/perspecta-webhook.js'
 
 function slugify(s) {
   return (s ?? '')
@@ -144,6 +145,10 @@ export default async function masterRoutes(app) {
     await registrarUso(id, TIPOS.USUARIO, 1, { origem: 'nova-empresa', role: 'admin' })
 
     const [tenant] = await db.select().from(tenants).where(eq(tenants.id, id)).limit(1)
+    emitirEventoPerspecta('cadastro.novo', {
+      empresa_ref: id, nome: tenant.name, plano: tenant.plan,
+      cnpj: tenant.settings?.cnpj ?? '', admin_email: b.adminEmail ?? null,
+    })
     return reply.code(201).send({
       ...tenant,
       cnpj: tenant.settings?.cnpj ?? '',
