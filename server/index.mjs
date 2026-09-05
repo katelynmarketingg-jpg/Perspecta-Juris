@@ -163,6 +163,11 @@ const HOST = process.env.HOST ?? '0.0.0.0'
 try {
   await app.listen({ port: PORT, host: HOST })
   console.log(`\n🚀 Perspecta Juris rodando em http://localhost:${PORT}`)
+
+  // Acompanhamento automático dos processos (DataJud/CNJ). Roda aqui, no
+  // servidor: antes dependia de alguém estar com o app aberto no navegador.
+  const { agendarSync } = await import('./jobs/datajudSync.js')
+  agendarSync()
 } catch (err) {
   app.log.error(err)
   process.exit(1)

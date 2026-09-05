@@ -2,10 +2,8 @@ import { createBrowserRouter, RouterProvider, Navigate } from 'react-router-dom'
 import { useAuthStore } from './stores/authStore'
 import { usePortalAuthStore } from './stores/portalAuthStore'
 import AppShell from './components/layout/AppShell'
-import { lazy, Suspense, useEffect } from 'react'
+import { lazy, Suspense } from 'react'
 import { Spinner } from './components/ui'
-import { syncAllProcesses, shouldAutoSync } from './lib/datajudSync'
-import { useUiStore } from './stores/uiStore'
 
 const LoginPage       = lazy(() => import('./modules/auth/LoginPage'))
 const MasterPage      = lazy(() => import('./modules/master/MasterPage'))
@@ -132,40 +130,16 @@ const router = createBrowserRouter([
   { path: '*', element: <Navigate to="/app" replace /> },
 ])
 
-function AutoSync() {
-  const { showToast } = useUiStore()
-  const user = useAuthStore(s => s.user)
-
-  useEffect(() => {
-    if (!user) return
-    if (!shouldAutoSync()) return
-
-    // Aguarda 5s após login para não atrasar o carregamento inicial
-    const t = setTimeout(async () => {
-      const { newMovements, synced } = await syncAllProcesses().catch(() => ({ newMovements: 0, synced: 0 }))
-      if (newMovements > 0) {
-        showToast(`⚖️ DataJud: ${newMovements} nova${newMovements !== 1 ? 's' : ''} movimentaç${newMovements !== 1 ? 'ões' : 'ão'} importada${newMovements !== 1 ? 's' : ''}.`, 'success', 6000)
-      }
-    }, 5000)
-
-    // Re-sync a cada hora
-    const interval = setInterval(async () => {
-      const { newMovements } = await syncAllProcesses().catch(() => ({ newMovements: 0 }))
-      if (newMovements > 0) {
-        showToast(`⚖️ DataJud: ${newMovements} nova${newMovements !== 1 ? 's' : ''} movimentaç${newMovements !== 1 ? 'ões' : 'ão'}.`, 'success', 6000)
-      }
-    }, 60 * 60 * 1000)
-
-    return () => { clearTimeout(t); clearInterval(interval) }
-  }, [user])
-
-  return null
-}
+// O acompanhamento automático do DataJud saiu daqui: agora roda NO SERVIDOR
+// (server/jobs/datajudSync.js), de hora em hora, para todos os escritórios.
+// Aqui dependia de alguém estar com a aba aberta — fim de semana, feriado ou
+// almoço e os processos ficavam sem acompanhamento. O botão "Sincronizar
+// agora" em Configurações → Integrações continua existindo para quem quiser
+// forçar na hora.
 
 export default function App() {
   return (
     <>
-      <AutoSync />
       <RouterProvider router={router} />
     </>
   )

@@ -369,6 +369,19 @@ export const automationLogs = pgTable('automation_logs', {
   ranAt:          text('ran_at').notNull(),
 })
 
+// ── Job Locks ─────────────────────────────────────────────────
+// Trava para tarefas que rodam sozinhas no servidor. Se um dia houver mais de
+// uma instância do servidor no ar, todas tentam rodar o mesmo job ao mesmo
+// tempo — e o DataJud seria consultado em dobro. Quem consegue atualizar a
+// linha (UPDATE condicional, atômico no Postgres) roda; os outros pulam.
+export const jobLocks = pgTable('job_locks', {
+  id:          text('id').primaryKey(),        // nome do job
+  lockedUntil: text('locked_until').notNull(), // até quando a trava vale
+  lockedBy:    text('locked_by'),              // quem pegou (para diagnóstico)
+  lastRunAt:   text('last_run_at'),
+  lastResult:  jsonb('last_result'),
+})
+
 // ── Usage Events (medição de consumo por escritório) ──────────
 // Base para cobrar por cota. Antes não existia contador nenhum: não havia
 // como saber quantas consultas ao DataJud um escritório fez no mês.
