@@ -1,4 +1,5 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
+import api from '../../lib/api'
 import { analisarPlanejamento } from '../../lib/previdenciaPlanner'
 import { fmtData, brl } from '../../lib/legalCalc'
 import { extractPdfText, parseCnisText } from '../../lib/cnisParser'
@@ -16,9 +17,33 @@ export default function PrevidenciarioPlanner({ onBack }) {
   const [vinculos, setVinculos] = useState([novoVinculo()])
   const [extra, setExtra] = useState({ tempoServicoMilitarDias: '', tempoRegimeProprioDias: '' })
   const [analise, setAnalise] = useState(null)
+  // Vincular o cliente logo no começo: o planejamento vira peça do processo
+  // dele, e o nome/nascimento já vêm preenchidos em vez de redigitados.
+  const [clientes, setClientes] = useState([])
+  const [clienteId, setClienteId] = useState('')
   const [importOpen, setImportOpen] = useState(false)
   const [importText, setImportText] = useState('')
   const [importing, setImporting] = useState(false)
+
+  useEffect(() => {
+    api.clients.list({ limit: 500 })
+      .then(r => setClientes(Array.isArray(r) ? r : (r?.data ?? [])))
+      .catch(() => setClientes([]))   // sem lista, os campos seguem manuais
+  }, [])
+
+  // Ao escolher o cliente, puxa o que já se sabe dele. Não sobrescreve o que
+  // já foi digitado à mão nem o que veio do CNIS: preenche o que está vazio.
+  const escolherCliente = (e) => {
+    const id = e.target.value
+    setClienteId(id)
+    const c = clientes.find(x => x.id === id)
+    if (!c) return
+    setSegurado(s => ({
+      ...s,
+      nome: c.name ?? s.nome,
+      nascimento: s.nascimento || (c.birthDate ? String(c.birthDate).slice(0, 10) : ''),
+    }))
+  }
   const fileRef = useRef()
 
   const setSeg = (k) => (e) => setSegurado(d => ({ ...d, [k]: e.target.value }))
@@ -73,10 +98,24 @@ export default function PrevidenciarioPlanner({ onBack }) {
     finally { setImporting(false) }
   }
 
+  // Um aviso que some em 3 segundos não basta quando o campo que falta está
+  // fora da vista. O erro fica na tela, ao lado do botão, até ser resolvido.
+  const [erro, setErro] = useState('')
+
   const calcular = () => {
-    if (!segurado.nascimento) { showToast('Informe a data de nascimento.', 'error'); return }
+    setErro('')
+    if (!segurado.nascimento) {
+      const msg = 'Informe a data de nascimento do segurado — sem ela não dá para calcular idade nem regra de transição.'
+      setErro(msg); showToast(msg, 'error')
+      document.querySelector('input[type="date"]')?.focus()
+      return
+    }
     const validos = vinculos.filter(v => v.inicio && v.fim)
-    if (!validos.length) { showToast('Adicione ao menos um vínculo com datas.', 'error'); return }
+    if (!validos.length) {
+      const msg = 'Adicione ao menos um vínculo com data de início E de fim.'
+      setErro(msg); showToast(msg, 'error')
+      return
+    }
     const filiadoAntesReforma = segurado.dataFiliacao ? new Date(segurado.dataFiliacao) < new Date('2019-11-13') : true
     setAnalise(analisarPlanejamento(segurado, validos, { ...extra, filiadoAntesReforma }))
   }
@@ -164,9 +203,33 @@ ${cenariosHtml}
       {/* Segurado */}
       <Card className="p-5 mb-4">
         <h3 className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wide mb-3">Dados do segurado</h3>
+
+        <label className="block mb-3">
+          <span className="text-xs text-[var(--text-secondary)] mb-1 block">Cliente</span>
+          <select className={inputCls} value={clienteId} onChange={escolherCliente}>
+            <option value="">— avulso (sem vincular a um cliente) —</option>
+            {clientes.map(c => (
+              <option key={c.id} value={c.id}>
+                {c.name}{c.cpfCnpj ? ` — ${c.cpfCnpj}` : ''}
+              </option>
+            ))}
+          </select>
+          <span className="text-[10px] text-[var(--text-muted)] mt-1 block">
+            {clientes.length === 0
+              ? 'Nenhum cliente carregado — preencha os dados à mão.'
+              : 'Escolher o cliente preenche nome e nascimento, e o relatório sai identificado.'}
+          </span>
+        </label>
+
         <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
           <label className="block col-span-2 md:col-span-1"><span className="text-xs text-[var(--text-secondary)] mb-1 block">Nome</span><input className={inputCls} value={segurado.nome} onChange={setSeg('nome')} /></label>
-          <label className="block"><span className="text-xs text-[var(--text-secondary)] mb-1 block">Nascimento *</span><input type="date" className={inputCls} value={segurado.nascimento} onChange={setSeg('nascimento')} /></label>
+          <label className="block">
+            <span className="text-xs text-[var(--text-secondary)] mb-1 block">
+              Nascimento <span className="text-red-400">*</span>
+            </span>
+            <input type="date" value={segurado.nascimento} onChange={setSeg('nascimento')}
+              className={`${inputCls} ${!segurado.nascimento ? 'border-amber-500/70' : ''}`} />
+          </label>
           <label className="block"><span className="text-xs text-[var(--text-secondary)] mb-1 block">Sexo</span>
             <select className={inputCls} value={segurado.sexo} onChange={setSeg('sexo')}><option value="M">Masculino</option><option value="F">Feminino</option></select>
           </label>
@@ -223,6 +286,11 @@ ${cenariosHtml}
             </div>
           ))}
         </div>
+        {erro && (
+          <div className="mt-4 px-4 py-3 rounded-lg bg-red-500/10 border border-red-500/40">
+            <p className="text-sm text-red-300">{erro}</p>
+          </div>
+        )}
         <Button variant="primary" className="w-full mt-4 bg-emerald-600 hover:bg-emerald-500" onClick={calcular}>
           Calcular Planejamento Previdenciário
         </Button>

@@ -51,6 +51,7 @@ node server/tests/etapa6.papeis.mjs       # perfis de acesso num vocabulario so
 
 # Este roda sozinho: nao precisa de servidor nem de banco, e so matematica.
 node server/tests/etapa7.calculos.mjs     # motor de calculos juridicos
+node server/tests/etapa9.avisos.mjs       # os avisos da tela e a validacao do planejamento
 ```
 
 Precisam de bundle, porque exercitam código do cliente (imports sem extensão,
@@ -68,7 +69,7 @@ for t in etapa0.resgate etapa2.datajud etapa8.sessao; do
 done
 ```
 
-Total atual: **333 asserções** em 10 suítes. Cada suíte sai com código 0 se passar.
+Total atual: **360 asserções** em 11 suítes. Cada suíte sai com código 0 se passar.
 
 | Suíte | Asserções | O que prova |
 |---|---:|---|
@@ -82,6 +83,7 @@ Total atual: **333 asserções** em 10 suítes. Cada suíte sai com código 0 se
 | `etapa6.papeis` | 22 | um vocabulário só de perfis, sem mexer em permissão |
 | `etapa7.calculos` | 165 | correção monetária, rescisão, dosimetria, locação, prazos, INSS/IRRF |
 | `etapa8.sessao` | 14 | o laço de recarregamento na abertura |
+| `etapa9.avisos` | 27 | os avisos que ninguém desenhava |
 
 **Atenção:** os testes escrevem no banco apontado por `DATABASE_URL`. Rode
 sempre contra um banco descartável, **nunca contra produção**. Cada suíte apaga
