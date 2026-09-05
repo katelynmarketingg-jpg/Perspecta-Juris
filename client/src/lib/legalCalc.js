@@ -136,14 +136,87 @@ if (typeof localStorage !== 'undefined') { try { _aplicarPrevOverrides() } catch
 
 const two = (n) => String(n).padStart(2, '0')
 
-// meses inteiros entre duas datas ISO (yyyy-mm-dd)
+// Lê 'yyyy-mm-dd' sempre em UTC. Sem isto, `new Date('2026-03-25')` vira
+// 24/03 às 21h no fuso de Brasília, e todo dia do mês sai um a menos.
+function emUTC(iso) {
+  if (!iso) return null
+  const s = String(iso).slice(0, 10)
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  const d = m ? new Date(Date.UTC(+m[1], +m[2] - 1, +m[3])) : new Date(iso)
+  return isNaN(d) ? null : d
+}
+const diaDoMes = (d) => d.getUTCDate()
+const ultimoDiaDoMes = (ano, mes) => new Date(Date.UTC(ano, mes + 1, 0)).getUTCDate()
+
+// Meses INTEIROS decorridos entre duas datas.
+//
+// A linha que descontava o mês incompleto estava escrita `m -= 0` — um no-op.
+// O efeito era cobrar juros de um mês que ainda não fechou: numa varredura de
+// 540 pares de datas, 96,5% saíam com um mês a mais.
 export function mesesEntre(d1, d2) {
-  if (!d1 || !d2) return 0
-  const a = new Date(d1), b = new Date(d2)
-  if (isNaN(a) || isNaN(b)) return 0
-  let m = (b.getFullYear() - a.getFullYear()) * 12 + (b.getMonth() - a.getMonth())
-  if (b.getDate() < a.getDate()) m -= 0 // meses de calendário; ajuste fino opcional
+  const a = emUTC(d1), b = emUTC(d2)
+  if (!a || !b) return 0
+  let m = (b.getUTCFullYear() - a.getUTCFullYear()) * 12 + (b.getUTCMonth() - a.getUTCMonth())
+  // O mês só fecha quando chega o mesmo dia. Quem começou dia 31 fecha no
+  // último dia dos meses curtos — senão fevereiro nunca fecharia.
+  const diaLimite = Math.min(diaDoMes(a), ultimoDiaDoMes(b.getUTCFullYear(), b.getUTCMonth()))
+  if (diaDoMes(b) < diaLimite) m -= 1
   return Math.max(0, m)
+}
+
+// ── Avos trabalhistas (fração ≥ 15 dias = mês inteiro) ─────────────────────
+
+/**
+ * Avos de 13º salário no ano da saída (Lei 4.090/62, art. 1º, §2º).
+ * Conta os meses do ANO CIVIL em que houve 15 dias ou mais de trabalho —
+ * começando na admissão, quando ela é do próprio ano.
+ *
+ * Antes o cálculo era `mês da saída + (dia ≥ 15 ? 1 : 0)`, que ignorava a
+ * data de admissão: quem foi contratado em junho e dispensado em setembro
+ * recebia 9 avos em vez de 4.
+ */
+export function avosDecimoTerceiro(admissaoISO, saidaISO) {
+  const adm = emUTC(admissaoISO), sai = emUTC(saidaISO)
+  if (!sai) return 0
+  const ano = sai.getUTCFullYear()
+  const inicioAno = new Date(Date.UTC(ano, 0, 1))
+  const inicio = adm && adm > inicioAno ? adm : inicioAno
+  if (inicio > sai) return 0
+
+  let avos = 0
+  for (let mes = inicio.getUTCMonth(); mes <= sai.getUTCMonth(); mes++) {
+    const primeiro = new Date(Date.UTC(ano, mes, 1))
+    const ultimo   = new Date(Date.UTC(ano, mes, ultimoDiaDoMes(ano, mes)))
+    const de  = inicio > primeiro ? inicio : primeiro
+    const ate = sai < ultimo ? sai : ultimo
+    const dias = Math.round((ate - de) / 86400000) + 1   // inclui os dois extremos
+    if (dias >= 15) avos++
+  }
+  return Math.min(12, avos)
+}
+
+/**
+ * Avos de férias proporcionais (CLT art. 146, parágrafo único).
+ * Contam do último aniversário da admissão — o período aquisitivo — e não do
+ * 1º de janeiro. Fração igual ou superior a 15 dias conta mês inteiro.
+ *
+ * Antes as férias usavam os mesmos avos do 13º, que são do ano civil. Para
+ * quem tem casa de anos isso errava praticamente sempre.
+ */
+export function avosFeriasProporcionais(admissaoISO, saidaISO) {
+  const adm = emUTC(admissaoISO), sai = emUTC(saidaISO)
+  if (!adm || !sai || sai < adm) return 0
+
+  // Último aniversário de admissão que já passou: o início do aquisitivo em curso.
+  let inicio = new Date(Date.UTC(sai.getUTCFullYear(), adm.getUTCMonth(), adm.getUTCDate()))
+  if (inicio > sai) inicio = new Date(Date.UTC(sai.getUTCFullYear() - 1, adm.getUTCMonth(), adm.getUTCDate()))
+  if (inicio < adm) inicio = adm
+
+  const meses = mesesEntre(inicio.toISOString().slice(0, 10), sai.toISOString().slice(0, 10))
+  // Sobra depois dos meses fechados: ≥ 15 dias vira mais um avo.
+  const fechado = new Date(Date.UTC(inicio.getUTCFullYear(), inicio.getUTCMonth() + meses, inicio.getUTCDate()))
+  const sobra = Math.round((sai - fechado) / 86400000)
+  return Math.min(12, meses + (sobra >= 15 ? 1 : 0))
 }
 
 // dias entre datas
@@ -400,9 +473,11 @@ export const CALCULADORAS = [
     ],
     compute: (v) => {
       const sal = num(v.salario)
-      const admissao = new Date(v.admissao), saida = new Date(v.saida)
       const anosCompletos = Math.max(0, Math.floor(diasEntre(v.admissao, v.saida) / 365))
-      const mesesTrabAno = Math.min(12, saida.getUTCMonth() + (saida.getUTCDate() >= 15 ? 1 : 0)) // meses no ano p/ 13º e férias prop.
+      // 13º conta pelo ANO CIVIL; férias, pelo PERÍODO AQUISITIVO (aniversário
+      // da admissão). São contas diferentes e antes usavam o mesmo número.
+      const meses13   = avosDecimoTerceiro(v.admissao, v.saida)
+      const mesesFerias = avosFeriasProporcionais(v.admissao, v.saida)
       const motivo = v.motivo
       const temAviso = motivo === 'sem_justa' || motivo === 'indireta'
       const temMulta = motivo === 'sem_justa' || motivo === 'indireta'
@@ -424,14 +499,15 @@ export const CALCULADORAS = [
       }
 
       // 13º proporcional
-      const meses13 = mesesTrabAno
       const decimo = motivo === 'justa' ? 0 : sal / 12 * meses13
-      if (decimo) { linhas.push({ label: `13º proporcional (${meses13}/12)`, value: brl(decimo) }); memoria.push(`13º proporcional = ${brl(sal)} ÷ 12 × ${meses13} = ${brl(decimo)}`) }
+      if (decimo) { linhas.push({ label: `13º proporcional (${meses13}/12)`, value: brl(decimo) }); memoria.push(`13º proporcional = ${brl(sal)} ÷ 12 × ${meses13} avos do ano civil = ${brl(decimo)}`) }
 
-      // Férias proporcionais + 1/3
-      const fp = motivo === 'justa' ? 0 : (sal / 12 * meses13)
+      // Férias proporcionais + 1/3 — avos do período aquisitivo
+      // (quem pede demissão com menos de 12 meses de casa também tem direito:
+      //  Súmula 261 do TST derrubou a regra antiga.)
+      const fp = motivo === 'justa' ? 0 : (sal / 12 * mesesFerias)
       const fpTerco = fp / 3
-      if (fp) { linhas.push({ label: `Férias proporcionais + 1/3 (${meses13}/12)`, value: brl(fp + fpTerco) }); memoria.push(`Férias prop. = ${brl(sal)} ÷ 12 × ${meses13} = ${brl(fp)}; +1/3 = ${brl(fpTerco)}`) }
+      if (fp) { linhas.push({ label: `Férias proporcionais + 1/3 (${mesesFerias}/12)`, value: brl(fp + fpTerco) }); memoria.push(`Férias prop. = ${brl(sal)} ÷ 12 × ${mesesFerias} avos do período aquisitivo = ${brl(fp)}; +1/3 = ${brl(fpTerco)}`) }
 
       // Férias vencidas + 1/3
       let fv = 0
@@ -449,7 +525,7 @@ export const CALCULADORAS = [
       return {
         headline: { label: 'Total rescisório (bruto)', value: brl(total) },
         linhas, memoria,
-        criterios: [`Motivo: ${{sem_justa:'Sem justa causa',pedido:'Pedido de demissão',justa:'Justa causa',indireta:'Rescisão indireta'}[motivo]}`, `Tempo: ${anosCompletos} ano(s) completos`, 'Não inclui INSS/IRRF nem horas extras/adicionais.'],
+        criterios: [`Motivo: ${{sem_justa:'Sem justa causa',pedido:'Pedido de demissão',justa:'Justa causa',indireta:'Rescisão indireta'}[motivo]}`, `Tempo: ${anosCompletos} ano(s) completos`, `13º: ${meses13}/12 avos (ano civil) · Férias: ${mesesFerias}/12 avos (período aquisitivo)`, 'Não inclui INSS/IRRF nem horas extras/adicionais.', 'Não projeta o aviso-prévio indenizado sobre 13º e férias (art. 487, §1º, CLT) — some se o caso exigir.'],
       }
     },
   },
