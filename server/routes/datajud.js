@@ -2,26 +2,8 @@
 // O cliente chamava '/datajud/...', que só existe no proxy do modo de
 // desenvolvimento; em produção a busca falhava em silêncio. Aqui o servidor
 // repassa a consulta e injeta a chave (que assim não vai para o navegador).
-import { eq } from 'drizzle-orm'
-import { db } from '../db/index.js'
-import { tenants } from '../db/schema.js'
 import { registrarUso, TIPOS } from '../lib/usage.js'
-
-const DATAJUD = 'https://api-publica.datajud.cnj.jus.br'
-const CHAVE_PADRAO = 'cDZHYzlZa0JadVREZDJCendBdUFWZz09cDZHYzlZa0JadVREZDJCendBdUFWZz09'
-
-// Só letras e números: evita que alguém monte uma URL para outro destino.
-const TRIBUNAL_OK = /^[a-z0-9]{3,12}$/
-
-// A chave do escritório (Configurações → Integrações) tem prioridade sobre a
-// variável de ambiente e sobre a chave padrão (que o CNJ pode invalidar).
-async function chaveDoEscritorio(tenantId) {
-  try {
-    const [t] = await db.select().from(tenants).where(eq(tenants.id, tenantId)).limit(1)
-    const k = t?.settings?.config?.pj_cfg_datajud_key
-    return (typeof k === 'string' && k.trim()) ? k.trim() : null
-  } catch { return null }
-}
+import { DATAJUD, TRIBUNAL_OK, chaveDoEscritorio } from '../lib/datajudCnj.js'
 
 export default async function datajudRoutes(app) {
   const auth = { preHandler: [app.authenticate] }
@@ -33,7 +15,7 @@ export default async function datajudRoutes(app) {
       return reply.code(400).send({ message: 'Tribunal inválido.' })
     }
 
-    const chave = (await chaveDoEscritorio(req.user.tenantId)) || process.env.DATAJUD_KEY || CHAVE_PADRAO
+    const chave = await chaveDoEscritorio(req.user.tenantId)
 
     // Medidor de consumo. Conta a INTENÇÃO de consultar (antes do fetch):
     // é isso que gasta cota no CNJ, dê certo ou não. Nunca derruba a consulta.

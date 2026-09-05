@@ -10,6 +10,7 @@ import {
 } from '../../components/ui'
 import IntegrationTab from './IntegrationTab'
 import ResgateTab from './ResgateTab'
+import { USER_ROLES, roleLabel } from '../../lib/constants'
 
 // ── helpers ──────────────────────────────────────────────────────
 const uid = () => Math.random().toString(36).slice(2, 9) + Math.random().toString(36).slice(2, 9)
@@ -594,16 +595,10 @@ function UsersTab() {
   const { showToast } = useUiStore()
   const [users, setUsers] = useState([])
   const [usage, setUsage] = useState(null)
-  const [form, setForm] = useState({ name: '', loginName: '', email: '', password: '', role: 'lawyer', menuAccess: null })
+  const [form, setForm] = useState({ name: '', loginName: '', email: '', password: '', role: 'advogado', menuAccess: null })
   const [editing, setEditing] = useState(null)
   const [loading, setLoading] = useState(true)
 
-  const ROLES = [
-    { value: 'admin',  label: 'Administrador' },
-    { value: 'lawyer', label: 'Advogado(a)' },
-    { value: 'staff',  label: 'Assistente / Estagiário' },
-  ]
-  const roleLabel = (r) => ROLES.find(x => x.value === r)?.label ?? r
 
   const load = () => {
     api.settings.users().then(r => setUsers(Array.isArray(r) ? r : (r?.data ?? []))).catch(() => setUsers([])).finally(() => setLoading(false))
@@ -613,11 +608,20 @@ function UsersTab() {
 
   const full = !editing && usage && usage.limit != null && (usage.remaining ?? 0) <= 0
 
-  const reset = () => { setForm({ name: '', loginName: '', email: '', password: '', role: 'lawyer', menuAccess: null }); setEditing(null) }
+  // O login é normalizado no servidor (minúsculas, sem espaços) e precisa ser
+  // único dentro do escritório. Avisa enquanto se digita, com o campo na
+  // frente, em vez de recusar depois de preencher o formulário inteiro.
+  const normalizarLogin = (v) => String(v ?? '').toLowerCase().trim().replace(/\s+/g, '')
+  const loginEmUso = form.loginName.trim()
+    ? users.find(u => u.id !== editing && normalizarLogin(u.loginName) === normalizarLogin(form.loginName))
+    : null
+
+  const reset = () => { setForm({ name: '', loginName: '', email: '', password: '', role: 'advogado', menuAccess: null }); setEditing(null) }
 
   const save = async () => {
     if (!form.name.trim() || !form.loginName.trim()) { showToast('Preencha nome e login.', 'error'); return }
     if (!editing && !form.password.trim()) { showToast('Defina uma senha.', 'error'); return }
+    if (loginEmUso) { showToast(`O login "${normalizarLogin(form.loginName)}" já está em uso por ${loginEmUso.name}.`, 'error'); return }
     const menuAccess = form.role === 'admin' ? null : (form.menuAccess ?? ALL_TABS)
     try {
       if (editing) {
@@ -632,7 +636,7 @@ function UsersTab() {
     } catch (e) { showToast(e.message || 'Erro ao salvar.', 'error') }
   }
 
-  const edit = (u) => { setEditing(u.id); setForm({ name: u.name, loginName: u.loginName, email: u.email ?? '', password: '', role: u.role ?? 'lawyer', menuAccess: u.menuAccess ?? null }) }
+  const edit = (u) => { setEditing(u.id); setForm({ name: u.name, loginName: u.loginName, email: u.email ?? '', password: '', role: u.role ?? 'advogado', menuAccess: u.menuAccess ?? null }) }
   const remove = async (id) => {
     const u = users.find(x => x.id === id)
     if (!window.confirm(`Excluir o acesso de "${u?.name ?? 'este login'}"? A pessoa perde o acesso imediatamente.`)) return
@@ -668,12 +672,20 @@ function UsersTab() {
         <h3 className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wide">{editing ? 'Editar login' : 'Novo login'}</h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Input label="Nome completo *" value={form.name} onChange={set('name')} placeholder="Ex: Ana Souza" />
-          <Input label="Login (usuário) *" value={form.loginName} onChange={set('loginName')} placeholder="Ex: ana" />
+          <div>
+            <Input label="Login (usuário) *" value={form.loginName} onChange={set('loginName')} placeholder="Ex: ana" />
+            {loginEmUso && (
+              <p className="mt-1.5 text-xs text-amber-400">
+                Já em uso por <b>{loginEmUso.name}</b>. Cada login precisa ser único no
+                escritório — tente <b>{normalizarLogin(form.loginName)}2</b> ou o sobrenome junto.
+              </p>
+            )}
+          </div>
           <Input label="E-mail" type="email" value={form.email} onChange={set('email')} />
           <div>
             <label className="text-xs font-medium text-[var(--text-secondary)] mb-1 block">Perfil</label>
             <select value={form.role} onChange={set('role')} className="w-full px-3 py-2 rounded-lg bg-[var(--bg-input)] border border-[var(--border)] text-sm text-[var(--text-primary)] focus:border-brand-500 focus:outline-none">
-              {ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+              {USER_ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
             </select>
           </div>
           <Input label={editing ? 'Nova senha (deixe vazio p/ manter)' : 'Senha *'} type="text" value={form.password} onChange={set('password')} placeholder="••••" />
@@ -713,7 +725,7 @@ function UsersTab() {
         <div className="flex items-center justify-end gap-2">
           {full && <span className="text-[11px] text-red-400 mr-auto">Limite do plano atingido — faça upgrade para adicionar mais logins.</span>}
           {editing && <Button variant="secondary" size="sm" onClick={reset}>Cancelar</Button>}
-          <Button variant="primary" size="sm" onClick={save} disabled={full}>{editing ? 'Salvar' : 'Adicionar login'}</Button>
+          <Button variant="primary" size="sm" onClick={save} disabled={full || !!loginEmUso}>{editing ? 'Salvar' : 'Adicionar login'}</Button>
         </div>
       </Card>
 

@@ -23,6 +23,16 @@ services:
         value: /var/data/files
       - key: HUB_URL
         value: https://perspecta-hub.onrender.com
+      # Porta /api/admin/* usada pela Perspecta Central. Sem esta variável a
+      # porta responde 503 — é assim que ela nasce fechada.
+      # Gere com `openssl rand -base64 48` e cole no painel do Render.
+      - key: ADMIN_API_TOKEN
+        sync: false
+      # Acompanhamento automático dos processos no CNJ, rodando no servidor.
+      - key: DATAJUD_SYNC_ENABLED
+        value: "true"
+      - key: DATAJUD_SYNC_INTERVALO_MIN
+        value: "60"
     disk:
       name: juris-data
       mountPath: /var/data

@@ -36,6 +36,13 @@
       "when": 1788461030143,
       "tag": "0004_numerous_vermin",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1788568962960,
+      "tag": "0005_white_ironclad",
+      "breakpoints": true
     }
   ]
 }

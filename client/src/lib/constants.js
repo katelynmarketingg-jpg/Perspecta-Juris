@@ -41,13 +41,28 @@ export const CONTRACT_TYPES = [
   { value: 'monthly',    label: 'Mensalidade' },
 ]
 
+// Espelho de server/lib/roles.js, que é quem manda: o servidor recusa
+// qualquer perfil fora desta lista. Mexeu aqui, mexa lá também.
 export const USER_ROLES = [
-  { value: 'admin',        label: 'Administrador' },
-  { value: 'advogado',     label: 'Advogado' },
-  { value: 'estagiario',   label: 'Estagiário' },
-  { value: 'financeiro',   label: 'Financeiro' },
-  { value: 'recepcionista',label: 'Recepcionista / Secretária' },
+  { value: 'admin',         label: 'Administrador' },
+  { value: 'advogado',      label: 'Advogado(a)' },
+  { value: 'estagiario',    label: 'Estagiário(a)' },
+  { value: 'financeiro',    label: 'Financeiro' },
+  { value: 'recepcionista', label: 'Recepção / Secretaria' },
 ]
+
+// Nomes antigos que a tela de Configurações chegou a gravar.
+export const PAPEIS_ANTIGOS = { lawyer: 'advogado', staff: 'estagiario' }
+
+export const roleLabel = (r) => {
+  const canonico = PAPEIS_ANTIGOS[String(r ?? '').toLowerCase()] ?? r
+  if (canonico === 'master') return 'Administradora do sistema'
+  return USER_ROLES.find(x => x.value === canonico)?.label ?? String(r ?? '—')
+}
+
+// Quem pode ser responsável por um processo. Financeiro e recepção ficam de
+// fora do seletor — não é permissão, é só não poluir a lista.
+export const PAPEIS_JURIDICOS = ['admin', 'advogado', 'estagiario']
 
 export const LEAD_SOURCES = [
   { value: 'indicacao',   label: 'Indicação' },

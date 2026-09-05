@@ -114,6 +114,7 @@ const { default: masterRoutes }    = await import('./routes/master.js')
 const { default: auditRoutes }     = await import('./routes/audit.js')
 const { default: reportRoutes }    = await import('./routes/reports.js')
 const { default: datajudRoutes }   = await import('./routes/datajud.js')
+const { default: adminRoutes }     = await import('./routes/admin.js')
 
 await app.register(authRoutes,      { prefix: '/api/auth' })
 await app.register(clientRoutes,    { prefix: '/api/clients' })
@@ -131,6 +132,10 @@ await app.register(masterRoutes,    { prefix: '/api/master' })
 await app.register(auditRoutes,     { prefix: '/api/audit' })
 await app.register(reportRoutes,    { prefix: '/api/reports' })
 await app.register(datajudRoutes,   { prefix: '/api/datajud' })
+
+// Porta máquina-a-máquina da Perspecta Central. Não usa JWT de usuário:
+// autentica por ADMIN_API_TOKEN. Sem essa variável, responde 503.
+await app.register(adminRoutes,     { prefix: '/api/admin' })
 
 // ── Health ────────────────────────────────────────────────────
 app.get('/api/health', async () => ({
@@ -163,6 +168,11 @@ const HOST = process.env.HOST ?? '0.0.0.0'
 try {
   await app.listen({ port: PORT, host: HOST })
   console.log(`\n🚀 Perspecta Juris rodando em http://localhost:${PORT}`)
+
+  // Acompanhamento automático dos processos (DataJud/CNJ). Roda aqui, no
+  // servidor: antes dependia de alguém estar com o app aberto no navegador.
+  const { agendarSync } = await import('./jobs/datajudSync.js')
+  agendarSync()
 } catch (err) {
   app.log.error(err)
   process.exit(1)
