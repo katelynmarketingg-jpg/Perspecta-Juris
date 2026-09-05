@@ -48,6 +48,9 @@ node server/tests/etapa3.consumo.mjs      # medidor de consumo
 node server/tests/etapa2b.syncServidor.mjs  # sync do DataJud no servidor + trava
 node server/tests/etapa5.admin.mjs        # porta /api/admin/* (precisa do ADMIN_API_TOKEN)
 node server/tests/etapa6.papeis.mjs       # perfis de acesso num vocabulario so
+
+# Este roda sozinho: nao precisa de servidor nem de banco, e so matematica.
+node server/tests/etapa7.calculos.mjs     # motor de calculos juridicos
 ```
 
 Precisam de bundle, porque exercitam código do cliente (imports sem extensão,
@@ -64,7 +67,7 @@ for t in etapa0.resgate etapa2.datajud; do
 done
 ```
 
-Total atual: **154 asserções** em 8 suítes. Cada suíte sai com código 0 se passar.
+Total atual: **213 asserções** em 9 suítes. Cada suíte sai com código 0 se passar.
 
 | Suíte | Asserções | O que prova |
 |---|---:|---|
@@ -76,6 +79,7 @@ Total atual: **154 asserções** em 8 suítes. Cada suíte sai com código 0 se 
 | `etapa3.consumo` | 14 | medidor de consumo por escritório |
 | `etapa5.admin` | 36 | porta `/api/admin/*` da Perspecta Central |
 | `etapa6.papeis` | 22 | um vocabulário só de perfis, sem mexer em permissão |
+| `etapa7.calculos` | 59 | correção monetária, verbas rescisórias, dosimetria, locação |
 
 **Atenção:** os testes escrevem no banco apontado por `DATABASE_URL`. Rode
 sempre contra um banco descartável, **nunca contra produção**. Cada suíte apaga
