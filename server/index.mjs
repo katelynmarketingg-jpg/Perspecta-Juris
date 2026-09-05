@@ -151,9 +151,30 @@ app.get('/api/branding', async () => getBranding())
 
 // ── Static files (production) ─────────────────────────────────
 if (existsSync(DIST)) {
-  await app.register(fastifyStatic, { root: DIST, wildcard: false })
+  await app.register(fastifyStatic, {
+    root: DIST,
+    wildcard: false,
+    // Os arquivos de /assets têm hash no nome (index-9m8uK4FE.js): mudou o
+    // conteúdo, muda o nome. Podem ficar no cache para sempre.
+    //
+    // O index.html NÃO pode. Ele é quem diz quais arquivos com hash carregar,
+    // e o build apaga os antigos. Um index.html velho no cache manda o
+    // navegador buscar arquivos que não existem mais, e o app cai inteiro com
+    // "Failed to fetch dynamically imported module" — foi o que aconteceu
+    // depois de uma publicação.
+    maxAge: 0,
+    setHeaders(res, caminho) {
+      if (/[\\/]assets[\\/]/.test(caminho) && !caminho.endsWith('.html')) {
+        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable')
+      } else {
+        res.setHeader('Cache-Control', 'no-cache')
+      }
+    },
+  })
   app.setNotFoundHandler((req, reply) => {
     if (!req.url.startsWith('/api')) {
+      // Toda rota do SPA devolve o index.html; ele nunca pode ficar velho.
+      reply.header('Cache-Control', 'no-cache')
       reply.sendFile('index.html', DIST)
     } else {
       reply.code(404).send({ message: 'Not found' })

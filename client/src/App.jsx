@@ -2,7 +2,8 @@ import { createBrowserRouter, RouterProvider, Navigate } from 'react-router-dom'
 import { useAuthStore } from './stores/authStore'
 import { usePortalAuthStore } from './stores/portalAuthStore'
 import AppShell from './components/layout/AppShell'
-import { lazy, Suspense } from 'react'
+import { Suspense } from 'react'
+import { lazyComRecarga as lazy } from './lib/lazyComRecarga'
 import { Spinner } from './components/ui'
 
 const LoginPage       = lazy(() => import('./modules/auth/LoginPage'))

@@ -11,8 +11,12 @@
 const {
   mesesEntre, avosDecimoTerceiro, avosFeriasProporcionais,
   fracao, mesesEmPena, jurosDePrestacoes, diasDoPeriodo, diasEntre,
+  descontoINSS, descontoIRRF, definirTabelaIRRF, restaurarTabelaIRRF, centavos,
+  FAIXAS_IRRF_PADRAO, DEDUCAO_DEPENDENTE_PADRAO, DESCONTO_SIMPLIFICADO,
   CALCULADORAS, PARAMS, num,
 } = await import('../../client/src/lib/legalCalc.js')
+const { calcularPrazo, pascoa, feriadosDoAno, ehDiaUtil, emUTC, noRecesso } =
+  await import('../../client/src/lib/prazos.js')
 
 let falhas = 0
 const ok  = (m) => console.log(`  ✅ ${m}`)
@@ -265,6 +269,192 @@ console.log('\n── 14. Transição da EC 103/2019 ──')
   const p50n = rodar('pedagio-50', { sexo: 'M', tempoNaData: '30' })
   if (p50n.headline.label.includes('❌')) ok('faltando 5 anos: fora do pedágio de 50%')
   else bad(`pedágio 50 aceitou quem faltava 5 anos`)
+}
+
+console.log('\n── 15. Prazo processual: os feriados móveis ──')
+{
+  // Páscoa manda em Carnaval, Sexta-feira Santa e Corpus Christi. Uma lista
+  // fixa ficaria errada no ano seguinte.
+  const pas = (a) => pascoa(a).toISOString().slice(0, 10)
+  eq(pas(2026), '2026-04-05', 'Páscoa 2026')
+  eq(pas(2027), '2027-03-28', 'Páscoa 2027')
+  eq(pas(2030), '2030-04-21', 'Páscoa 2030')
+
+  const f26 = feriadosDoAno(2026).map(f => f.data)
+  if (f26.includes('2026-02-16') && f26.includes('2026-02-17')) ok('Carnaval 2026 nos dias 16 e 17 de fevereiro')
+  else bad(`carnaval: ${f26.join(', ')}`)
+  if (f26.includes('2026-04-03')) ok('Sexta-feira Santa 2026 em 3 de abril')
+  else bad('sexta-feira santa errada')
+  if (f26.includes('2026-06-04')) ok('Corpus Christi 2026 em 4 de junho')
+  else bad('corpus christi errado')
+  if (f26.includes('2026-11-20')) ok('Consciência Negra (Lei 14.759/2023) está na lista')
+  else bad('20 de novembro não entrou')
+
+  // Errar para o lado do feriado joga o vencimento para depois do real, e a
+  // petição entra intempestiva. A Quarta-feira de Cinzas tem expediente na
+  // maioria dos tribunais, então NÃO entra.
+  if (!f26.includes('2026-02-18')) ok('Quarta-feira de Cinzas fica de fora (erra para o lado seguro)')
+  else bad('cinzas entrou como feriado')
+}
+
+console.log('\n── 16. Prazo processual: a contagem ──')
+{
+  const venc = (pub, dias, opts) => calcularPrazo(pub, dias, opts).vencimento
+
+  // Publicada terça 08/09; começa quarta 09/09; 15 dias úteis → terça 29/09.
+  eq(venc('2026-09-08', 15), '2026-09-29', '15 dias úteis de uma terça-feira')
+  // Publicada sexta 11/09: art. 224 §3º manda começar na segunda.
+  eq(calcularPrazo('2026-09-11', 15).inicio, '2026-09-14', 'publicação na sexta começa a contar na segunda')
+  eq(venc('2026-09-11', 15), '2026-10-02', 'e vence na sexta seguinte')
+  // Prazo em dobro (art. 183 CPC).
+  eq(venc('2026-09-08', 15, { dobro: true }), '2026-10-21', 'prazo em dobro da Fazenda')
+
+  // Recesso de 20/12 a 20/01 (art. 220 CPC): o prazo atravessa o ano.
+  const rec = calcularPrazo('2026-12-15', 15)
+  if (rec.vencimento > '2027-01-20') ok(`recesso empurra o vencimento para ${rec.vencimento}`)
+  else bad(`recesso ignorado: venceu em ${rec.vencimento}`)
+  if (rec.pulados.some(p => p.motivo.includes('220'))) ok('a memória mostra o recesso como motivo')
+  else bad('recesso não apareceu nos dias pulados')
+
+  // Feriado local informado pela pessoa.
+  const semFeriado = venc('2026-09-11', 15)
+  const comFeriado = venc('2026-09-11', 15, { feriadosExtras: ['2026-09-21', '2026-09-22'] })
+  if (comFeriado > semFeriado) ok('dois feriados locais empurram o vencimento em dois dias')
+  else bad(`feriado local ignorado: ${semFeriado} → ${comFeriado}`)
+
+  // Dias corridos: art. 132 CC prorroga só o vencimento.
+  const corr = calcularPrazo('2026-09-08', 30, { uteis: false })
+  eq(corr.vencimento, '2026-10-08', '30 dias corridos')
+  const cai = calcularPrazo('2026-10-02', 30, { uteis: false })
+  if (ehDiaUtil(emUTC(cai.vencimento))) ok('vencimento em dia não útil é prorrogado')
+  else bad(`venceu em dia sem expediente: ${cai.vencimento}`)
+
+  eq(calcularPrazo(null, 15), null, 'sem data, não inventa prazo')
+  eq(calcularPrazo('2026-09-08', 0), null, 'sem dias, não inventa prazo')
+  if (noRecesso(emUTC('2026-12-25')) && noRecesso(emUTC('2027-01-05')) && !noRecesso(emUTC('2027-01-21')))
+    ok('o recesso vai de 20/12 a 20/01, e acaba ali')
+  else bad('as bordas do recesso estão erradas')
+}
+
+console.log('\n── 17. INSS: progressivo, faixa a faixa ──')
+{
+  // Portaria Interministerial MPS/MF nº 13/2026.
+  const inss = (s) => descontoINSS(s).valor
+  eq(inss(1621.00), 121.58, 'no piso: 7,5% sobre tudo (121,575 arredonda PARA CIMA, como no holerite)')
+  eq(centavos(121.575), 121.58, 'o arredondamento de centavos não desce no meio')
+  eq(centavos(-121.575), -121.58, 'e faz o mesmo com valor negativo')
+  eq(centavos('abc'), 0, 'texto vira zero, não NaN')
+  eq(inss(2000), 155.69, 'R$ 2.000 pega duas faixas')
+  eq(inss(5000), 501.51, 'R$ 5.000 pega quatro faixas')
+  eq(inss(8475.55), 988.09, 'no teto: contribuição máxima')
+  eq(inss(50000), 988.09, 'acima do teto, não sobe mais')
+  eq(inss(0), 0, 'sem salário, sem contribuição')
+
+  // A prova de que é progressivo: 14% de 5.000 seriam R$ 700, não R$ 501,51.
+  if (inss(5000) < 5000 * 0.14) ok('a alíquota não incide sobre o salário inteiro')
+  else bad('está aplicando a alíquota cheia sobre tudo')
+  if (descontoINSS(9000).tetoAtingido) ok('avisa quando bate no teto')
+  else bad('não sinalizou o teto')
+}
+
+console.log('\n── 18. IRRF: a tabela oficial de 2026 ──')
+{
+  restaurarTabelaIRRF()
+
+  // A "dedução" de cada faixa não é arbitrária: existe para o imposto não dar
+  // um salto na virada. Se a tabela fecha nessa conta, não houve erro de
+  // digitação — é a melhor verificação possível sem acesso à fonte.
+  let continua = true
+  for (let i = 1; i < FAIXAS_IRRF_PADRAO.length; i++) {
+    const ant = FAIXAS_IRRF_PADRAO[i - 1], at = FAIXAS_IRRF_PADRAO[i]
+    const esperado = ant.deduzir + ant.ate * (at.aliquota - ant.aliquota)
+    if (Math.abs(esperado - at.deduzir) > 0.01) continua = false
+  }
+  if (continua) ok('as cinco faixas fecham na conta da continuidade (Lei 15.191/2025)')
+  else bad('a tabela não é internamente consistente — erro de digitação?')
+
+  eq(DEDUCAO_DEPENDENTE_PADRAO, 189.59, 'dedução mensal por dependente')
+  eq(DESCONTO_SIMPLIFICADO, 607.20, 'desconto simplificado = 25% da 1ª faixa (2.428,80)')
+  eq(centavos(2428.80 * 0.25), 607.20, 'e 25% de 2.428,80 dá exatamente isso')
+
+  // Isento: base abaixo da primeira faixa.
+  eq(descontoIRRF(2000, 0).valor, 0, 'base de R$ 2.000: isento')
+  // O desconto simplificado (607,20) ganha de 2 dependentes (379,18), e a lei
+  // manda aplicar o mais favorável.
+  const doisDep = descontoIRRF(5000, 2)
+  if (doisDep.usouSimplificado) ok('com 2 dependentes, o simplificado ainda é melhor — e é o que se usa')
+  else bad('aplicou as deduções legais sendo o simplificado maior')
+  // A base de 4.392,80 fica ABAIXO de 4.664,68, então cai na faixa de 22,5%
+  // — e não na última. É exatamente o tipo de faixa que se erra na mão.
+  eq(doisDep.faixa.aliquota, 0.225, 'base de 4.392,80 cai na faixa de 22,5%, não na última')
+  eq(doisDep.valor, 312.89, '4.392,80 × 22,5% − 675,49')
+
+  // Com dependentes suficientes, as deduções legais passam o simplificado.
+  const muitos = descontoIRRF(5000, 4)
+  if (!muitos.usouSimplificado) ok('com 4 dependentes (R$ 758,36), as deduções legais passam a valer mais')
+  else bad('continuou no simplificado com 4 dependentes')
+  if (muitos.valor < doisDep.valor) ok('e o imposto cai')
+  else bad('mais dependentes não reduziram o imposto')
+
+  // Nunca negativo.
+  eq(descontoIRRF(0, 5).valor, 0, 'sem rendimento, sem imposto (e não negativo)')
+
+  const cheio = rodar('rescisao-liquida', { salario: '5000', verbasTributaveis: '6500', verbasIsentas: '4000', dependentes: '0', outrosDescontos: '0' })
+  if (cheio.headline.label === 'Líquido a receber') ok('o líquido da rescisão agora vem completo')
+  else bad(`título: ${cheio.headline.label}`)
+
+  // E o comportamento de segurança continua lá, para quando a tabela virar o ano.
+  definirTabelaIRRF([], 0)
+  if (descontoIRRF(5000, 0).aplicavel === false) ok('tabela esvaziada: volta a dizer "não aplicável", não zero')
+  else bad('tabela vazia devolveu zero como se não houvesse imposto')
+  const semIR = rodar('rescisao-liquida', { salario: '5000', verbasTributaveis: '6500', verbasIsentas: '4000', dependentes: '0', outrosDescontos: '0' })
+  if (semIR.memoria.some(m => m.includes('MAIOR que o real'))) ok('e avisa que o líquido está superestimado')
+  else bad('não avisou')
+  restaurarTabelaIRRF()
+}
+
+console.log('\n── 19. Multas do art. 477 e do art. 467 da CLT ──')
+{
+  const m = (v) => rodar('multa-477', { salario: '3000', incontroversas: '0', ...v })
+  // Saída num sábado: o prazo de 10 dias é material, começa no dia seguinte
+  // mesmo sendo domingo — só o vencimento é que prorroga (art. 132 CC).
+  if (brlNum(m({ saida: '2026-08-01', pagamento: '2026-08-11' }).headline.value) === 0)
+    ok('pago no último dia do prazo: sem multa')
+  else bad('cobrou multa de quem pagou no prazo')
+  if (brlNum(m({ saida: '2026-08-01', pagamento: '2026-08-12' }).headline.value) === 3000)
+    ok('um dia depois: multa de 1 salário (art. 477, §8º)')
+  else bad('não aplicou a multa do atraso')
+  if (brlNum(m({ saida: '2026-08-01', pagamento: '' }).headline.value) === 3000)
+    ok('sem pagamento nenhum: multa devida')
+  else bad('não aplicou multa para quem nunca pagou')
+
+  const art467 = m({ saida: '2026-08-01', pagamento: '2026-08-11', incontroversas: '5000' })
+  if (brlNum(art467.headline.value) === 2500) ok('art. 467: 50% do incontroverso')
+  else bad(`art. 467 deu ${art467.headline.value}`)
+}
+
+console.log('\n── 20. DSR, salário-maternidade e auxílio-acidente ──')
+{
+  const dsr = rodar('dsr-horas-extras', { valorExtras: '1000', diasUteis: '25', diasRepouso: '5' })
+  if (brlNum(dsr.headline.value) === 200) ok('DSR = extras ÷ dias úteis × repousos (Súm. 172 TST)')
+  else bad(`DSR deu ${dsr.headline.value}`)
+  const dsr0 = rodar('dsr-horas-extras', { valorExtras: '1000', diasUteis: '0', diasRepouso: '5' })
+  if (isFinite(brlNum(dsr0.headline.value))) ok('zero dias úteis não vira divisão por zero')
+  else bad('dividiu por zero')
+
+  const sm = (cat, base) => rodar('salario-maternidade', { categoria: cat, base, dias: '120' })
+  if (brlNum(sm('especial', '').linhas[0].value) === PARAMS.salarioMinimo) ok('segurada especial: 1 salário mínimo')
+  else bad('segurada especial errada')
+  if (brlNum(sm('individual', '20000').linhas[0].value) === PARAMS.tetoINSS) ok('contribuinte individual trava no teto do INSS')
+  else bad('individual passou do teto')
+  if (brlNum(sm('empregada', '20000').linhas[0].value) === 20000) ok('empregada NÃO trava no teto (Súm. 688 STF)')
+  else bad('aplicou o teto à empregada')
+  if (brlNum(sm('empregada', '500').linhas[0].value) === PARAMS.salarioMinimo) ok('nunca abaixo do salário mínimo')
+  else bad('ficou abaixo do piso')
+
+  const aa = rodar('auxilio-acidente', { salarioBeneficio: '2400' })
+  if (brlNum(aa.headline.value) === 1200) ok('auxílio-acidente: 50% do salário de benefício (art. 86, §1º)')
+  else bad(`auxílio-acidente deu ${aa.headline.value}`)
 }
 
 console.log(falhas === 0 ? '\n🟢 TODOS OS TESTES PASSARAM\n' : `\n🔴 ${falhas} FALHA(S)\n`)

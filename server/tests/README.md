@@ -57,17 +57,18 @@ Precisam de bundle, porque exercitam código do cliente (imports sem extensão,
 resolvidos pelo Vite):
 
 ```bash
-for t in etapa0.resgate etapa2.datajud; do
+for t in etapa0.resgate etapa2.datajud etapa8.sessao; do
   node_modules/.bin/esbuild server/tests/$t.mjs \
     --bundle --platform=node --format=esm --outfile=.b.mjs \
     --define:import.meta.env.VITE_API_URL='"http://127.0.0.1:8799"' \
     --define:import.meta.env.DEV=false \
-    --external:bcryptjs --external:postgres --external:drizzle-orm --external:nanoid
+    --external:bcryptjs --external:postgres --external:drizzle-orm --external:nanoid \
+    --external:node:fs
   node .b.mjs; rm -f .b.mjs
 done
 ```
 
-Total atual: **229 asserções** em 9 suítes. Cada suíte sai com código 0 se passar.
+Total atual: **299 asserções** em 10 suítes. Cada suíte sai com código 0 se passar.
 
 | Suíte | Asserções | O que prova |
 |---|---:|---|
@@ -79,7 +80,8 @@ Total atual: **229 asserções** em 9 suítes. Cada suíte sai com código 0 se 
 | `etapa3.consumo` | 14 | medidor de consumo por escritório |
 | `etapa5.admin` | 36 | porta `/api/admin/*` da Perspecta Central |
 | `etapa6.papeis` | 22 | um vocabulário só de perfis, sem mexer em permissão |
-| `etapa7.calculos` | 75 | correção monetária, verbas rescisórias, dosimetria, locação |
+| `etapa7.calculos` | 131 | correção monetária, rescisão, dosimetria, locação, prazos, INSS/IRRF |
+| `etapa8.sessao` | 14 | o laço de recarregamento na abertura |
 
 **Atenção:** os testes escrevem no banco apontado por `DATABASE_URL`. Rode
 sempre contra um banco descartável, **nunca contra produção**. Cada suíte apaga

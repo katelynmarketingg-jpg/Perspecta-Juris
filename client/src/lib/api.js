@@ -50,9 +50,48 @@ function setTokens({ access, refresh }) {
   localStorage.setItem('pj_refresh_token', refresh)
 }
 
+// A sessão inteira, não só os tokens.
+//
+// Antes isto apagava só os dois tokens e deixava `pj_auth` — onde o zustand
+// guarda o usuário — intacto. O resultado era um laço fechado:
+//
+//   RequireAuth vê o usuário guardado  →  entra no app
+//   o app chama a API sem token válido →  401
+//   o refresh falha                    →  location.href = '/login'
+//   a tela de login vê o usuário       →  navega para /app
+//   ... e recomeça, com um recarregamento inteiro a cada volta.
+//
+// Sessão morta é sessão morta: some com o usuário também.
 function clearTokens() {
   localStorage.removeItem('pj_access_token')
   localStorage.removeItem('pj_refresh_token')
+  localStorage.removeItem('pj_auth')          // usuário/escritório do zustand
+  localStorage.removeItem('pj_master_backup') // volta do "entrar como" do master
+}
+
+// Manda para o login sem empilhar histórico — e sem recarregar de novo se já
+// estamos lá, que era a outra metade do laço.
+function irParaLogin() {
+  if (typeof window === 'undefined') return
+  if (window.location.pathname === '/login') return
+  window.location.replace('/login')
+}
+
+/**
+ * Guarda de partida: se sobrou usuário guardado mas não sobrou refresh token,
+ * a sessão está pela metade e o app entraria no laço na primeira chamada.
+ * Melhor cair no login limpo, uma vez, do que recarregar para sempre.
+ */
+export function sanearSessao() {
+  try {
+    const temUsuario = !!localStorage.getItem('pj_auth')
+    const temRefresh = !!localStorage.getItem('pj_refresh_token')
+    if (temUsuario && !temRefresh) {
+      clearTokens()
+      return true
+    }
+  } catch { /* modo privado: nada a sanear */ }
+  return false
 }
 
 let refreshPromise = null
@@ -140,7 +179,7 @@ async function request(path, opts = {}) {
       })
     } catch {
       clearTokens()
-      window.location.href = '/login'
+      irParaLogin()
       throw new Error('session_expired')
     }
   }

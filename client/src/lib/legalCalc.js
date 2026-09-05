@@ -1,3 +1,5 @@
+import { calcularPrazo, fmt as fmtPrazo, emUTC as emUTCPrazo } from './prazos.js'
+
 // ─────────────────────────────────────────────────────────────────────────
 //  Perspecta Juris — Motor de Cálculos Jurídicos
 //  Todos os resultados são ESTIMATIVOS e devem ser conferidos por
@@ -42,6 +44,122 @@ export function paramsInfo() {
 // true se os parâmetros são de um ano anterior ao atual (sugere atualização)
 export function parametrosDesatualizados() {
   return paramsInfo().ano < new Date().getFullYear()
+}
+
+/**
+ * Arredonda para centavos, meio para cima.
+ *
+ * `Math.round(x * 100) / 100` erra em folha: 1621 × 7,5% dá 121,575, que o
+ * binário guarda como 121,57499999999999 — e o arredondamento desce para
+ * R$ 121,57 quando o holerite diz R$ 121,58. A folga de 1e-9 devolve o valor
+ * para o lado certo sem afetar contas que já estão longe do meio.
+ */
+export const centavos = (n) => {
+  const x = Number(n)
+  if (!isFinite(x)) return 0
+  const sinal = x < 0 ? -1 : 1
+  return sinal * Math.round(Math.abs(x) * 100 + 1e-9) / 100
+}
+
+// ── Descontos sobre a folha ────────────────────────────────────────────────
+//
+// INSS: tabela progressiva de 2026 (Portaria Interministerial MPS/MF nº
+// 13/2026 — conferida na fonte). Cada alíquota incide SÓ sobre a parcela do
+// salário dentro da sua faixa, não sobre o salário inteiro.
+export const FAIXAS_INSS = [
+  { ate: 1621.00, aliquota: 0.075 },
+  { ate: 2902.84, aliquota: 0.09  },
+  { ate: 4354.27, aliquota: 0.12  },
+  { ate: 8475.55, aliquota: 0.14  },   // o último "até" é o teto
+]
+
+// IRRF: Tabela de Incidência Mensal a partir de janeiro de 2026 — Receita
+// Federal, Lei nº 15.191, de 11 de agosto de 2025.
+//
+// A tabela é auto-verificável: a "dedução" de cada faixa existe para o imposto
+// não dar um salto na virada, e vale
+//     dedução(n) = dedução(n−1) + limite(n−1) × (alíquota(n) − alíquota(n−1)).
+// Os cinco valores abaixo fecham nessa conta, o que descarta erro de digitação.
+export const FAIXAS_IRRF_PADRAO = [
+  { ate: 2428.80, aliquota: 0,     deduzir: 0      },
+  { ate: 2826.65, aliquota: 0.075, deduzir: 182.16 },
+  { ate: 3751.05, aliquota: 0.15,  deduzir: 394.16 },
+  { ate: 4664.68, aliquota: 0.225, deduzir: 675.49 },
+  { ate: null,    aliquota: 0.275, deduzir: 908.73 },
+]
+
+export const DEDUCAO_DEPENDENTE_PADRAO   = 189.59    // por dependente, ao mês
+export const DESCONTO_SIMPLIFICADO       = 607.20    // 25% da 1ª faixa, teto mensal
+export const ISENCAO_PREVIDENCIARIA_65   = 1903.98   // maiores de 65 anos
+
+export let FAIXAS_IRRF = [...FAIXAS_IRRF_PADRAO]
+export let DEDUCAO_DEPENDENTE = DEDUCAO_DEPENDENTE_PADRAO
+
+/** Substitui a tabela — para quando a Receita publicar a do ano seguinte. */
+export function definirTabelaIRRF(faixas, deducaoDependente = DEDUCAO_DEPENDENTE_PADRAO) {
+  FAIXAS_IRRF = Array.isArray(faixas) ? faixas : []
+  DEDUCAO_DEPENDENTE = Number(deducaoDependente) || 0
+}
+export function restaurarTabelaIRRF() {
+  FAIXAS_IRRF = [...FAIXAS_IRRF_PADRAO]
+  DEDUCAO_DEPENDENTE = DEDUCAO_DEPENDENTE_PADRAO
+}
+
+/** Desconto de INSS sobre um salário, faixa por faixa. */
+export function descontoINSS(salario) {
+  const base = Math.max(0, num(salario))
+  let devido = 0, piso = 0
+  const detalhe = []
+  for (const f of FAIXAS_INSS) {
+    if (base <= piso) break
+    const teto = Math.min(base, f.ate)
+    const parcela = teto - piso
+    if (parcela > 0) {
+      const v = parcela * f.aliquota
+      devido += v
+      detalhe.push({ de: piso, ate: teto, aliquota: f.aliquota, valor: v })
+    }
+    piso = f.ate
+  }
+  const teto = FAIXAS_INSS[FAIXAS_INSS.length - 1].ate
+  return {
+    valor: centavos(devido),
+    detalhe: detalhe.map(d => ({ ...d, valor: centavos(d.valor) })),
+    tetoAtingido: base >= teto,
+    base: Math.min(base, teto),
+  }
+}
+
+/**
+ * Desconto de IRRF. Devolve `{ aplicavel: false }` enquanto a tabela não for
+ * cadastrada — em vez de devolver zero, que passaria por "não tem imposto".
+ */
+/**
+ * Desconto de IRRF sobre um rendimento já líquido de INSS.
+ *
+ * Aplica o mais favorável entre as deduções legais (dependentes, pensão) e o
+ * desconto simplificado de R$ 607,20 — que é 25% do limite da primeira faixa e
+ * substitui todas as outras deduções. Quem tem poucos dependentes quase sempre
+ * ganha com o simplificado, e a lei garante o melhor dos dois.
+ *
+ * `baseTributavel` já deve vir com o INSS descontado.
+ */
+export function descontoIRRF(baseTributavel, dependentes = 0, outrasDeducoes = 0) {
+  if (!FAIXAS_IRRF.length) return { aplicavel: false, valor: 0 }
+
+  const bruto = Math.max(0, num(baseTributavel))
+  const legais = num(dependentes) * DEDUCAO_DEPENDENTE + num(outrasDeducoes)
+  const simplificado = Math.min(DESCONTO_SIMPLIFICADO, bruto)
+  const usouSimplificado = simplificado > legais
+  const deducao = usouSimplificado ? simplificado : legais
+
+  const base = Math.max(0, bruto - deducao)
+  const faixa = FAIXAS_IRRF.find(f => base <= (f.ate ?? Infinity)) ?? FAIXAS_IRRF[FAIXAS_IRRF.length - 1]
+  const valor = centavos(Math.max(0, base * (faixa.aliquota ?? 0) - (faixa.deduzir ?? 0)))
+  return {
+    aplicavel: true, valor, base: centavos(base), faixa,
+    deducao: centavos(deducao), usouSimplificado,
+  }
 }
 
 // ── Helpers de formatação e parsing ───────────────────────────────────────
@@ -1290,6 +1408,270 @@ export const CALCULADORAS = [
       { name: 'alimentos', label: 'Prestação mensal (se alimentos)', type: 'currency' },
     ],
     compute: (v) => { const ali = num(v.alimentos)*12; const total = num(v.principal)+num(v.acessorios)+ali; return { headline: { label: 'Valor da causa', value: brl(total) }, linhas: [{label:'Principal', value: brl(num(v.principal))}, ...(num(v.acessorios)?[{label:'Acessórios', value: brl(num(v.acessorios))}]:[]), ...(ali?[{label:'Alimentos (×12)', value: brl(ali)}]:[])], memoria: [`Valor da causa = ${brl(num(v.principal))} + ${brl(num(v.acessorios))} ${ali?`+ ${brl(ali)} (12 prestações)`:''} = ${brl(total)}`], criterios: [] } },
+  },
+
+  // ═════════════════ ACRESCENTADAS NA AUDITORIA ═════════════════
+
+  {
+    id: 'prazo-processual', ramo: 'processual', titulo: 'Prazo processual (dias úteis)',
+    descricao: 'Conta o vencimento pulando fins de semana, feriados e o recesso forense.',
+    casos: 'Contestação, recurso, manifestação — qualquer prazo contado da intimação.',
+    baseLegal: 'CPC art. 219 (dias úteis), art. 224 §1º e §3º (começo e vencimento), art. 220 (recesso de 20/12 a 20/01), arts. 183/186/229 (prazo em dobro).',
+    campos: [
+      { name: 'publicacao', label: 'Data da publicação / intimação', type: 'date', required: true },
+      { name: 'dias', label: 'Prazo (dias)', type: 'number', default: '15', required: true },
+      { name: 'tipo', label: 'Contagem', type: 'select', default: 'uteis', options: [
+        { value: 'uteis', label: 'Dias úteis — prazo processual (art. 219 CPC)' },
+        { value: 'corridos', label: 'Dias corridos — prazo de direito material' },
+      ]},
+      { name: 'dobro', label: 'Prazo em dobro?', type: 'select', default: 'nao', options: [
+        { value: 'nao', label: 'Não' },
+        { value: 'sim', label: 'Sim — Fazenda, MP, Defensoria ou litisconsortes' },
+      ]},
+      { name: 'recesso', label: 'Aplicar o recesso de 20/12 a 20/01?', type: 'select', default: 'sim', options: [
+        { value: 'sim', label: 'Sim (art. 220 CPC)' },
+        { value: 'nao', label: 'Não' },
+      ]},
+      { name: 'feriadosExtras', label: 'Feriados locais (um por linha, aaaa-mm-dd)', type: 'text', help: 'Feriado estadual/municipal e suspensão por portaria do tribunal. Separe por vírgula.' },
+    ],
+    compute: (v) => {
+      const extras = String(v.feriadosExtras ?? '').split(/[,;\n]/).map(x => x.trim()).filter(Boolean)
+      const r = calcularPrazo(v.publicacao, num(v.dias), {
+        uteis: v.tipo !== 'corridos',
+        dobro: v.dobro === 'sim',
+        recesso: v.recesso !== 'nao',
+        feriadosExtras: extras,
+      })
+      if (!r) return { headline: { label: 'Prazo', value: '—' }, linhas: [], memoria: ['Informe a data da publicação e a quantidade de dias.'], criterios: [] }
+
+      const porMotivo = {}
+      for (const p of r.pulados) porMotivo[p.motivo] = (porMotivo[p.motivo] ?? 0) + 1
+      const naoUteis = r.pulados.filter(p => !['sábado', 'domingo'].includes(p.motivo))
+
+      return {
+        headline: { label: 'Vence em', value: fmtPrazo(r.vencimento) },
+        linhas: [
+          { label: 'Publicação / intimação', value: fmtPrazo(v.publicacao) },
+          { label: 'Começa a contar em', value: fmtPrazo(r.inicio) },
+          { label: `Prazo${v.dobro === 'sim' ? ' (em dobro)' : ''}`, value: `${r.total} dias ${v.tipo === 'corridos' ? 'corridos' : 'úteis'}` },
+          { label: 'Vencimento', value: fmtPrazo(r.vencimento) },
+          { label: 'Dias corridos no total', value: `${r.diasCorridos} dias` },
+        ],
+        memoria: [
+          `Publicação em ${fmtPrazo(v.publicacao)}.`,
+          `Art. 224, §3º: a contagem começa no primeiro dia útil seguinte → ${fmtPrazo(r.inicio)}.`,
+          v.dobro === 'sim' ? `Prazo em dobro: ${num(v.dias)} × 2 = ${r.total} dias.` : '',
+          ...Object.entries(porMotivo).map(([m, n]) => `Não contaram: ${n} × ${m}`),
+          `Art. 224, §1º: exclui o dia do começo, inclui o do vencimento → ${fmtPrazo(r.vencimento)}.`,
+          ...r.passos,
+        ].filter(Boolean),
+        criterios: [
+          naoUteis.length
+            ? `Feriados no meio do prazo: ${naoUteis.map(p => p.data.slice(8) + '/' + p.data.slice(5, 7) + ' (' + p.motivo + ')').join(', ')}`
+            : 'Nenhum feriado no meio do prazo.',
+          'Feriado estadual, municipal e suspensão por portaria do tribunal NÃO entram sozinhos — informe no campo de feriados locais.',
+          'Confira sempre no sistema do tribunal antes de protocolar.',
+        ],
+      }
+    },
+  },
+
+  {
+    id: 'rescisao-liquida', ramo: 'trabalhista', titulo: 'Líquido da rescisão (INSS/IRRF)',
+    descricao: 'Aplica os descontos legais sobre as verbas para chegar ao que a pessoa recebe.',
+    casos: 'Responder "quanto eu recebo?" depois de calcular as verbas rescisórias.',
+    baseLegal: 'INSS: Portaria Interministerial MPS/MF nº 13/2026 (tabela progressiva). IRRF: tabela da Receita Federal, cadastrada em Parâmetros. Não incidem INSS/IRRF sobre férias indenizadas, 1/3 indenizado, aviso-prévio indenizado, FGTS e multa de 40% (Súm. 688 STF; art. 28, §9º, Lei 8.212/91).',
+    campos: [
+      { name: 'salario', label: 'Salário mensal (base do INSS)', type: 'currency', required: true },
+      { name: 'verbasTributaveis', label: 'Verbas com incidência (saldo, 13º…)', type: 'currency', required: true, help: 'Saldo de salário, 13º proporcional, horas extras, adicionais.' },
+      { name: 'verbasIsentas', label: 'Verbas sem incidência', type: 'currency', help: 'Férias indenizadas + 1/3, aviso indenizado, FGTS, multa de 40%.' },
+      { name: 'dependentes', label: 'Nº de dependentes (IRRF)', type: 'number', default: '0' },
+      { name: 'outrosDescontos', label: 'Outros descontos (R$)', type: 'currency', help: 'Adiantamentos, vale, pensão, contribuições.' },
+    ],
+    compute: (v) => {
+      const trib = num(v.verbasTributaveis), isentas = num(v.verbasIsentas)
+      const bruto = trib + isentas
+      const inss = descontoINSS(v.salario)
+      const ir = descontoIRRF(trib - inss.valor, num(v.dependentes))
+      const outros = num(v.outrosDescontos)
+      const liquido = bruto - inss.valor - ir.valor - outros
+
+      const linhas = [
+        { label: 'Verbas com incidência', value: brl(trib) },
+        ...(isentas ? [{ label: 'Verbas sem incidência', value: brl(isentas) }] : []),
+        { label: 'Total bruto', value: brl(bruto) },
+        { label: `(−) INSS${inss.tetoAtingido ? ' (no teto)' : ''}`, value: '- ' + brl(inss.valor) },
+        ...(ir.aplicavel ? [{ label: '(−) IRRF', value: '- ' + brl(ir.valor) }] : []),
+        ...(outros ? [{ label: '(−) Outros descontos', value: '- ' + brl(outros) }] : []),
+      ]
+
+      const memoria = [
+        `Bruto = ${brl(trib)} + ${brl(isentas)} = ${brl(bruto)}`,
+        'INSS, faixa a faixa (cada alíquota só sobre a parcela dentro dela):',
+        ...inss.detalhe.map(d => `   ${brl(d.de)} a ${brl(d.ate)} × ${(d.aliquota * 100).toFixed(1)}% = ${brl(d.valor)}`),
+        `   INSS total = ${brl(inss.valor)}`,
+        ir.aplicavel
+          ? `IRRF: base ${brl(ir.base)} × ${((ir.faixa.aliquota ?? 0) * 100).toFixed(1)}% − ${brl(ir.faixa.deduzir ?? 0)} = ${brl(ir.valor)}`
+          : '⚠️ IRRF NÃO foi aplicado: a tabela do imposto de renda ainda não está cadastrada em Configurações → Parâmetros. O líquido abaixo está MAIOR que o real.',
+        `LÍQUIDO = ${brl(liquido)}`,
+      ]
+
+      return {
+        headline: { label: ir.aplicavel ? 'Líquido a receber' : 'Líquido (sem IRRF)', value: brl(liquido) },
+        linhas, memoria,
+        criterios: [
+          `INSS sobre ${brl(inss.base)}${inss.tetoAtingido ? ' (teto de contribuição)' : ''}.`,
+          ir.aplicavel ? `${num(v.dependentes)} dependente(s) deduzido(s).` : 'Cadastre a tabela do IRRF em Parâmetros para o líquido ficar completo.',
+          'Férias indenizadas, 1/3, aviso indenizado, FGTS e multa de 40% não sofrem INSS nem IRRF.',
+        ],
+      }
+    },
+  },
+
+  {
+    id: 'multa-477', ramo: 'trabalhista', titulo: 'Multas do art. 477 e do art. 467 da CLT',
+    descricao: 'Multa por atraso no acerto e por não pagar o incontroverso na audiência.',
+    casos: 'Reclamação trabalhista — pedidos que acompanham quase toda inicial.',
+    baseLegal: 'CLT art. 477, §6º (prazo de 10 dias) e §8º (multa de 1 salário); art. 467 (50% sobre as verbas incontroversas não pagas na primeira audiência).',
+    campos: [
+      { name: 'salario', label: 'Último salário mensal', type: 'currency', required: true },
+      { name: 'saida', label: 'Data da saída', type: 'date' },
+      { name: 'pagamento', label: 'Data do pagamento das verbas', type: 'date', help: 'Deixe vazio se ainda não pagou.' },
+      { name: 'incontroversas', label: 'Verbas incontroversas não pagas em audiência (R$)', type: 'currency', help: 'Para a multa do art. 467.' },
+    ],
+    compute: (v) => {
+      const sal = num(v.salario)
+      const linhas = [], memoria = [], criterios = []
+
+      // Art. 477, §6º: 10 dias corridos da saída. §8º: multa de 1 salário.
+      let multa477 = 0, prazoStr = '—'
+      if (v.saida) {
+        const limite = calcularPrazo(v.saida, 10, { uteis: false, recesso: false, inicioNoDiaUtil: false })
+        prazoStr = fmtPrazo(limite.vencimento)
+        const atrasou = !v.pagamento || emUTCPrazo(v.pagamento) > emUTCPrazo(limite.vencimento)
+        if (atrasou) {
+          multa477 = sal
+          linhas.push({ label: 'Multa do art. 477, §8º (1 salário)', value: brl(multa477) })
+          memoria.push(`Saída em ${fmtPrazo(v.saida)}; o acerto vencia em ${prazoStr} (10 dias, art. 477 §6º).`)
+          memoria.push(v.pagamento ? `Pago em ${fmtPrazo(v.pagamento)} — fora do prazo.` : 'Ainda não pago.')
+          memoria.push(`Multa = 1 salário = ${brl(sal)}`)
+        } else {
+          memoria.push(`Acerto pago em ${fmtPrazo(v.pagamento)}, dentro do prazo que vencia em ${prazoStr}. Sem multa do art. 477.`)
+        }
+        criterios.push(`Prazo do acerto: ${prazoStr}`)
+      }
+
+      // Art. 467: 50% sobre o incontroverso não pago na primeira audiência.
+      const multa467 = num(v.incontroversas) * 0.50
+      if (multa467) {
+        linhas.push({ label: 'Multa do art. 467 (50%)', value: brl(multa467) })
+        memoria.push(`Art. 467: ${brl(num(v.incontroversas))} × 50% = ${brl(multa467)}`)
+      }
+
+      const total = multa477 + multa467
+      memoria.push(`TOTAL = ${brl(total)}`)
+      criterios.push('A multa do art. 477 não incide quando o atraso é do próprio empregado (§8º, parte final).')
+      criterios.push('A do art. 467 só cabe se as verbas eram incontroversas e não foram pagas na primeira audiência.')
+      return { headline: { label: 'Total das multas', value: brl(total) }, linhas, memoria, criterios }
+    },
+  },
+
+  {
+    id: 'dsr-horas-extras', ramo: 'trabalhista', titulo: 'DSR sobre horas extras',
+    descricao: 'Repouso semanal remunerado refletido sobre as horas extras do mês.',
+    casos: 'Reflexo que acompanha o pedido de horas extras.',
+    baseLegal: 'Lei 605/49, art. 7º, "a"; Súmula 172 do TST. DSR = extras ÷ dias úteis × dias de repouso.',
+    campos: [
+      { name: 'valorExtras', label: 'Valor das horas extras no mês', type: 'currency', required: true },
+      { name: 'diasUteis', label: 'Dias úteis no mês', type: 'number', default: '25', required: true },
+      { name: 'diasRepouso', label: 'Domingos e feriados no mês', type: 'number', default: '5', required: true },
+    ],
+    compute: (v) => {
+      const extras = num(v.valorExtras)
+      const uteis = Math.max(1, num(v.diasUteis))
+      const repouso = num(v.diasRepouso)
+      const dsr = extras / uteis * repouso
+      return {
+        headline: { label: 'DSR sobre horas extras', value: brl(dsr) },
+        linhas: [
+          { label: 'Horas extras no mês', value: brl(extras) },
+          { label: `DSR (${repouso} repousos ÷ ${uteis} dias úteis)`, value: brl(dsr) },
+          { label: 'Extras + DSR', value: brl(extras + dsr) },
+        ],
+        memoria: [`DSR = ${brl(extras)} ÷ ${uteis} × ${repouso} = ${brl(dsr)}`, `Total = ${brl(extras + dsr)}`],
+        criterios: [
+          'Sábado só entra como repouso se houver previsão em norma coletiva.',
+          'O DSR das extras integra a base de 13º, férias e FGTS (OJ 394 da SDI-1 do TST tem entendimento próprio sobre a repercussão).',
+        ],
+      }
+    },
+  },
+
+  {
+    id: 'salario-maternidade', ramo: 'previdenciario', titulo: 'Salário-maternidade',
+    descricao: 'Valor mensal e total do benefício, conforme a categoria da segurada.',
+    casos: 'Parto, adoção ou guarda judicial.',
+    baseLegal: 'Lei 8.213/91, arts. 71 a 73. Empregada: remuneração integral. Contribuinte individual/facultativa: média dos 12 últimos salários de contribuição. Segurada especial: 1 salário mínimo.',
+    campos: [
+      { name: 'categoria', label: 'Categoria', type: 'select', default: 'empregada', options: [
+        { value: 'empregada', label: 'Empregada / trabalhadora avulsa (remuneração integral)' },
+        { value: 'individual', label: 'Contribuinte individual / facultativa (média de 12)' },
+        { value: 'especial', label: 'Segurada especial (1 salário mínimo)' },
+      ]},
+      { name: 'base', label: 'Remuneração ou média (R$)', type: 'currency', help: 'Não se aplica à segurada especial.' },
+      { name: 'dias', label: 'Duração (dias)', type: 'number', default: '120' },
+    ],
+    compute: (v) => {
+      const especial = v.categoria === 'especial'
+      let mensal = especial ? PARAMS.salarioMinimo : num(v.base)
+      const memoria = []
+      if (especial) memoria.push(`Segurada especial: 1 salário mínimo = ${brl(PARAMS.salarioMinimo)}`)
+      // Empregada não tem teto (Súm. 688 STF); as demais, sim.
+      if (!especial && v.categoria !== 'empregada' && mensal > PARAMS.tetoINSS) {
+        memoria.push(`Limitado ao teto: ${brl(mensal)} → ${brl(PARAMS.tetoINSS)}`)
+        mensal = PARAMS.tetoINSS
+      }
+      if (mensal < PARAMS.salarioMinimo) {
+        memoria.push(`Abaixo do piso: ${brl(mensal)} → ${brl(PARAMS.salarioMinimo)}`)
+        mensal = PARAMS.salarioMinimo
+      }
+      const dias = num(v.dias) || 120
+      const total = mensal / 30 * dias
+      memoria.push(`Mensal = ${brl(mensal)}`, `Total = ${brl(mensal)} ÷ 30 × ${dias} dias = ${brl(total)}`)
+      return {
+        headline: { label: `Total (${dias} dias)`, value: brl(total) },
+        linhas: [{ label: 'Valor mensal', value: brl(mensal) }, { label: `Período (${dias} dias)`, value: brl(total) }],
+        memoria,
+        criterios: [
+          'A empregada não se sujeita ao teto do INSS (Súmula 688 do STF) — o limite é o subsídio de ministro do STF.',
+          '120 dias é a regra; 180 nas empresas do Programa Empresa Cidadã.',
+        ],
+      }
+    },
+  },
+
+  {
+    id: 'auxilio-acidente', ramo: 'previdenciario', titulo: 'Auxílio-acidente (50%)',
+    descricao: '50% do salário de benefício, vitalício até a aposentadoria.',
+    casos: 'Sequela que reduz a capacidade para o trabalho habitual.',
+    baseLegal: 'Lei 8.213/91, art. 86, §1º — 50% do salário de benefício. Não se sujeita ao piso do salário mínimo (é indenizatório, Súm. 507 STJ sobre acumulação).',
+    campos: [
+      { name: 'salarioBeneficio', label: 'Salário de benefício (R$)', type: 'currency', required: true },
+    ],
+    compute: (v) => {
+      const sb = num(v.salarioBeneficio)
+      const r = sb * 0.50
+      return {
+        headline: { label: 'Auxílio-acidente mensal', value: brl(r) },
+        linhas: [{ label: 'Salário de benefício', value: brl(sb) }, { label: '50%', value: brl(r) }],
+        memoria: [`${brl(sb)} × 50% = ${brl(r)}`],
+        criterios: [
+          'Devido a partir do dia seguinte à cessação do auxílio por incapacidade.',
+          'Cessa com a aposentadoria; entra na média do salário de benefício dela.',
+          'Por ser indenizatório, pode ficar abaixo do salário mínimo.',
+        ],
+      }
+    },
   },
 ]
 
