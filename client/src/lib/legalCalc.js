@@ -70,6 +70,23 @@ export const num = (v) => {
 }
 export const pct = (v) => num(v) / 100
 
+/**
+ * Lê frações jurídicas como "1/3", "1/6", "2/3" — e também decimais.
+ *
+ * Os campos da dosimetria pediam o decimal ("1/3 = 0.3333"), e 1/3 não cabe
+ * em decimal: 9 meses × 1,3333 dá 11,9997, que vira "11 meses e 29 dias" em
+ * vez de 1 ano. Aceitando a fração, a conta fecha exata.
+ */
+export function fracao(v) {
+  const s = String(v ?? '').trim()
+  const m = s.match(/^(-?\d+(?:[.,]\d+)?)\s*\/\s*(\d+(?:[.,]\d+)?)$/)
+  if (m) {
+    const den = num(m[2])
+    return den === 0 ? 0 : num(m[1]) / den
+  }
+  return num(s)
+}
+
 // ── Fator previdenciário (Lei 8.213/91, art. 29, §7-§9 + Anexo) ─────────────
 // FP = (Tc × a / Es) × [1 + (Id + Tc × a) / 100],  a = 0,31
 // Es = expectativa de sobrevida na idade (tábua IBGE, média única ambos os sexos).
@@ -359,6 +376,37 @@ const camposAtualizacao = [
   { name: 'custas', label: 'Custas (R$)', type: 'currency' },
   { name: 'pagamentos', label: 'Pagamentos parciais (R$)', type: 'currency' },
 ]
+
+/**
+ * Juros simples sobre prestações vencidas uma a cada mês.
+ *
+ * Aluguéis e cotas de condomínio não vencem todos no mesmo dia: o primeiro
+ * está atrasado há N meses, o último há 1. Cobrar `total × i × N` trata o
+ * débito inteiro como se estivesse vencido desde o começo — em 12 meses a 1%,
+ * dá 85% de juros a mais.
+ *
+ * A soma correta é prestação × i × (N + (N−1) + … + 1) = prestação × i × N(N+1)/2.
+ */
+export function jurosDePrestacoes(prestacao, meses, taxaMensal) {
+  const n = Math.max(0, Math.floor(num(meses)))
+  return num(prestacao) * num(taxaMensal) * (n * (n + 1) / 2)
+}
+
+// Converte meses fracionários em anos, meses e dias.
+//
+// Antes o resultado saía de `Math.floor(f/12)` com `Math.round(f % 12)`, e uma
+// pena de 24 meses (que o ponto flutuante guarda como 23,9994) virava
+// "1 ano e 12 meses". Aqui o arredondamento é feito UMA vez, em dias, e o
+// excesso sobe de nível.
+//
+// Mês de 30 dias e frações de dia desprezadas (art. 11 do Código Penal).
+export function mesesEmPena(totalMeses) {
+  const t = Math.max(0, num(totalMeses))
+  let dias = Math.floor(t * 30 + 1e-6)          // a folga absorve o erro binário
+  let anos = Math.floor(dias / 360); dias -= anos * 360
+  let meses = Math.floor(dias / 30);  dias -= meses * 30
+  return { anos, meses, dias }
+}
 
 // ════════════════════════════════════════════════════════════════════════════
 //  CATÁLOGO DE CALCULADORAS
@@ -923,10 +971,10 @@ export const CALCULADORAS = [
       { name: 'minMeses', label: 'Pena mínima (meses)', type: 'number', required: true },
       { name: 'maxMeses', label: 'Pena máxima (meses)', type: 'number', required: true },
       { name: 'circNeg', label: 'Circunstâncias judiciais negativas (0-8)', type: 'number', default: '0' },
-      { name: 'agravantes', label: 'Fração de aumento 2ª fase (ex.: 1/6 = 0.1667)', type: 'number', default: '0' },
-      { name: 'atenuantes', label: 'Fração de redução 2ª fase', type: 'number', default: '0' },
-      { name: 'aumento', label: 'Causa de aumento 3ª fase (ex.: 1/3 = 0.3333)', type: 'number', default: '0' },
-      { name: 'diminuicao', label: 'Causa de diminuição 3ª fase', type: 'number', default: '0' },
+      { name: 'agravantes', label: 'Aumento da 2ª fase (agravantes)', type: 'text', default: '0', help: 'Escreva a fração: 1/6, 1/3… (decimal também funciona).' },
+      { name: 'atenuantes', label: 'Redução da 2ª fase (atenuantes)', type: 'text', default: '0', help: 'Ex.: 1/6' },
+      { name: 'aumento', label: 'Causa de aumento da 3ª fase', type: 'text', default: '0', help: 'Ex.: 1/3, 2/3, 1/2' },
+      { name: 'diminuicao', label: 'Causa de diminuição da 3ª fase', type: 'text', default: '0', help: 'Ex.: 1/3, 2/3' },
     ],
     compute: (v) => {
       const min = num(v.minMeses), max = num(v.maxMeses)
@@ -935,22 +983,33 @@ export const CALCULADORAS = [
       const neg = Math.min(8, num(v.circNeg))
       const base = min + intervalo * (neg / 8)
       // 2ª fase
-      let f2 = base + base * num(v.agravantes) - base * num(v.atenuantes)
-      f2 = Math.max(min, f2) // não abaixo do mínimo legal (Súm. 231 STJ)
+      let f2 = base + base * fracao(v.agravantes) - base * fracao(v.atenuantes)
+      // A 2ª fase não sai da moldura legal: nem abaixo do mínimo (Súm. 231
+      // STJ), nem acima do máximo. Só a 3ª fase pode ultrapassar.
+      f2 = Math.min(max, Math.max(min, f2))
       // 3ª fase
-      const f3 = f2 + f2 * num(v.aumento) - f2 * num(v.diminuicao)
-      const anos = Math.floor(f3 / 12), meses = Math.round(f3 % 12)
+      const f3 = f2 + f2 * fracao(v.aumento) - f2 * fracao(v.diminuicao)
+      const { anos, meses, dias } = mesesEmPena(f3)
+      const penaEscrita = [
+        anos  ? `${anos} ano${anos > 1 ? 's' : ''}` : '',
+        meses ? `${meses} ${meses > 1 ? 'meses' : 'mês'}` : '',
+        dias  ? `${dias} dia${dias > 1 ? 's' : ''}` : '',
+      ].filter(Boolean).join(' e ') || '0 mês'
       return {
-        headline: { label: 'Pena definitiva', value: `${anos} ano(s) e ${meses} mês(es)` },
+        headline: { label: 'Pena definitiva', value: penaEscrita },
         linhas: [{label:'1ª fase (pena-base)', value: `${(base/12).toFixed(2)} anos`}, {label:'2ª fase', value: `${(f2/12).toFixed(2)} anos`}, {label:'3ª fase (definitiva)', value: `${(f3/12).toFixed(2)} anos`}],
         memoria: [
           `Intervalo = ${max} − ${min} = ${intervalo} meses`,
           `1ª fase: ${min} + ${intervalo} × (${neg}/8) = ${base.toFixed(1)} meses`,
-          `2ª fase: ${base.toFixed(1)} + agrav. ${num(v.agravantes)} − aten. ${num(v.atenuantes)} = ${f2.toFixed(1)} meses (piso: mínimo legal)`,
-          `3ª fase: ${f2.toFixed(1)} + aum. ${num(v.aumento)} − dim. ${num(v.diminuicao)} = ${f3.toFixed(1)} meses`,
+          `2ª fase: ${base.toFixed(1)} + agrav. ${fracao(v.agravantes)} − aten. ${fracao(v.atenuantes)} = ${f2.toFixed(1)} meses (piso: mínimo legal)`,
+          `3ª fase: ${f2.toFixed(1)} + aum. ${fracao(v.aumento)} − dim. ${fracao(v.diminuicao)} = ${f3.toFixed(1)} meses`,
           `Definitiva = ${anos} ano(s) e ${meses} mês(es)`,
         ],
-        criterios: ['1ª fase usa peso 1/8 por circunstância (critério doutrinário); ajuste conforme entendimento.'],
+        criterios: [
+          '1ª fase usa peso 1/8 por circunstância (critério doutrinário); ajuste conforme entendimento.',
+          '2ª fase limitada à moldura legal: não desce do mínimo (Súm. 231 STJ) nem sobe do máximo.',
+          'Mês de 30 dias; frações de dia desprezadas (art. 11 CP).',
+        ],
       }
     },
   },
@@ -1015,7 +1074,32 @@ export const CALCULADORAS = [
       { name: 'taxaAcumulada', label: 'Correção acumulada (%)', type: 'percent' },
       { name: 'encargos', label: 'Encargos (IPTU, condomínio) R$', type: 'currency' },
     ],
-    compute: (v) => { const base = num(v.aluguel)*num(v.meses)+num(v.encargos); const corr = base*pct(v.taxaAcumulada); const cj = base+corr; const juros = cj*pct(v.jurosMes)*num(v.meses); const multa = (cj+juros)*pct(v.multa); const total = cj+juros+multa; return { headline: { label: 'Débito locatício', value: brl(total) }, linhas: [{label:`Aluguéis (${num(v.meses)}) + encargos`, value: brl(base)}, {label:'Correção', value: brl(corr)}, {label:'Juros', value: brl(juros)}, {label:'Multa', value: brl(multa)}], memoria: [`Base = ${brl(num(v.aluguel))} × ${num(v.meses)} + encargos ${brl(num(v.encargos))} = ${brl(base)}`, `Correção = ${brl(corr)}`, `Juros = ${brl(juros)}`, `Multa = ${brl(multa)}`, `Total = ${brl(total)}`], criterios: [] } },
+    compute: (v) => {
+      const n = Math.max(0, Math.floor(num(v.meses)))
+      const alugueis = num(v.aluguel) * n
+      const base = alugueis + num(v.encargos)
+      const corr = base * pct(v.taxaAcumulada)
+      const cj = base + corr
+      // Cada aluguel atrasa um tempo diferente. Ver jurosDePrestacoes().
+      const fatorCorrigido = base ? cj / base : 1
+      const juros = jurosDePrestacoes(num(v.aluguel) * fatorCorrigido, n, pct(v.jurosMes))
+        + num(v.encargos) * fatorCorrigido * pct(v.jurosMes) * n
+      const multa = (cj + juros) * pct(v.multa)
+      const total = cj + juros + multa
+      const somaMeses = n * (n + 1) / 2
+      return {
+        headline: { label: 'Débito locatício', value: brl(total) },
+        linhas: [{label:`Aluguéis (${n}) + encargos`, value: brl(base)}, {label:'Correção', value: brl(corr)}, {label:`Juros (${somaMeses} meses-aluguel)`, value: brl(juros)}, {label:'Multa', value: brl(multa)}],
+        memoria: [
+          `Base = ${brl(num(v.aluguel))} × ${n} + encargos ${brl(num(v.encargos))} = ${brl(base)}`,
+          `Correção = ${brl(corr)}`,
+          `Juros: o 1º aluguel atrasou ${n} ${n === 1 ? 'mês' : 'meses'}, o último 1 → ${n}+…+1 = ${somaMeses} meses-aluguel × ${(pct(v.jurosMes)*100).toFixed(2)}% = ${brl(juros)}`,
+          `Multa = ${brl(multa)}`,
+          `Total = ${brl(total)}`,
+        ],
+        criterios: ['Juros contados prestação a prestação, não sobre o total desde o início.'],
+      }
+    },
   },
   {
     id: 'reajuste-aluguel', ramo: 'imobiliario', titulo: 'Reajuste de aluguel',
@@ -1034,7 +1118,29 @@ export const CALCULADORAS = [
       { name: 'multa', label: 'Multa (%)', type: 'percent', default: '2' },
       { name: 'jurosMes', label: 'Juros ao mês (%)', type: 'percent', default: '1' },
     ],
-    compute: (v) => { const base = num(v.cota)*num(v.meses); const juros = base*pct(v.jurosMes)*num(v.meses); const multa = base*pct(v.multa); const total = base+juros+multa; return { headline: { label: 'Débito condominial', value: brl(total) }, linhas: [{label:`Cotas (${num(v.meses)})`, value: brl(base)}, {label:'Juros', value: brl(juros)}, {label:`Multa (${(pct(v.multa)*100).toFixed(0)}%)`, value: brl(multa)}], memoria: [`Base = ${brl(num(v.cota))} × ${num(v.meses)} = ${brl(base)}`, `Juros = ${brl(juros)}`, `Multa = ${brl(multa)}`, `Total = ${brl(total)}`], criterios: ['Multa condominial limitada a 2%.'] } },
+    compute: (v) => {
+      const n = Math.max(0, Math.floor(num(v.meses)))
+      const base = num(v.cota) * n
+      // Mesma correção do aluguel: cada cota vence no seu mês.
+      const juros = jurosDePrestacoes(v.cota, n, pct(v.jurosMes))
+      const multa = base * pct(v.multa)
+      const total = base + juros + multa
+      const somaMeses = n * (n + 1) / 2
+      const acima2 = pct(v.multa) > 0.02
+        ? ['⚠️ Multa acima de 2% — o art. 1.336, §1º do Código Civil limita a 2%.'] : []
+      return {
+        headline: { label: 'Débito condominial', value: brl(total) },
+        linhas: [{label:`Cotas (${n})`, value: brl(base)}, {label:`Juros (${somaMeses} meses-cota)`, value: brl(juros)}, {label:`Multa (${(pct(v.multa)*100).toFixed(0)}%)`, value: brl(multa)}],
+        memoria: [
+          `Base = ${brl(num(v.cota))} × ${n} = ${brl(base)}`,
+          `Juros: a 1ª cota atrasou ${n} ${n === 1 ? 'mês' : 'meses'}, a última 1 → ${n}+…+1 = ${somaMeses} meses-cota × ${(pct(v.jurosMes)*100).toFixed(2)}% = ${brl(juros)}`,
+          `Multa = ${brl(multa)}`,
+          `Total = ${brl(total)}`,
+          ...acima2,
+        ],
+        criterios: ['Multa condominial limitada a 2% (art. 1.336, §1º CC).', 'Juros contados cota a cota.'],
+      }
+    },
   },
 
   // ─────────────────────── BANCÁRIO ───────────────────────

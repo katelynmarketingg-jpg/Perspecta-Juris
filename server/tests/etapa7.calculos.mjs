@@ -10,6 +10,7 @@
 // Este arquivo roda sem servidor e sem banco: é só matemática.
 const {
   mesesEntre, avosDecimoTerceiro, avosFeriasProporcionais,
+  fracao, mesesEmPena, jurosDePrestacoes,
   CALCULADORAS, PARAMS, num,
 } = await import('../../client/src/lib/legalCalc.js')
 
@@ -158,6 +159,58 @@ console.log('\n── 8. Leitura de números em português ──')
   eq(num('0.16'), 0.16, 'ponto decimal também funciona')
   eq(num(''), 0, 'vazio é zero')
   eq(num('abc'), 0, 'texto é zero, não NaN')
+}
+
+console.log('\n── 9. Dosimetria: 2 anos não é "1 ano e 12 meses" ──')
+{
+  // Frações jurídicas por extenso: 1/3 não cabe em decimal, e o 0,3333 que o
+  // campo pedia fazia 24 meses virarem 23,9994 — "1 ano e 11 meses e 29 dias".
+  if (Math.abs(fracao('1/3') - 1/3) < 1e-12) ok("'1/3' é lido como um terço exato")
+  else bad(`fracao('1/3') = ${fracao('1/3')}`)
+  eq(fracao('2/3') === 2/3, true, "'2/3' exato")
+  eq(fracao('0.5'), 0.5, 'decimal continua funcionando')
+  eq(fracao('1/0'), 0, 'divisão por zero não vira Infinity')
+  eq(fracao('qualquer coisa'), 0, 'texto vira 0')
+
+  const dos = (v) => calc('dosimetria').compute(v).headline.value
+  const padrao = { agravantes: '0', atenuantes: '0', diminuicao: '0' }
+  eq(dos({ ...padrao, minMeses: '6',  maxMeses: '54',  circNeg: '2', aumento: '1/3' }), '2 anos', 'o caso que dava "1 ano e 12 meses"')
+  eq(dos({ ...padrao, minMeses: '6',  maxMeses: '18',  circNeg: '2', aumento: '1/3' }), '1 ano', 'o caso que dava "0 anos e 12 meses"')
+  eq(dos({ ...padrao, minMeses: '48', maxMeses: '120', circNeg: '0', aumento: '0'   }), '4 anos', 'pena no mínimo, sem aumento')
+
+  eq(JSON.stringify(mesesEmPena(24)),   '{"anos":2,"meses":0,"dias":0}', '24 meses = 2 anos exatos')
+  eq(JSON.stringify(mesesEmPena(23.9994)), '{"anos":1,"meses":11,"dias":29}', 'quase-24 continua sendo quase-24 (não arredonda para cima sozinho)')
+  eq(JSON.stringify(mesesEmPena(19.2)), '{"anos":1,"meses":7,"dias":6}', 'os dias aparecem, em vez de sumirem no arredondamento')
+
+  // Súmula 231 STJ e o teto da moldura legal, na 2ª fase.
+  const piso = calc('dosimetria').compute({ minMeses: '12', maxMeses: '48', circNeg: '0', agravantes: '0', atenuantes: '1/2', aumento: '0', diminuicao: '0' })
+  if (piso.headline.value === '1 ano') ok('atenuante não leva a pena abaixo do mínimo (Súm. 231 STJ)')
+  else bad(`2ª fase furou o piso: ${piso.headline.value}`)
+  const teto = calc('dosimetria').compute({ minMeses: '12', maxMeses: '48', circNeg: '8', agravantes: '1/2', aumento: '0', atenuantes: '0', diminuicao: '0' })
+  if (teto.headline.value === '4 anos') ok('agravante não leva a 2ª fase acima do máximo')
+  else bad(`2ª fase furou o teto: ${teto.headline.value}`)
+}
+
+console.log('\n── 10. Aluguel e condomínio: cada prestação atrasa o seu tempo ──')
+{
+  // Cobrar `total × juros × N` trata tudo como vencido desde o começo.
+  eq(jurosDePrestacoes(2000, 12, 0.01), 1560, '12 aluguéis de R$ 2.000 a 1% (era R$ 2.880)')
+  eq(jurosDePrestacoes(2000, 1, 0.01), 20, 'um mês só: juros de um mês')
+  eq(jurosDePrestacoes(2000, 0, 0.01), 0, 'nenhum mês, nenhum juro')
+
+  const al = rodar('aluguel-atraso', { aluguel: '2000', meses: '12', multa: '0', jurosMes: '1', taxaAcumulada: '0', encargos: '0' })
+  const jurosAl = brlNum(linha(al, 'Juros')?.value)
+  if (Math.abs(jurosAl - 1560) < 0.01) ok('aluguel: R$ 1.560,00 de juros (antes R$ 2.880,00 — 85% a mais)')
+  else bad(`juros do aluguel: ${jurosAl}`)
+
+  const cd = rodar('condominio-atraso', { cota: '500', meses: '6', multa: '2', jurosMes: '1' })
+  const jurosCd = brlNum(linha(cd, 'Juros')?.value)
+  if (Math.abs(jurosCd - 105) < 0.01) ok('condomínio: R$ 105,00 de juros (antes R$ 180,00)')
+  else bad(`juros do condomínio: ${jurosCd}`)
+
+  const abusiva = rodar('condominio-atraso', { cota: '500', meses: '6', multa: '10', jurosMes: '1' })
+  if (abusiva.memoria.some(m => m.includes('1.336'))) ok('multa de condomínio acima de 2% é avisada (art. 1.336, §1º CC)')
+  else bad('multa de 10% passou sem aviso')
 }
 
 console.log(falhas === 0 ? '\n🟢 TODOS OS TESTES PASSARAM\n' : `\n🔴 ${falhas} FALHA(S)\n`)
