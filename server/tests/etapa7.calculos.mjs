@@ -13,7 +13,7 @@ const {
   fracao, mesesEmPena, jurosDePrestacoes, diasDoPeriodo, diasEntre,
   descontoINSS, descontoIRRF, definirTabelaIRRF, restaurarTabelaIRRF, centavos,
   FAIXAS_IRRF_PADRAO, DEDUCAO_DEPENDENTE_PADRAO, DESCONTO_SIMPLIFICADO,
-  CALCULADORAS, PARAMS, num,
+  CALCULADORAS, PARAMS, num, valorBrl, camposCorrecao,
 } = await import('../../client/src/lib/legalCalc.js')
 const { calcularPrazo, pascoa, feriadosDoAno, ehDiaUtil, emUTC, noRecesso } =
   await import('../../client/src/lib/prazos.js')
@@ -116,7 +116,10 @@ console.log('\n── 5. A rescisão inteira, com os números corrigidos ──'
     salario: '3000', admissao: '2020-01-01', saida: '2026-09-20',
     motivo: 'pedido', diasTrabMes: '20', feriasVencidas: 'nao', fgtsDepositado: '10000',
   })
-  if (!linha(pd, 'Aviso') && !linha(pd, 'Multa') && linha(pd, '13º'))
+  // A multa do art. 477 é devida TAMBÉM no pedido de demissão: a obrigação de
+  // pagar em 10 dias é do empregador, não importa quem pediu a saída. O que
+  // não cabe aqui é a multa de 40% do FGTS.
+  if (!linha(pd, 'Aviso') && !linha(pd, 'Multa 40%') && linha(pd, '13º'))
     ok('pedido de demissão: sem aviso e sem multa de 40%, mas com 13º')
   else bad(`pedido: ${pd.linhas.map(l => l.label).join(' | ')}`)
 
@@ -455,6 +458,174 @@ console.log('\n── 20. DSR, salário-maternidade e auxílio-acidente ──')
   const aa = rodar('auxilio-acidente', { salarioBeneficio: '2400' })
   if (brlNum(aa.headline.value) === 1200) ok('auxílio-acidente: 50% do salário de benefício (art. 86, §1º)')
   else bad(`auxílio-acidente deu ${aa.headline.value}`)
+}
+
+console.log('\n── 21. Rescisão completa: do bruto ao líquido numa conta só ──')
+{
+  const base = {
+    salario: '4000', admissao: '2021-03-15', saida: '2026-09-20', motivo: 'sem_justa',
+    diasTrabMes: '20', feriasVencidas: 'nao', fgtsDepositado: '18000',
+    dependentes: '1', pagamento: '', outrosDescontos: '0',
+  }
+  const r = rodar('verbas-rescisorias', base)
+  if (r.headline.label === 'Líquido a receber') ok('o resultado termina no líquido, não no bruto')
+  else bad(`título: ${r.headline.label}`)
+  if (linha(r, 'INSS') && linha(r, 'IRRF')) ok('INSS e IRRF aparecem na mesma tela')
+  else bad('faltou algum desconto')
+
+  // Só saldo e 13º sofrem incidência; férias indenizadas e multa de 40%, não.
+  const inss = brlNum(linha(r, 'INSS').value)
+  if (Math.abs(inss - 368.60) < 0.01) ok('INSS calculado sobre o salário, não sobre o total bruto')
+  else bad(`INSS deu ${inss}`)
+
+  // Sem data de pagamento = ainda não pagou = multa do art. 477.
+  if (linha(r, 'art. 477')) ok('sem pagamento informado, a multa do art. 477 entra sozinha')
+  else bad('não aplicou a multa do atraso')
+  const noPrazo = rodar('verbas-rescisorias', { ...base, pagamento: '2026-09-30' })
+  if (!linha(noPrazo, 'art. 477')) ok('pago dentro dos 10 dias: sem multa')
+  else bad('cobrou multa de quem pagou no prazo')
+
+  // Justa causa não gera multa do art. 477 nem 40%.
+  const jc = rodar('verbas-rescisorias', { ...base, motivo: 'justa' })
+  if (!linha(jc, 'art. 477') && !linha(jc, 'Multa 40%')) ok('justa causa: nenhuma das duas multas')
+  else bad('justa causa gerou multa')
+}
+
+console.log('\n── 22. Reclamatória trabalhista completa ──')
+{
+  const r = rodar('reclamatoria-trabalhista', {
+    salario: '3000', meses: '24', horasExtrasMes: '20', adicionalHE: '50', divisor: '220',
+    horasNoturnasMes: '0', insalubridade: '20', periculosidade: 'nao',
+    verbasRescisorias: '15000', incontroversas: '5000', multa477: 'sim',
+  })
+  // Hora normal 3000/220 = 13,6364; extra ×1,5 = 20,4545; ×20h = 409,09/mês.
+  const extras = brlNum(linha(r, 'Horas extras').value)
+  if (Math.abs(extras - 9818.18) < 0.05) ok('horas extras de 24 meses conferem')
+  else bad(`extras deu ${extras}`)
+  const dsr = brlNum(linha(r, 'DSR').value)
+  if (Math.abs(dsr - extras / 5) < 0.05) ok('DSR = 1/5 das extras (5 repousos ÷ 25 dias úteis)')
+  else bad(`DSR deu ${dsr}`)
+
+  // Insalubridade tem base no salário mínimo, não no salário do trabalhador.
+  const ins = brlNum(linha(r, 'Insalubridade').value)
+  if (Math.abs(ins - PARAMS.salarioMinimo * 0.20 * 24) < 0.05)
+    ok('insalubridade sobre o salário mínimo (Súm. Vinc. 4 STF)')
+  else bad(`insalubridade deu ${ins}`)
+
+  if (linha(r, 'FGTS') && linha(r, 'Multa 40%')) ok('FGTS de 8% e a multa de 40% sobre os reflexos')
+  else bad('faltou o FGTS dos reflexos')
+  if (brlNum(linha(r, 'art. 467').value) === 2500) ok('multa do art. 467 sobre o incontroverso')
+  else bad('art. 467 errado')
+
+  // Os dois adicionais não se acumulam: precisa avisar.
+  const ambos = rodar('reclamatoria-trabalhista', {
+    salario: '3000', meses: '12', horasExtrasMes: '0', adicionalHE: '50', divisor: '220',
+    horasNoturnasMes: '0', insalubridade: '20', periculosidade: 'sim',
+    verbasRescisorias: '0', incontroversas: '0', multa477: 'nao',
+  })
+  if (ambos.memoria.some(m => m.includes('não se acumulam')))
+    ok('avisa que insalubridade e periculosidade não se acumulam (art. 193, §2º)')
+  else bad('somou os dois adicionais em silêncio')
+}
+
+console.log('\n── 23. Inventário completo ──')
+{
+  const r = rodar('inventario-completo', {
+    bens: '800000', bensComuns: '600000', dividas: '50000',
+    herdeiros: '3', itcmd: '4', custas: '1', honorarios: '6',
+  })
+  // A meação sai ANTES: é do cônjuge, nunca foi do falecido.
+  if (brlNum(linha(r, 'Meação').value) === 300000) ok('meação = metade dos bens comuns')
+  else bad('meação errada')
+  if (brlNum(linha(r, 'Herança bruta').value) === 500000) ok('herança bruta = acervo − meação')
+  else bad('herança bruta errada')
+  // ITCMD sobre a herança, não sobre o acervo com a meação dentro.
+  if (brlNum(linha(r, 'ITCMD').value) === 20000) ok('ITCMD incide sobre a herança, não sobre a meação')
+  else bad('ITCMD calculado sobre a base errada')
+  if (Math.abs(brlNum(r.headline.value) - 131666.67) < 0.01) ok('quinhão de cada um dos 3 herdeiros')
+  else bad(`quinhão deu ${r.headline.value}`)
+
+  // Dívidas maiores que o acervo não viram quinhão negativo.
+  const afundado = rodar('inventario-completo', {
+    bens: '100000', bensComuns: '0', dividas: '500000', herdeiros: '2', itcmd: '4', custas: '0', honorarios: '0' })
+  if (brlNum(afundado.headline.value) === 0) ok('espólio insolvente: quinhão zero, não negativo')
+  else bad(`quinhão negativo: ${afundado.headline.value}`)
+}
+
+console.log('\n── 24. Em que regra de aposentadoria a pessoa se encaixa ──')
+{
+  const r = (v) => rodar('aposentadoria-regras', v)
+
+  // Mulher de 59 anos com 31 de contribuição, em 2026: nenhuma fechada ainda.
+  const perto = r({ sexo: 'F', idade: '59', tempoHoje: '31', tempoEm2019: '24', ano: '2026' })
+  if (perto.linhas.every(l => l.label.startsWith('❌'))) ok('nenhuma regra cumprida ainda — e diz qual é a mais próxima')
+  else bad('marcou alguma regra como cumprida indevidamente')
+  if (perto.headline.value.includes('Idade progressiva')) ok('aponta a regra que falta menos')
+  else bad(`apontou: ${perto.headline.value}`)
+
+  // Mulher de 63 com 32: regra permanente e pontos fechadas.
+  const pronta = r({ sexo: 'F', idade: '63', tempoHoje: '32', tempoEm2019: '', ano: '2026' })
+  const ok3 = pronta.linhas.filter(l => l.label.startsWith('✅')).length
+  if (ok3 >= 2) ok(`já pode se aposentar por ${ok3} regras`)
+  else bad(`só ${ok3} regra(s) cumprida(s)`)
+  if (pronta.headline.label === 'Já pode se aposentar por') ok('o título muda quando alguma regra fecha')
+  else bad('o título não reflete que já pode')
+
+  // Sem o tempo em 2019, os pedágios não são avaliados — e isso é dito.
+  if (pronta.memoria.some(m => m.includes('13/11/2019')))
+    ok('avisa que os pedágios ficaram de fora sem o tempo em 13/11/2019')
+  else bad('omitiu que não avaliou os pedágios')
+  if (!pronta.linhas.some(l => l.label.includes('Pedágio'))) ok('e realmente não os lista')
+  else bad('listou pedágio sem ter o dado')
+}
+
+console.log('\n── 25. Correção monetária acoplada ──')
+{
+  eq(valorBrl('R$ 1.234,56'), 1234.56, 'lê o valor de volta do texto formatado')
+  eq(valorBrl('R$ 0,00'), 0, 'zero')
+  eq(valorBrl('5 anos e 4 meses'), null, 'o que não é dinheiro devolve null')
+  eq(valorBrl('2 anos'), null, 'uma pena não é dinheiro')
+
+  const corrigiveis = CALCULADORAS.filter(c => c.corrigivel)
+  if (corrigiveis.length > 30) ok(`${corrigiveis.length} calculadoras ganharam o bloco de correção`)
+  else bad(`só ${corrigiveis.length} ficaram corrigíveis`)
+
+  // Desligada por padrão: ninguém corrige sem pedir.
+  const nominal = rodar('multa-contratual', { valor: '10000', multa: '10' })
+  if (brlNum(nominal.headline.value) === 1000) ok('desligada por padrão — o valor sai nominal')
+  else bad(`veio corrigido sem pedir: ${nominal.headline.value}`)
+
+  const corrigido = rodar('multa-contratual', {
+    valor: '10000', multa: '10', corrigir: 'sim',
+    corrDataInicial: '2024-09-20', corrDataFinal: '2026-09-20',
+    corrIndice: 'ipca-e', corrTaxa: '30', corrJuros: '1', corrJurosTipo: 'simples',
+  })
+  // 1000 + 30% = 1300; juros 1% × 24 meses sobre 1300 = 312 → 1612.
+  if (Math.abs(brlNum(corrigido.headline.value) - 1612) < 0.01) ok('1.000 + 30% + 1% a.m. por 24 meses = R$ 1.612,00')
+  else bad(`corrigido deu ${corrigido.headline.value}`)
+  if (corrigido.headline.label.includes('atualizado')) ok('o título diz que está atualizado')
+  else bad('o título não avisa')
+
+  // SELIC já engloba juros: não pode somar por cima.
+  const selic = rodar('multa-contratual', {
+    valor: '10000', multa: '10', corrigir: 'sim',
+    corrDataInicial: '2024-09-20', corrDataFinal: '2026-09-20',
+    corrIndice: 'selic', corrTaxa: '30', corrJuros: '1', corrJurosTipo: 'simples',
+  })
+  if (Math.abs(brlNum(selic.headline.value) - 1300) < 0.01) ok('com SELIC, nenhum juro é somado por cima')
+  else bad(`SELIC somou juros: ${selic.headline.value}`)
+
+  // O que não é dinheiro não é corrigido, mesmo pedindo.
+  const pena = rodar('dosimetria', {
+    minMeses: '48', maxMeses: '120', circNeg: '0', agravantes: '0',
+    atenuantes: '0', aumento: '0', diminuicao: '0', corrigir: 'sim', corrTaxa: '30',
+  })
+  if (pena.headline.value === '4 anos') ok('uma pena não é corrigida monetariamente, nem se mandarem')
+  else bad(`corrigiu a pena: ${pena.headline.value}`)
+
+  // E quem já corrige por dentro não ganha o bloco, para não corrigir 2 vezes.
+  if (!calc('atualizacao-divida').corrigivel) ok('quem já corrige por dentro não recebe o bloco de novo')
+  else bad('atualizacao-divida ficaria corrigindo duas vezes')
 }
 
 console.log(falhas === 0 ? '\n🟢 TODOS OS TESTES PASSARAM\n' : `\n🔴 ${falhas} FALHA(S)\n`)
