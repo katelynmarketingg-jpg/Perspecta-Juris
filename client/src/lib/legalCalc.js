@@ -237,6 +237,23 @@ export function avosFeriasProporcionais(admissaoISO, saidaISO) {
 }
 
 // dias entre datas
+/**
+ * Dias de um vínculo, contando o primeiro E o último dia.
+ *
+ * `diasEntre` mede a distância entre duas datas: de 01/01 a 31/12 dá 365. Mas
+ * o INSS conta o período, e quem trabalhou de 01/01/2020 a 31/12/2020
+ * contribuiu por 366 dias. A diferença é de 1 dia por vínculo — numa carreira
+ * com 30 vínculos, um mês inteiro de contribuição.
+ *
+ * Fica separada de `diasEntre` de propósito: distância e período são coisas
+ * diferentes, e o resto do sistema usa a distância.
+ */
+export function diasDoPeriodo(d1, d2) {
+  if (!d1 || !d2) return 0
+  const d = diasEntre(d1, d2)
+  return d > 0 || String(d1).slice(0, 10) === String(d2).slice(0, 10) ? d + 1 : 0
+}
+
 export function diasEntre(d1, d2) {
   if (!d1 || !d2) return 0
   const a = new Date(d1), b = new Date(d2)
@@ -670,8 +687,8 @@ export const CALCULADORAS = [
     compute: (v) => {
       const ps = Array.isArray(v.periodos) ? v.periodos : []
       let dias = 0; const mem = []
-      ps.forEach((p, i) => { const d = diasEntre(p.inicio, p.fim); dias += d; if (p.inicio && p.fim) mem.push(`Período ${i+1}: ${fmtData(p.inicio)} a ${fmtData(p.fim)} = ${d} dias`) })
-      return { headline: { label: 'Tempo total', value: tempoStr(dias) }, linhas: [{label:'Total em dias', value: `${dias} dias`}, {label:'Em anos (decimal)', value: tempoDecimal(dias).toFixed(2)}], memoria: [...mem, `Soma = ${dias} dias = ${tempoStr(dias)}`], criterios: ['Não desconta períodos concomitantes automaticamente.'] }
+      ps.forEach((p, i) => { const d = diasDoPeriodo(p.inicio, p.fim); dias += d; if (p.inicio && p.fim) mem.push(`Período ${i+1}: ${fmtData(p.inicio)} a ${fmtData(p.fim)} = ${d} dias`) })
+      return { headline: { label: 'Tempo total', value: tempoStr(dias) }, linhas: [{label:'Total em dias', value: `${dias} dias`}, {label:'Em anos (decimal)', value: tempoDecimal(dias).toFixed(2)}], memoria: [...mem, `Soma = ${dias} dias = ${tempoStr(dias)}`], criterios: ['Cada período conta o primeiro e o último dia.', 'Não desconta períodos concomitantes automaticamente.'] }
     },
   },
   {
@@ -682,7 +699,7 @@ export const CALCULADORAS = [
       { name: 'sexo', label: 'Sexo', type: 'select', default: 'M', options: [{value:'M',label:'Masculino'},{value:'F',label:'Feminino'}] },
       { name: 'idade', label: 'Idade atual (anos)', type: 'number', required: true },
       { name: 'tempoAnos', label: 'Tempo de contribuição (anos)', type: 'number', required: true },
-      { name: 'ano', label: 'Ano de análise', type: 'number', default: '2025' },
+      { name: 'ano', label: 'Ano de análise', type: 'number', default: String(new Date().getFullYear()) },
     ],
     compute: (v) => {
       const ano = num(v.ano), fem = v.sexo === 'F'
@@ -900,14 +917,29 @@ export const CALCULADORAS = [
       { name: 'multa', label: 'Multa (%)', type: 'percent' },
     ],
     compute: (v) => {
-      const base = num(v.valorParcela)*num(v.parcelas)
-      const corr = base*pct(v.taxaAcumulada)
-      const corrigido = base+corr
-      // juros média simples sobre metade do período (aprox.) — usamos meses = parcelas
-      const juros = corrigido*pct(v.jurosMes)*num(v.parcelas)/2
-      const multa = (corrigido+juros)*pct(v.multa)
-      const total = corrigido+juros+multa
-      return { headline: { label: 'Total dos alimentos atrasados', value: brl(total) }, linhas: [{label:`${num(v.parcelas)} parcelas`, value: brl(base)}, {label:'Correção', value: brl(corr)}, {label:'Juros', value: brl(juros)}, ...(multa?[{label:'Multa', value: brl(multa)}]:[])], memoria: [`Base = ${brl(num(v.valorParcela))} × ${num(v.parcelas)} = ${brl(base)}`, `Correção = ${brl(corr)}`, `Juros (média) ≈ ${brl(juros)}`, `Total = ${brl(total)}`], criterios: ['Juros calculados de forma aproximada sobre o período médio.'] }
+      const n = Math.max(0, Math.floor(num(v.parcelas)))
+      const base = num(v.valorParcela) * n
+      const corr = base * pct(v.taxaAcumulada)
+      const corrigido = base + corr
+      // Era `corrigido × taxa × parcelas / 2` — uma aproximação "sobre o
+      // período médio", assumida em comentário. Cada parcela vence no seu mês,
+      // e a soma exata é a mesma do aluguel: parcela × taxa × n(n+1)/2.
+      const parcelaCorrigida = base ? num(v.valorParcela) * (corrigido / base) : 0
+      const juros = jurosDePrestacoes(parcelaCorrigida, n, pct(v.jurosMes))
+      const multa = (corrigido + juros) * pct(v.multa)
+      const total = corrigido + juros + multa
+      const somaMeses = n * (n + 1) / 2
+      return {
+        headline: { label: 'Total dos alimentos atrasados', value: brl(total) },
+        linhas: [{label:`${n} parcelas`, value: brl(base)}, {label:'Correção', value: brl(corr)}, {label:`Juros (${somaMeses} meses-parcela)`, value: brl(juros)}, ...(multa?[{label:'Multa', value: brl(multa)}]:[])],
+        memoria: [
+          `Base = ${brl(num(v.valorParcela))} × ${n} = ${brl(base)}`,
+          `Correção = ${brl(corr)}`,
+          `Juros: a 1ª parcela atrasou ${n} ${n === 1 ? 'mês' : 'meses'}, a última 1 → ${n}+…+1 = ${somaMeses} meses-parcela × ${(pct(v.jurosMes)*100).toFixed(2)}% = ${brl(juros)}`,
+          `Total = ${brl(total)}`,
+        ],
+        criterios: ['Juros contados parcela a parcela, no vencimento de cada uma.'],
+      }
     },
   },
   {
@@ -924,6 +956,9 @@ export const CALCULADORAS = [
       let partilhavel = num(v.bens) - num(v.dividas)
       if (v.regime === 'parcial') partilhavel -= num(v.bensParticulares)
       if (v.regime === 'total') partilhavel = 0
+      // Se as dívidas superam os bens não há o que partilhar. O título mostrava
+      // um valor negativo enquanto as linhas logo abaixo mostravam zero.
+      partilhavel = Math.max(0, partilhavel)
       const cada = partilhavel/2
       return { headline: { label: 'Meação de cada cônjuge', value: brl(cada) }, linhas: [{label:'Patrimônio líquido partilhável', value: brl(Math.max(0,partilhavel))}, {label:'Cada cônjuge (50%)', value: brl(Math.max(0,cada))}], memoria: [`Partilhável = ${brl(num(v.bens))} − ${brl(num(v.dividas))} ${v.regime==='parcial'?`− ${brl(num(v.bensParticulares))} (particulares)`:''} = ${brl(partilhavel)}`, v.regime==='total'?'Separação total: sem partilha de aquestos.':`Cada um = ${brl(cada)}`], criterios: [`Regime: ${{parcial:'Comunhão parcial',universal:'Comunhão universal',total:'Separação total'}[v.regime]}`] }
     },

@@ -67,7 +67,7 @@ for t in etapa0.resgate etapa2.datajud; do
 done
 ```
 
-Total atual: **213 asserções** em 9 suítes. Cada suíte sai com código 0 se passar.
+Total atual: **229 asserções** em 9 suítes. Cada suíte sai com código 0 se passar.
 
 | Suíte | Asserções | O que prova |
 |---|---:|---|
@@ -79,7 +79,7 @@ Total atual: **213 asserções** em 9 suítes. Cada suíte sai com código 0 se 
 | `etapa3.consumo` | 14 | medidor de consumo por escritório |
 | `etapa5.admin` | 36 | porta `/api/admin/*` da Perspecta Central |
 | `etapa6.papeis` | 22 | um vocabulário só de perfis, sem mexer em permissão |
-| `etapa7.calculos` | 59 | correção monetária, verbas rescisórias, dosimetria, locação |
+| `etapa7.calculos` | 75 | correção monetária, verbas rescisórias, dosimetria, locação |
 
 **Atenção:** os testes escrevem no banco apontado por `DATABASE_URL`. Rode
 sempre contra um banco descartável, **nunca contra produção**. Cada suíte apaga

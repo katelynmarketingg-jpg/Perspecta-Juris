@@ -10,7 +10,7 @@
 // Este arquivo roda sem servidor e sem banco: é só matemática.
 const {
   mesesEntre, avosDecimoTerceiro, avosFeriasProporcionais,
-  fracao, mesesEmPena, jurosDePrestacoes,
+  fracao, mesesEmPena, jurosDePrestacoes, diasDoPeriodo, diasEntre,
   CALCULADORAS, PARAMS, num,
 } = await import('../../client/src/lib/legalCalc.js')
 
@@ -211,6 +211,60 @@ console.log('\n── 10. Aluguel e condomínio: cada prestação atrasa o seu t
   const abusiva = rodar('condominio-atraso', { cota: '500', meses: '6', multa: '10', jurosMes: '1' })
   if (abusiva.memoria.some(m => m.includes('1.336'))) ok('multa de condomínio acima de 2% é avisada (art. 1.336, §1º CC)')
   else bad('multa de 10% passou sem aviso')
+}
+
+console.log('\n── 11. Tempo de contribuição: o último dia conta ──')
+{
+  // Distância entre datas e duração de um período são coisas diferentes.
+  eq(diasEntre('2020-01-01', '2020-12-31'), 365, 'distância entre as duas datas')
+  eq(diasDoPeriodo('2020-01-01', '2020-12-31'), 366, 'período trabalhado (o INSS conta os dois extremos)')
+  eq(diasDoPeriodo('2026-05-10', '2026-05-10'), 1, 'um dia de vínculo conta 1, não 0')
+  eq(diasDoPeriodo('2026-05-10', '2026-05-01'), 0, 'fim antes do início não vira negativo')
+  eq(diasDoPeriodo(null, '2026-01-01'), 0, 'data faltando devolve 0')
+
+  const tc = rodar('tempo-contribuicao', { periodos: [
+    { inicio: '2020-01-01', fim: '2020-12-31' },
+    { inicio: '2021-01-01', fim: '2021-12-31' },
+  ]})
+  if (tc.linhas[0].value === '731 dias') ok('dois anos somam 731 dias (366 + 365), não 729')
+  else bad(`somou ${tc.linhas[0].value}`)
+}
+
+console.log('\n── 12. Alimentos atrasados: parcela a parcela ──')
+{
+  const r = rodar('alimentos-atrasados', { valorParcela: '1000', parcelas: '12', taxaAcumulada: '0', jurosMes: '1', multa: '0' })
+  const juros = brlNum(linha(r, 'Juros')?.value)
+  if (Math.abs(juros - 780) < 0.01) ok('R$ 780,00 de juros (a aproximação dava R$ 720,00)')
+  else bad(`juros dos alimentos: ${juros}`)
+  if (!r.criterios.some(c => c.toLowerCase().includes('aproximad'))) ok('a tela não chama mais o número de aproximado')
+  else bad('ainda diz que é aproximado')
+}
+
+console.log('\n── 13. Nada de valor negativo na partilha ──')
+{
+  const r = rodar('partilha-bens', { bens: '100000', dividas: '250000', regime: 'parcial', bensParticulares: '0' })
+  if (r.headline.value === brl0()) ok('dívidas maiores que os bens: meação zerada, não negativa')
+  else bad(`título mostrou ${r.headline.value}`)
+}
+function brl0() { return (0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) }
+
+console.log('\n── 14. Transição da EC 103/2019 ──')
+{
+  const pts = (v) => rodar('regra-pontos', v).linhas.find(l => l.label.startsWith('Exigido')).value
+  eq(pts({ sexo: 'F', idade: '60', tempoAnos: '30', ano: '2026' }), '93 pts', 'mulher em 2026 (86 + 7)')
+  eq(pts({ sexo: 'M', idade: '62', tempoAnos: '35', ano: '2026' }), '103 pts', 'homem em 2026 (96 + 7)')
+  eq(pts({ sexo: 'F', idade: '65', tempoAnos: '30', ano: '2040' }), '100 pts', 'mulher trava em 100')
+  eq(pts({ sexo: 'M', idade: '65', tempoAnos: '35', ano: '2040' }), '105 pts', 'homem trava em 105')
+  if (calc('regra-pontos').campos.find(c => c.name === 'ano').default === String(new Date().getFullYear()))
+    ok('o ano de análise acompanha o calendário (estava preso em 2025)')
+  else bad('o ano de análise continua fixo')
+
+  const p50 = rodar('pedagio-50', { sexo: 'M', tempoNaData: '34' })
+  if (p50.headline.label.includes('✅')) ok('faltando 1 ano em 13/11/2019: elegível ao pedágio de 50%')
+  else bad(`pedágio 50: ${p50.headline.label}`)
+  const p50n = rodar('pedagio-50', { sexo: 'M', tempoNaData: '30' })
+  if (p50n.headline.label.includes('❌')) ok('faltando 5 anos: fora do pedágio de 50%')
+  else bad(`pedágio 50 aceitou quem faltava 5 anos`)
 }
 
 console.log(falhas === 0 ? '\n🟢 TODOS OS TESTES PASSARAM\n' : `\n🔴 ${falhas} FALHA(S)\n`)
