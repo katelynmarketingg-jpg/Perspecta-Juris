@@ -16,6 +16,7 @@ export default function MasterPage() {
   const [showNew, setShowNew] = useState(false)
   const [form, setForm] = useState(EMPTY_FORM)
   const [saving, setSaving] = useState(false)
+  const [erroForm, setErroForm] = useState('')      // recusa do servidor ao criar
   const [tab, setTab] = useState('empresas')       // 'empresas' | 'planos'
   const [plans, setPlans] = useState([])
   const [savingPlans, setSavingPlans] = useState(false)
@@ -88,16 +89,39 @@ export default function MasterPage() {
     } finally { setSavingBrand(false) }
   }
 
-  const setF = (k) => (e) => setForm(d => ({ ...d, [k]: e.target.value }))
+  const setF = (k) => (e) => { setErroForm(''); setForm(d => ({ ...d, [k]: e.target.value })) }
+
+  // Compara ignorando maiúsculas, acentos e espaços sobrando — é assim que o
+  // servidor compara, e é assim que a pessoa lê.
+  const achatar = (s) => (s ?? '').toString().trim().toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ')
+
+  // O nome já em uso é detectado enquanto se digita: o login identifica a
+  // empresa PELO NOME, então dois iguais tornariam a entrada ambígua. Melhor
+  // avisar agora, com o campo na frente, do que recusar depois de preencher
+  // tudo.
+  const nomeEmUso = form.name.trim()
+    ? companies.find(c => achatar(c.name) === achatar(form.name))
+    : null
 
   const createCompany = async () => {
-    if (!form.name.trim() || !form.adminLogin.trim() || !form.adminPassword.trim()) return
+    if (!form.name.trim() || !form.adminLogin.trim() || !form.adminPassword.trim()) {
+      setErroForm('Preencha nome da empresa, login e senha do administrador.')
+      return
+    }
+    if (nomeEmUso) return   // o aviso já está na tela; o botão está desabilitado
     setSaving(true)
+    setErroForm('')
     try {
       await api.master.createCompany(form)
       setShowNew(false); setForm(EMPTY_FORM)
       loadCompanies()
-    } catch {} finally { setSaving(false) }
+    } catch (e) {
+      // Antes isto era `catch {}`: o servidor recusava e a tela não dizia nada.
+      // A pessoa clicava de novo achando que tinha travado.
+      setErroForm(e?.message ?? 'Não foi possível criar a empresa.')
+      if (e?.status === 409) loadCompanies()   // a lista estava velha
+    } finally { setSaving(false) }
   }
 
   // Desativar um escritório derruba TODOS os acessos dele — pede confirmação,
@@ -192,7 +216,7 @@ export default function MasterPage() {
             <p className="text-sm text-[var(--text-muted)] mt-0.5">Gerencie escritórios e planos</p>
           </div>
           {tab === 'empresas' && (
-            <button onClick={() => { setForm({ ...EMPTY_FORM, plan: plans[0]?.key ?? 'starter' }); setShowNew(true) }} className="btn-primary flex items-center gap-2">
+            <button onClick={() => { setForm({ ...EMPTY_FORM, plan: plans[0]?.key ?? 'starter' }); setShowNew(true); setErroForm('') }} className="btn-primary flex items-center gap-2">
               <IconPlus size={15} />
               Nova Empresa
             </button>
@@ -434,7 +458,15 @@ export default function MasterPage() {
             <div className="p-5 space-y-3">
               <div>
                 <label className="text-xs text-[var(--text-secondary)] mb-1 block">Nome da empresa *</label>
-                <input value={form.name} onChange={setF('name')} placeholder="Ex: Silva Advogados" className="w-full px-3 py-2 rounded-lg bg-[var(--bg-input)] border border-[var(--border)] text-sm text-white focus:border-brand-500 focus:outline-none" />
+                <input value={form.name} onChange={setF('name')} placeholder="Ex: Silva Advogados"
+                  className={`w-full px-3 py-2 rounded-lg bg-[var(--bg-input)] border text-sm text-white focus:outline-none ${nomeEmUso ? 'border-amber-500 focus:border-amber-400' : 'border-[var(--border)] focus:border-brand-500'}`} />
+                {nomeEmUso && (
+                  <p className="mt-1.5 text-xs text-amber-400">
+                    Já existe uma empresa chamada <b>{nomeEmUso.name}</b>. Como o login usa o
+                    nome da empresa, dois iguais deixariam a entrada ambígua — escolha outro
+                    nome (ex.: <b>{form.name.trim()} — Matriz</b>).
+                  </p>
+                )}
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -465,9 +497,14 @@ export default function MasterPage() {
               </div>
               <p className="text-[11px] text-[var(--text-muted)]">A empresa entrará com: <b>{form.name || 'Nome da empresa'}</b> + login + senha.</p>
             </div>
+            {erroForm && (
+              <div className="mx-5 mb-1 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/40">
+                <p className="text-xs text-red-300">{erroForm}</p>
+              </div>
+            )}
             <div className="px-5 py-4 border-t border-[var(--border)] flex justify-end gap-2">
-              <button onClick={() => setShowNew(false)} className="px-3 py-2 rounded-lg text-sm text-[var(--text-muted)] hover:text-white">Cancelar</button>
-              <button onClick={createCompany} disabled={saving} className="btn-primary text-sm disabled:opacity-60">{saving ? 'Criando…' : 'Criar empresa'}</button>
+              <button onClick={() => { setShowNew(false); setErroForm('') }} className="px-3 py-2 rounded-lg text-sm text-[var(--text-muted)] hover:text-white">Cancelar</button>
+              <button onClick={createCompany} disabled={saving || !!nomeEmUso} className="btn-primary text-sm disabled:opacity-60">{saving ? 'Criando…' : 'Criar empresa'}</button>
             </div>
           </div>
         </div>

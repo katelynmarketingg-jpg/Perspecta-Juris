@@ -613,11 +613,20 @@ function UsersTab() {
 
   const full = !editing && usage && usage.limit != null && (usage.remaining ?? 0) <= 0
 
+  // O login é normalizado no servidor (minúsculas, sem espaços) e precisa ser
+  // único dentro do escritório. Avisa enquanto se digita, com o campo na
+  // frente, em vez de recusar depois de preencher o formulário inteiro.
+  const normalizarLogin = (v) => String(v ?? '').toLowerCase().trim().replace(/\s+/g, '')
+  const loginEmUso = form.loginName.trim()
+    ? users.find(u => u.id !== editing && normalizarLogin(u.loginName) === normalizarLogin(form.loginName))
+    : null
+
   const reset = () => { setForm({ name: '', loginName: '', email: '', password: '', role: 'lawyer', menuAccess: null }); setEditing(null) }
 
   const save = async () => {
     if (!form.name.trim() || !form.loginName.trim()) { showToast('Preencha nome e login.', 'error'); return }
     if (!editing && !form.password.trim()) { showToast('Defina uma senha.', 'error'); return }
+    if (loginEmUso) { showToast(`O login "${normalizarLogin(form.loginName)}" já está em uso por ${loginEmUso.name}.`, 'error'); return }
     const menuAccess = form.role === 'admin' ? null : (form.menuAccess ?? ALL_TABS)
     try {
       if (editing) {
@@ -668,7 +677,15 @@ function UsersTab() {
         <h3 className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wide">{editing ? 'Editar login' : 'Novo login'}</h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Input label="Nome completo *" value={form.name} onChange={set('name')} placeholder="Ex: Ana Souza" />
-          <Input label="Login (usuário) *" value={form.loginName} onChange={set('loginName')} placeholder="Ex: ana" />
+          <div>
+            <Input label="Login (usuário) *" value={form.loginName} onChange={set('loginName')} placeholder="Ex: ana" />
+            {loginEmUso && (
+              <p className="mt-1.5 text-xs text-amber-400">
+                Já em uso por <b>{loginEmUso.name}</b>. Cada login precisa ser único no
+                escritório — tente <b>{normalizarLogin(form.loginName)}2</b> ou o sobrenome junto.
+              </p>
+            )}
+          </div>
           <Input label="E-mail" type="email" value={form.email} onChange={set('email')} />
           <div>
             <label className="text-xs font-medium text-[var(--text-secondary)] mb-1 block">Perfil</label>
@@ -713,7 +730,7 @@ function UsersTab() {
         <div className="flex items-center justify-end gap-2">
           {full && <span className="text-[11px] text-red-400 mr-auto">Limite do plano atingido — faça upgrade para adicionar mais logins.</span>}
           {editing && <Button variant="secondary" size="sm" onClick={reset}>Cancelar</Button>}
-          <Button variant="primary" size="sm" onClick={save} disabled={full}>{editing ? 'Salvar' : 'Adicionar login'}</Button>
+          <Button variant="primary" size="sm" onClick={save} disabled={full || !!loginEmUso}>{editing ? 'Salvar' : 'Adicionar login'}</Button>
         </div>
       </Card>
 
