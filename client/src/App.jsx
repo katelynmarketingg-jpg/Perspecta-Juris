@@ -5,6 +5,7 @@ import AppShell from './components/layout/AppShell'
 import { Suspense } from 'react'
 import { lazyComRecarga as lazy } from './lib/lazyComRecarga'
 import { Spinner } from './components/ui'
+import Toaster from './components/layout/Toaster'
 
 const LoginPage       = lazy(() => import('./modules/auth/LoginPage'))
 const MasterPage      = lazy(() => import('./modules/master/MasterPage'))
@@ -142,6 +143,9 @@ export default function App() {
   return (
     <>
       <RouterProvider router={router} />
+      {/* Fora do router, para o aviso sobreviver à troca de tela. Sem isto,
+          showToast() escrevia no store e ninguém desenhava nada. */}
+      <Toaster />
     </>
   )
 }
