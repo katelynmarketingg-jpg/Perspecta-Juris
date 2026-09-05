@@ -70,6 +70,23 @@ export const num = (v) => {
 }
 export const pct = (v) => num(v) / 100
 
+/**
+ * Lê frações jurídicas como "1/3", "1/6", "2/3" — e também decimais.
+ *
+ * Os campos da dosimetria pediam o decimal ("1/3 = 0.3333"), e 1/3 não cabe
+ * em decimal: 9 meses × 1,3333 dá 11,9997, que vira "11 meses e 29 dias" em
+ * vez de 1 ano. Aceitando a fração, a conta fecha exata.
+ */
+export function fracao(v) {
+  const s = String(v ?? '').trim()
+  const m = s.match(/^(-?\d+(?:[.,]\d+)?)\s*\/\s*(\d+(?:[.,]\d+)?)$/)
+  if (m) {
+    const den = num(m[2])
+    return den === 0 ? 0 : num(m[1]) / den
+  }
+  return num(s)
+}
+
 // ── Fator previdenciário (Lei 8.213/91, art. 29, §7-§9 + Anexo) ─────────────
 // FP = (Tc × a / Es) × [1 + (Id + Tc × a) / 100],  a = 0,31
 // Es = expectativa de sobrevida na idade (tábua IBGE, média única ambos os sexos).
@@ -136,17 +153,107 @@ if (typeof localStorage !== 'undefined') { try { _aplicarPrevOverrides() } catch
 
 const two = (n) => String(n).padStart(2, '0')
 
-// meses inteiros entre duas datas ISO (yyyy-mm-dd)
+// Lê 'yyyy-mm-dd' sempre em UTC. Sem isto, `new Date('2026-03-25')` vira
+// 24/03 às 21h no fuso de Brasília, e todo dia do mês sai um a menos.
+function emUTC(iso) {
+  if (!iso) return null
+  const s = String(iso).slice(0, 10)
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  const d = m ? new Date(Date.UTC(+m[1], +m[2] - 1, +m[3])) : new Date(iso)
+  return isNaN(d) ? null : d
+}
+const diaDoMes = (d) => d.getUTCDate()
+const ultimoDiaDoMes = (ano, mes) => new Date(Date.UTC(ano, mes + 1, 0)).getUTCDate()
+
+// Meses INTEIROS decorridos entre duas datas.
+//
+// A linha que descontava o mês incompleto estava escrita `m -= 0` — um no-op.
+// O efeito era cobrar juros de um mês que ainda não fechou: numa varredura de
+// 540 pares de datas, 96,5% saíam com um mês a mais.
 export function mesesEntre(d1, d2) {
-  if (!d1 || !d2) return 0
-  const a = new Date(d1), b = new Date(d2)
-  if (isNaN(a) || isNaN(b)) return 0
-  let m = (b.getFullYear() - a.getFullYear()) * 12 + (b.getMonth() - a.getMonth())
-  if (b.getDate() < a.getDate()) m -= 0 // meses de calendário; ajuste fino opcional
+  const a = emUTC(d1), b = emUTC(d2)
+  if (!a || !b) return 0
+  let m = (b.getUTCFullYear() - a.getUTCFullYear()) * 12 + (b.getUTCMonth() - a.getUTCMonth())
+  // O mês só fecha quando chega o mesmo dia. Quem começou dia 31 fecha no
+  // último dia dos meses curtos — senão fevereiro nunca fecharia.
+  const diaLimite = Math.min(diaDoMes(a), ultimoDiaDoMes(b.getUTCFullYear(), b.getUTCMonth()))
+  if (diaDoMes(b) < diaLimite) m -= 1
   return Math.max(0, m)
 }
 
+// ── Avos trabalhistas (fração ≥ 15 dias = mês inteiro) ─────────────────────
+
+/**
+ * Avos de 13º salário no ano da saída (Lei 4.090/62, art. 1º, §2º).
+ * Conta os meses do ANO CIVIL em que houve 15 dias ou mais de trabalho —
+ * começando na admissão, quando ela é do próprio ano.
+ *
+ * Antes o cálculo era `mês da saída + (dia ≥ 15 ? 1 : 0)`, que ignorava a
+ * data de admissão: quem foi contratado em junho e dispensado em setembro
+ * recebia 9 avos em vez de 4.
+ */
+export function avosDecimoTerceiro(admissaoISO, saidaISO) {
+  const adm = emUTC(admissaoISO), sai = emUTC(saidaISO)
+  if (!sai) return 0
+  const ano = sai.getUTCFullYear()
+  const inicioAno = new Date(Date.UTC(ano, 0, 1))
+  const inicio = adm && adm > inicioAno ? adm : inicioAno
+  if (inicio > sai) return 0
+
+  let avos = 0
+  for (let mes = inicio.getUTCMonth(); mes <= sai.getUTCMonth(); mes++) {
+    const primeiro = new Date(Date.UTC(ano, mes, 1))
+    const ultimo   = new Date(Date.UTC(ano, mes, ultimoDiaDoMes(ano, mes)))
+    const de  = inicio > primeiro ? inicio : primeiro
+    const ate = sai < ultimo ? sai : ultimo
+    const dias = Math.round((ate - de) / 86400000) + 1   // inclui os dois extremos
+    if (dias >= 15) avos++
+  }
+  return Math.min(12, avos)
+}
+
+/**
+ * Avos de férias proporcionais (CLT art. 146, parágrafo único).
+ * Contam do último aniversário da admissão — o período aquisitivo — e não do
+ * 1º de janeiro. Fração igual ou superior a 15 dias conta mês inteiro.
+ *
+ * Antes as férias usavam os mesmos avos do 13º, que são do ano civil. Para
+ * quem tem casa de anos isso errava praticamente sempre.
+ */
+export function avosFeriasProporcionais(admissaoISO, saidaISO) {
+  const adm = emUTC(admissaoISO), sai = emUTC(saidaISO)
+  if (!adm || !sai || sai < adm) return 0
+
+  // Último aniversário de admissão que já passou: o início do aquisitivo em curso.
+  let inicio = new Date(Date.UTC(sai.getUTCFullYear(), adm.getUTCMonth(), adm.getUTCDate()))
+  if (inicio > sai) inicio = new Date(Date.UTC(sai.getUTCFullYear() - 1, adm.getUTCMonth(), adm.getUTCDate()))
+  if (inicio < adm) inicio = adm
+
+  const meses = mesesEntre(inicio.toISOString().slice(0, 10), sai.toISOString().slice(0, 10))
+  // Sobra depois dos meses fechados: ≥ 15 dias vira mais um avo.
+  const fechado = new Date(Date.UTC(inicio.getUTCFullYear(), inicio.getUTCMonth() + meses, inicio.getUTCDate()))
+  const sobra = Math.round((sai - fechado) / 86400000)
+  return Math.min(12, meses + (sobra >= 15 ? 1 : 0))
+}
+
 // dias entre datas
+/**
+ * Dias de um vínculo, contando o primeiro E o último dia.
+ *
+ * `diasEntre` mede a distância entre duas datas: de 01/01 a 31/12 dá 365. Mas
+ * o INSS conta o período, e quem trabalhou de 01/01/2020 a 31/12/2020
+ * contribuiu por 366 dias. A diferença é de 1 dia por vínculo — numa carreira
+ * com 30 vínculos, um mês inteiro de contribuição.
+ *
+ * Fica separada de `diasEntre` de propósito: distância e período são coisas
+ * diferentes, e o resto do sistema usa a distância.
+ */
+export function diasDoPeriodo(d1, d2) {
+  if (!d1 || !d2) return 0
+  const d = diasEntre(d1, d2)
+  return d > 0 || String(d1).slice(0, 10) === String(d2).slice(0, 10) ? d + 1 : 0
+}
+
 export function diasEntre(d1, d2) {
   if (!d1 || !d2) return 0
   const a = new Date(d1), b = new Date(d2)
@@ -287,6 +394,37 @@ const camposAtualizacao = [
   { name: 'pagamentos', label: 'Pagamentos parciais (R$)', type: 'currency' },
 ]
 
+/**
+ * Juros simples sobre prestações vencidas uma a cada mês.
+ *
+ * Aluguéis e cotas de condomínio não vencem todos no mesmo dia: o primeiro
+ * está atrasado há N meses, o último há 1. Cobrar `total × i × N` trata o
+ * débito inteiro como se estivesse vencido desde o começo — em 12 meses a 1%,
+ * dá 85% de juros a mais.
+ *
+ * A soma correta é prestação × i × (N + (N−1) + … + 1) = prestação × i × N(N+1)/2.
+ */
+export function jurosDePrestacoes(prestacao, meses, taxaMensal) {
+  const n = Math.max(0, Math.floor(num(meses)))
+  return num(prestacao) * num(taxaMensal) * (n * (n + 1) / 2)
+}
+
+// Converte meses fracionários em anos, meses e dias.
+//
+// Antes o resultado saía de `Math.floor(f/12)` com `Math.round(f % 12)`, e uma
+// pena de 24 meses (que o ponto flutuante guarda como 23,9994) virava
+// "1 ano e 12 meses". Aqui o arredondamento é feito UMA vez, em dias, e o
+// excesso sobe de nível.
+//
+// Mês de 30 dias e frações de dia desprezadas (art. 11 do Código Penal).
+export function mesesEmPena(totalMeses) {
+  const t = Math.max(0, num(totalMeses))
+  let dias = Math.floor(t * 30 + 1e-6)          // a folga absorve o erro binário
+  let anos = Math.floor(dias / 360); dias -= anos * 360
+  let meses = Math.floor(dias / 30);  dias -= meses * 30
+  return { anos, meses, dias }
+}
+
 // ════════════════════════════════════════════════════════════════════════════
 //  CATÁLOGO DE CALCULADORAS
 // ════════════════════════════════════════════════════════════════════════════
@@ -400,9 +538,11 @@ export const CALCULADORAS = [
     ],
     compute: (v) => {
       const sal = num(v.salario)
-      const admissao = new Date(v.admissao), saida = new Date(v.saida)
       const anosCompletos = Math.max(0, Math.floor(diasEntre(v.admissao, v.saida) / 365))
-      const mesesTrabAno = Math.min(12, saida.getUTCMonth() + (saida.getUTCDate() >= 15 ? 1 : 0)) // meses no ano p/ 13º e férias prop.
+      // 13º conta pelo ANO CIVIL; férias, pelo PERÍODO AQUISITIVO (aniversário
+      // da admissão). São contas diferentes e antes usavam o mesmo número.
+      const meses13   = avosDecimoTerceiro(v.admissao, v.saida)
+      const mesesFerias = avosFeriasProporcionais(v.admissao, v.saida)
       const motivo = v.motivo
       const temAviso = motivo === 'sem_justa' || motivo === 'indireta'
       const temMulta = motivo === 'sem_justa' || motivo === 'indireta'
@@ -424,14 +564,15 @@ export const CALCULADORAS = [
       }
 
       // 13º proporcional
-      const meses13 = mesesTrabAno
       const decimo = motivo === 'justa' ? 0 : sal / 12 * meses13
-      if (decimo) { linhas.push({ label: `13º proporcional (${meses13}/12)`, value: brl(decimo) }); memoria.push(`13º proporcional = ${brl(sal)} ÷ 12 × ${meses13} = ${brl(decimo)}`) }
+      if (decimo) { linhas.push({ label: `13º proporcional (${meses13}/12)`, value: brl(decimo) }); memoria.push(`13º proporcional = ${brl(sal)} ÷ 12 × ${meses13} avos do ano civil = ${brl(decimo)}`) }
 
-      // Férias proporcionais + 1/3
-      const fp = motivo === 'justa' ? 0 : (sal / 12 * meses13)
+      // Férias proporcionais + 1/3 — avos do período aquisitivo
+      // (quem pede demissão com menos de 12 meses de casa também tem direito:
+      //  Súmula 261 do TST derrubou a regra antiga.)
+      const fp = motivo === 'justa' ? 0 : (sal / 12 * mesesFerias)
       const fpTerco = fp / 3
-      if (fp) { linhas.push({ label: `Férias proporcionais + 1/3 (${meses13}/12)`, value: brl(fp + fpTerco) }); memoria.push(`Férias prop. = ${brl(sal)} ÷ 12 × ${meses13} = ${brl(fp)}; +1/3 = ${brl(fpTerco)}`) }
+      if (fp) { linhas.push({ label: `Férias proporcionais + 1/3 (${mesesFerias}/12)`, value: brl(fp + fpTerco) }); memoria.push(`Férias prop. = ${brl(sal)} ÷ 12 × ${mesesFerias} avos do período aquisitivo = ${brl(fp)}; +1/3 = ${brl(fpTerco)}`) }
 
       // Férias vencidas + 1/3
       let fv = 0
@@ -449,7 +590,7 @@ export const CALCULADORAS = [
       return {
         headline: { label: 'Total rescisório (bruto)', value: brl(total) },
         linhas, memoria,
-        criterios: [`Motivo: ${{sem_justa:'Sem justa causa',pedido:'Pedido de demissão',justa:'Justa causa',indireta:'Rescisão indireta'}[motivo]}`, `Tempo: ${anosCompletos} ano(s) completos`, 'Não inclui INSS/IRRF nem horas extras/adicionais.'],
+        criterios: [`Motivo: ${{sem_justa:'Sem justa causa',pedido:'Pedido de demissão',justa:'Justa causa',indireta:'Rescisão indireta'}[motivo]}`, `Tempo: ${anosCompletos} ano(s) completos`, `13º: ${meses13}/12 avos (ano civil) · Férias: ${mesesFerias}/12 avos (período aquisitivo)`, 'Não inclui INSS/IRRF nem horas extras/adicionais.', 'Não projeta o aviso-prévio indenizado sobre 13º e férias (art. 487, §1º, CLT) — some se o caso exigir.'],
       }
     },
   },
@@ -546,8 +687,8 @@ export const CALCULADORAS = [
     compute: (v) => {
       const ps = Array.isArray(v.periodos) ? v.periodos : []
       let dias = 0; const mem = []
-      ps.forEach((p, i) => { const d = diasEntre(p.inicio, p.fim); dias += d; if (p.inicio && p.fim) mem.push(`Período ${i+1}: ${fmtData(p.inicio)} a ${fmtData(p.fim)} = ${d} dias`) })
-      return { headline: { label: 'Tempo total', value: tempoStr(dias) }, linhas: [{label:'Total em dias', value: `${dias} dias`}, {label:'Em anos (decimal)', value: tempoDecimal(dias).toFixed(2)}], memoria: [...mem, `Soma = ${dias} dias = ${tempoStr(dias)}`], criterios: ['Não desconta períodos concomitantes automaticamente.'] }
+      ps.forEach((p, i) => { const d = diasDoPeriodo(p.inicio, p.fim); dias += d; if (p.inicio && p.fim) mem.push(`Período ${i+1}: ${fmtData(p.inicio)} a ${fmtData(p.fim)} = ${d} dias`) })
+      return { headline: { label: 'Tempo total', value: tempoStr(dias) }, linhas: [{label:'Total em dias', value: `${dias} dias`}, {label:'Em anos (decimal)', value: tempoDecimal(dias).toFixed(2)}], memoria: [...mem, `Soma = ${dias} dias = ${tempoStr(dias)}`], criterios: ['Cada período conta o primeiro e o último dia.', 'Não desconta períodos concomitantes automaticamente.'] }
     },
   },
   {
@@ -558,7 +699,7 @@ export const CALCULADORAS = [
       { name: 'sexo', label: 'Sexo', type: 'select', default: 'M', options: [{value:'M',label:'Masculino'},{value:'F',label:'Feminino'}] },
       { name: 'idade', label: 'Idade atual (anos)', type: 'number', required: true },
       { name: 'tempoAnos', label: 'Tempo de contribuição (anos)', type: 'number', required: true },
-      { name: 'ano', label: 'Ano de análise', type: 'number', default: '2025' },
+      { name: 'ano', label: 'Ano de análise', type: 'number', default: String(new Date().getFullYear()) },
     ],
     compute: (v) => {
       const ano = num(v.ano), fem = v.sexo === 'F'
@@ -776,14 +917,29 @@ export const CALCULADORAS = [
       { name: 'multa', label: 'Multa (%)', type: 'percent' },
     ],
     compute: (v) => {
-      const base = num(v.valorParcela)*num(v.parcelas)
-      const corr = base*pct(v.taxaAcumulada)
-      const corrigido = base+corr
-      // juros média simples sobre metade do período (aprox.) — usamos meses = parcelas
-      const juros = corrigido*pct(v.jurosMes)*num(v.parcelas)/2
-      const multa = (corrigido+juros)*pct(v.multa)
-      const total = corrigido+juros+multa
-      return { headline: { label: 'Total dos alimentos atrasados', value: brl(total) }, linhas: [{label:`${num(v.parcelas)} parcelas`, value: brl(base)}, {label:'Correção', value: brl(corr)}, {label:'Juros', value: brl(juros)}, ...(multa?[{label:'Multa', value: brl(multa)}]:[])], memoria: [`Base = ${brl(num(v.valorParcela))} × ${num(v.parcelas)} = ${brl(base)}`, `Correção = ${brl(corr)}`, `Juros (média) ≈ ${brl(juros)}`, `Total = ${brl(total)}`], criterios: ['Juros calculados de forma aproximada sobre o período médio.'] }
+      const n = Math.max(0, Math.floor(num(v.parcelas)))
+      const base = num(v.valorParcela) * n
+      const corr = base * pct(v.taxaAcumulada)
+      const corrigido = base + corr
+      // Era `corrigido × taxa × parcelas / 2` — uma aproximação "sobre o
+      // período médio", assumida em comentário. Cada parcela vence no seu mês,
+      // e a soma exata é a mesma do aluguel: parcela × taxa × n(n+1)/2.
+      const parcelaCorrigida = base ? num(v.valorParcela) * (corrigido / base) : 0
+      const juros = jurosDePrestacoes(parcelaCorrigida, n, pct(v.jurosMes))
+      const multa = (corrigido + juros) * pct(v.multa)
+      const total = corrigido + juros + multa
+      const somaMeses = n * (n + 1) / 2
+      return {
+        headline: { label: 'Total dos alimentos atrasados', value: brl(total) },
+        linhas: [{label:`${n} parcelas`, value: brl(base)}, {label:'Correção', value: brl(corr)}, {label:`Juros (${somaMeses} meses-parcela)`, value: brl(juros)}, ...(multa?[{label:'Multa', value: brl(multa)}]:[])],
+        memoria: [
+          `Base = ${brl(num(v.valorParcela))} × ${n} = ${brl(base)}`,
+          `Correção = ${brl(corr)}`,
+          `Juros: a 1ª parcela atrasou ${n} ${n === 1 ? 'mês' : 'meses'}, a última 1 → ${n}+…+1 = ${somaMeses} meses-parcela × ${(pct(v.jurosMes)*100).toFixed(2)}% = ${brl(juros)}`,
+          `Total = ${brl(total)}`,
+        ],
+        criterios: ['Juros contados parcela a parcela, no vencimento de cada uma.'],
+      }
     },
   },
   {
@@ -800,6 +956,9 @@ export const CALCULADORAS = [
       let partilhavel = num(v.bens) - num(v.dividas)
       if (v.regime === 'parcial') partilhavel -= num(v.bensParticulares)
       if (v.regime === 'total') partilhavel = 0
+      // Se as dívidas superam os bens não há o que partilhar. O título mostrava
+      // um valor negativo enquanto as linhas logo abaixo mostravam zero.
+      partilhavel = Math.max(0, partilhavel)
       const cada = partilhavel/2
       return { headline: { label: 'Meação de cada cônjuge', value: brl(cada) }, linhas: [{label:'Patrimônio líquido partilhável', value: brl(Math.max(0,partilhavel))}, {label:'Cada cônjuge (50%)', value: brl(Math.max(0,cada))}], memoria: [`Partilhável = ${brl(num(v.bens))} − ${brl(num(v.dividas))} ${v.regime==='parcial'?`− ${brl(num(v.bensParticulares))} (particulares)`:''} = ${brl(partilhavel)}`, v.regime==='total'?'Separação total: sem partilha de aquestos.':`Cada um = ${brl(cada)}`], criterios: [`Regime: ${{parcial:'Comunhão parcial',universal:'Comunhão universal',total:'Separação total'}[v.regime]}`] }
     },
@@ -847,10 +1006,10 @@ export const CALCULADORAS = [
       { name: 'minMeses', label: 'Pena mínima (meses)', type: 'number', required: true },
       { name: 'maxMeses', label: 'Pena máxima (meses)', type: 'number', required: true },
       { name: 'circNeg', label: 'Circunstâncias judiciais negativas (0-8)', type: 'number', default: '0' },
-      { name: 'agravantes', label: 'Fração de aumento 2ª fase (ex.: 1/6 = 0.1667)', type: 'number', default: '0' },
-      { name: 'atenuantes', label: 'Fração de redução 2ª fase', type: 'number', default: '0' },
-      { name: 'aumento', label: 'Causa de aumento 3ª fase (ex.: 1/3 = 0.3333)', type: 'number', default: '0' },
-      { name: 'diminuicao', label: 'Causa de diminuição 3ª fase', type: 'number', default: '0' },
+      { name: 'agravantes', label: 'Aumento da 2ª fase (agravantes)', type: 'text', default: '0', help: 'Escreva a fração: 1/6, 1/3… (decimal também funciona).' },
+      { name: 'atenuantes', label: 'Redução da 2ª fase (atenuantes)', type: 'text', default: '0', help: 'Ex.: 1/6' },
+      { name: 'aumento', label: 'Causa de aumento da 3ª fase', type: 'text', default: '0', help: 'Ex.: 1/3, 2/3, 1/2' },
+      { name: 'diminuicao', label: 'Causa de diminuição da 3ª fase', type: 'text', default: '0', help: 'Ex.: 1/3, 2/3' },
     ],
     compute: (v) => {
       const min = num(v.minMeses), max = num(v.maxMeses)
@@ -859,22 +1018,33 @@ export const CALCULADORAS = [
       const neg = Math.min(8, num(v.circNeg))
       const base = min + intervalo * (neg / 8)
       // 2ª fase
-      let f2 = base + base * num(v.agravantes) - base * num(v.atenuantes)
-      f2 = Math.max(min, f2) // não abaixo do mínimo legal (Súm. 231 STJ)
+      let f2 = base + base * fracao(v.agravantes) - base * fracao(v.atenuantes)
+      // A 2ª fase não sai da moldura legal: nem abaixo do mínimo (Súm. 231
+      // STJ), nem acima do máximo. Só a 3ª fase pode ultrapassar.
+      f2 = Math.min(max, Math.max(min, f2))
       // 3ª fase
-      const f3 = f2 + f2 * num(v.aumento) - f2 * num(v.diminuicao)
-      const anos = Math.floor(f3 / 12), meses = Math.round(f3 % 12)
+      const f3 = f2 + f2 * fracao(v.aumento) - f2 * fracao(v.diminuicao)
+      const { anos, meses, dias } = mesesEmPena(f3)
+      const penaEscrita = [
+        anos  ? `${anos} ano${anos > 1 ? 's' : ''}` : '',
+        meses ? `${meses} ${meses > 1 ? 'meses' : 'mês'}` : '',
+        dias  ? `${dias} dia${dias > 1 ? 's' : ''}` : '',
+      ].filter(Boolean).join(' e ') || '0 mês'
       return {
-        headline: { label: 'Pena definitiva', value: `${anos} ano(s) e ${meses} mês(es)` },
+        headline: { label: 'Pena definitiva', value: penaEscrita },
         linhas: [{label:'1ª fase (pena-base)', value: `${(base/12).toFixed(2)} anos`}, {label:'2ª fase', value: `${(f2/12).toFixed(2)} anos`}, {label:'3ª fase (definitiva)', value: `${(f3/12).toFixed(2)} anos`}],
         memoria: [
           `Intervalo = ${max} − ${min} = ${intervalo} meses`,
           `1ª fase: ${min} + ${intervalo} × (${neg}/8) = ${base.toFixed(1)} meses`,
-          `2ª fase: ${base.toFixed(1)} + agrav. ${num(v.agravantes)} − aten. ${num(v.atenuantes)} = ${f2.toFixed(1)} meses (piso: mínimo legal)`,
-          `3ª fase: ${f2.toFixed(1)} + aum. ${num(v.aumento)} − dim. ${num(v.diminuicao)} = ${f3.toFixed(1)} meses`,
+          `2ª fase: ${base.toFixed(1)} + agrav. ${fracao(v.agravantes)} − aten. ${fracao(v.atenuantes)} = ${f2.toFixed(1)} meses (piso: mínimo legal)`,
+          `3ª fase: ${f2.toFixed(1)} + aum. ${fracao(v.aumento)} − dim. ${fracao(v.diminuicao)} = ${f3.toFixed(1)} meses`,
           `Definitiva = ${anos} ano(s) e ${meses} mês(es)`,
         ],
-        criterios: ['1ª fase usa peso 1/8 por circunstância (critério doutrinário); ajuste conforme entendimento.'],
+        criterios: [
+          '1ª fase usa peso 1/8 por circunstância (critério doutrinário); ajuste conforme entendimento.',
+          '2ª fase limitada à moldura legal: não desce do mínimo (Súm. 231 STJ) nem sobe do máximo.',
+          'Mês de 30 dias; frações de dia desprezadas (art. 11 CP).',
+        ],
       }
     },
   },
@@ -939,7 +1109,32 @@ export const CALCULADORAS = [
       { name: 'taxaAcumulada', label: 'Correção acumulada (%)', type: 'percent' },
       { name: 'encargos', label: 'Encargos (IPTU, condomínio) R$', type: 'currency' },
     ],
-    compute: (v) => { const base = num(v.aluguel)*num(v.meses)+num(v.encargos); const corr = base*pct(v.taxaAcumulada); const cj = base+corr; const juros = cj*pct(v.jurosMes)*num(v.meses); const multa = (cj+juros)*pct(v.multa); const total = cj+juros+multa; return { headline: { label: 'Débito locatício', value: brl(total) }, linhas: [{label:`Aluguéis (${num(v.meses)}) + encargos`, value: brl(base)}, {label:'Correção', value: brl(corr)}, {label:'Juros', value: brl(juros)}, {label:'Multa', value: brl(multa)}], memoria: [`Base = ${brl(num(v.aluguel))} × ${num(v.meses)} + encargos ${brl(num(v.encargos))} = ${brl(base)}`, `Correção = ${brl(corr)}`, `Juros = ${brl(juros)}`, `Multa = ${brl(multa)}`, `Total = ${brl(total)}`], criterios: [] } },
+    compute: (v) => {
+      const n = Math.max(0, Math.floor(num(v.meses)))
+      const alugueis = num(v.aluguel) * n
+      const base = alugueis + num(v.encargos)
+      const corr = base * pct(v.taxaAcumulada)
+      const cj = base + corr
+      // Cada aluguel atrasa um tempo diferente. Ver jurosDePrestacoes().
+      const fatorCorrigido = base ? cj / base : 1
+      const juros = jurosDePrestacoes(num(v.aluguel) * fatorCorrigido, n, pct(v.jurosMes))
+        + num(v.encargos) * fatorCorrigido * pct(v.jurosMes) * n
+      const multa = (cj + juros) * pct(v.multa)
+      const total = cj + juros + multa
+      const somaMeses = n * (n + 1) / 2
+      return {
+        headline: { label: 'Débito locatício', value: brl(total) },
+        linhas: [{label:`Aluguéis (${n}) + encargos`, value: brl(base)}, {label:'Correção', value: brl(corr)}, {label:`Juros (${somaMeses} meses-aluguel)`, value: brl(juros)}, {label:'Multa', value: brl(multa)}],
+        memoria: [
+          `Base = ${brl(num(v.aluguel))} × ${n} + encargos ${brl(num(v.encargos))} = ${brl(base)}`,
+          `Correção = ${brl(corr)}`,
+          `Juros: o 1º aluguel atrasou ${n} ${n === 1 ? 'mês' : 'meses'}, o último 1 → ${n}+…+1 = ${somaMeses} meses-aluguel × ${(pct(v.jurosMes)*100).toFixed(2)}% = ${brl(juros)}`,
+          `Multa = ${brl(multa)}`,
+          `Total = ${brl(total)}`,
+        ],
+        criterios: ['Juros contados prestação a prestação, não sobre o total desde o início.'],
+      }
+    },
   },
   {
     id: 'reajuste-aluguel', ramo: 'imobiliario', titulo: 'Reajuste de aluguel',
@@ -958,7 +1153,29 @@ export const CALCULADORAS = [
       { name: 'multa', label: 'Multa (%)', type: 'percent', default: '2' },
       { name: 'jurosMes', label: 'Juros ao mês (%)', type: 'percent', default: '1' },
     ],
-    compute: (v) => { const base = num(v.cota)*num(v.meses); const juros = base*pct(v.jurosMes)*num(v.meses); const multa = base*pct(v.multa); const total = base+juros+multa; return { headline: { label: 'Débito condominial', value: brl(total) }, linhas: [{label:`Cotas (${num(v.meses)})`, value: brl(base)}, {label:'Juros', value: brl(juros)}, {label:`Multa (${(pct(v.multa)*100).toFixed(0)}%)`, value: brl(multa)}], memoria: [`Base = ${brl(num(v.cota))} × ${num(v.meses)} = ${brl(base)}`, `Juros = ${brl(juros)}`, `Multa = ${brl(multa)}`, `Total = ${brl(total)}`], criterios: ['Multa condominial limitada a 2%.'] } },
+    compute: (v) => {
+      const n = Math.max(0, Math.floor(num(v.meses)))
+      const base = num(v.cota) * n
+      // Mesma correção do aluguel: cada cota vence no seu mês.
+      const juros = jurosDePrestacoes(v.cota, n, pct(v.jurosMes))
+      const multa = base * pct(v.multa)
+      const total = base + juros + multa
+      const somaMeses = n * (n + 1) / 2
+      const acima2 = pct(v.multa) > 0.02
+        ? ['⚠️ Multa acima de 2% — o art. 1.336, §1º do Código Civil limita a 2%.'] : []
+      return {
+        headline: { label: 'Débito condominial', value: brl(total) },
+        linhas: [{label:`Cotas (${n})`, value: brl(base)}, {label:`Juros (${somaMeses} meses-cota)`, value: brl(juros)}, {label:`Multa (${(pct(v.multa)*100).toFixed(0)}%)`, value: brl(multa)}],
+        memoria: [
+          `Base = ${brl(num(v.cota))} × ${n} = ${brl(base)}`,
+          `Juros: a 1ª cota atrasou ${n} ${n === 1 ? 'mês' : 'meses'}, a última 1 → ${n}+…+1 = ${somaMeses} meses-cota × ${(pct(v.jurosMes)*100).toFixed(2)}% = ${brl(juros)}`,
+          `Multa = ${brl(multa)}`,
+          `Total = ${brl(total)}`,
+          ...acima2,
+        ],
+        criterios: ['Multa condominial limitada a 2% (art. 1.336, §1º CC).', 'Juros contados cota a cota.'],
+      }
+    },
   },
 
   // ─────────────────────── BANCÁRIO ───────────────────────
