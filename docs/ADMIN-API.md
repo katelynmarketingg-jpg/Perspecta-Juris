@@ -176,9 +176,15 @@ curl -X POST -H "Authorization: Bearer $ADMIN_API_TOKEN" \
   https://perspecta-juris.onrender.com/api/admin/companies/tnt_abc123/users
 ```
 
-Papéis: `admin`, `advogado`, `estagiario`, `financeiro`, `recepcionista`
-(a lista viva está em `client/src/lib/constants.js`, `USER_ROLES`). Sem `role`, entra
-como `advogado`.
+Papéis: `admin`, `advogado`, `estagiario`, `financeiro`, `recepcionista`. A lista
+que manda é `server/lib/roles.js` — qualquer outro valor é recusado com `400`, e
+`master` também (esse nasce no seed, não por rota). Sem `role`, entra como
+`advogado`. Os nomes antigos `lawyer` e `staff` ainda são aceitos e gravados
+já traduzidos.
+
+O papel **não dá nem tira permissão**, exceto `admin`: as abas que cada pessoa
+enxerga são gravadas por usuário. Trocar o rótulo de alguém não muda o que
+essa pessoa vê.
 
 | Resposta | Motivo |
 |---|---|

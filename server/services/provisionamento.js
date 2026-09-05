@@ -15,6 +15,7 @@ import { validarSenha } from '../lib/senha.js'
 import { planLimitFor, userCount } from '../lib/plans.js'
 import { setMenuAccess } from '../lib/permissions.js'
 import { registrarUso, TIPOS } from '../lib/usage.js'
+import { normalizarPapel, PAPEIS } from '../lib/roles.js'
 
 // Erro de regra de negócio: quem chama traduz para o HTTP certo.
 export class ErroDeRegra extends Error {
@@ -110,6 +111,16 @@ export async function criarAcesso(tenantId, dados = {}, { origem = 'painel', cri
   const erroSenha = validarSenha(dados.password)
   if (erroSenha) throw new ErroDeRegra(erroSenha)
 
+  // Antes qualquer string virava perfil, e a tela de Configurações gravava um
+  // vocabulário diferente do resto do sistema. Agora há um só, e o que não
+  // estiver nele é recusado — inclusive 'master', que nasce no seed.
+  const papel = normalizarPapel(dados.role)
+  if (!papel || papel === 'master') {
+    throw new ErroDeRegra(
+      `Perfil inválido: "${dados.role}". Use um destes: ${PAPEIS.map(p => p.valor).join(', ')}.`,
+    )
+  }
+
   // Limite de acessos do plano.
   const limite = await planLimitFor(tenant)
   if (limite != null) {
@@ -138,7 +149,7 @@ export async function criarAcesso(tenantId, dados = {}, { origem = 'painel', cri
     name: nome, loginName,
     email: dados.email ? String(dados.email).toLowerCase().trim() : null,
     passwordHash: await bcrypt.hash(dados.password, 12),
-    role: dados.role ?? 'advogado',
+    role: papel,
     oabNumber: dados.oabNumber ?? null,
     oabState:  dados.oabState ?? null,
     phone:     dados.phone ?? null,
@@ -146,7 +157,7 @@ export async function criarAcesso(tenantId, dados = {}, { origem = 'painel', cri
   })
 
   if (dados.menuAccess !== undefined) await setMenuAccess(tenantId, id, dados.menuAccess)
-  await registrarUso(tenantId, TIPOS.USUARIO, 1, { origem, role: dados.role ?? 'advogado' }, criadoPor)
+  await registrarUso(tenantId, TIPOS.USUARIO, 1, { origem, role: papel }, criadoPor)
 
   const [row] = await db.select({
     id: users.id, name: users.name, loginName: users.loginName, email: users.email, role: users.role,

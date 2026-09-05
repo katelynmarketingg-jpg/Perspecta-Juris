@@ -10,6 +10,7 @@ import {
 } from '../../components/ui'
 import IntegrationTab from './IntegrationTab'
 import ResgateTab from './ResgateTab'
+import { USER_ROLES, roleLabel } from '../../lib/constants'
 
 // ── helpers ──────────────────────────────────────────────────────
 const uid = () => Math.random().toString(36).slice(2, 9) + Math.random().toString(36).slice(2, 9)
@@ -594,16 +595,10 @@ function UsersTab() {
   const { showToast } = useUiStore()
   const [users, setUsers] = useState([])
   const [usage, setUsage] = useState(null)
-  const [form, setForm] = useState({ name: '', loginName: '', email: '', password: '', role: 'lawyer', menuAccess: null })
+  const [form, setForm] = useState({ name: '', loginName: '', email: '', password: '', role: 'advogado', menuAccess: null })
   const [editing, setEditing] = useState(null)
   const [loading, setLoading] = useState(true)
 
-  const ROLES = [
-    { value: 'admin',  label: 'Administrador' },
-    { value: 'lawyer', label: 'Advogado(a)' },
-    { value: 'staff',  label: 'Assistente / Estagiário' },
-  ]
-  const roleLabel = (r) => ROLES.find(x => x.value === r)?.label ?? r
 
   const load = () => {
     api.settings.users().then(r => setUsers(Array.isArray(r) ? r : (r?.data ?? []))).catch(() => setUsers([])).finally(() => setLoading(false))
@@ -621,7 +616,7 @@ function UsersTab() {
     ? users.find(u => u.id !== editing && normalizarLogin(u.loginName) === normalizarLogin(form.loginName))
     : null
 
-  const reset = () => { setForm({ name: '', loginName: '', email: '', password: '', role: 'lawyer', menuAccess: null }); setEditing(null) }
+  const reset = () => { setForm({ name: '', loginName: '', email: '', password: '', role: 'advogado', menuAccess: null }); setEditing(null) }
 
   const save = async () => {
     if (!form.name.trim() || !form.loginName.trim()) { showToast('Preencha nome e login.', 'error'); return }
@@ -641,7 +636,7 @@ function UsersTab() {
     } catch (e) { showToast(e.message || 'Erro ao salvar.', 'error') }
   }
 
-  const edit = (u) => { setEditing(u.id); setForm({ name: u.name, loginName: u.loginName, email: u.email ?? '', password: '', role: u.role ?? 'lawyer', menuAccess: u.menuAccess ?? null }) }
+  const edit = (u) => { setEditing(u.id); setForm({ name: u.name, loginName: u.loginName, email: u.email ?? '', password: '', role: u.role ?? 'advogado', menuAccess: u.menuAccess ?? null }) }
   const remove = async (id) => {
     const u = users.find(x => x.id === id)
     if (!window.confirm(`Excluir o acesso de "${u?.name ?? 'este login'}"? A pessoa perde o acesso imediatamente.`)) return
@@ -690,7 +685,7 @@ function UsersTab() {
           <div>
             <label className="text-xs font-medium text-[var(--text-secondary)] mb-1 block">Perfil</label>
             <select value={form.role} onChange={set('role')} className="w-full px-3 py-2 rounded-lg bg-[var(--bg-input)] border border-[var(--border)] text-sm text-[var(--text-primary)] focus:border-brand-500 focus:outline-none">
-              {ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+              {USER_ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
             </select>
           </div>
           <Input label={editing ? 'Nova senha (deixe vazio p/ manter)' : 'Senha *'} type="text" value={form.password} onChange={set('password')} placeholder="••••" />

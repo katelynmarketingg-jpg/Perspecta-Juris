@@ -47,6 +47,7 @@ node server/tests/etapa1.financeiro.mjs   # financeiro unificado
 node server/tests/etapa3.consumo.mjs      # medidor de consumo
 node server/tests/etapa2b.syncServidor.mjs  # sync do DataJud no servidor + trava
 node server/tests/etapa5.admin.mjs        # porta /api/admin/* (precisa do ADMIN_API_TOKEN)
+node server/tests/etapa6.papeis.mjs       # perfis de acesso num vocabulario so
 ```
 
 Precisam de bundle, porque exercitam código do cliente (imports sem extensão,
@@ -63,7 +64,7 @@ for t in etapa0.resgate etapa2.datajud; do
 done
 ```
 
-Total atual: **130 asserções** em 7 suítes. Cada suíte sai com código 0 se passar.
+Total atual: **154 asserções** em 8 suítes. Cada suíte sai com código 0 se passar.
 
 | Suíte | Asserções | O que prova |
 |---|---:|---|
@@ -71,9 +72,10 @@ Total atual: **130 asserções** em 7 suítes. Cada suíte sai com código 0 se 
 | `etapa0.resgate` | 17 | resgate do que ficou no navegador |
 | `etapa1.financeiro` | 20 | financeiro unificado no banco |
 | `etapa2.datajud` | 12 | movimentações do CNJ gravadas no banco |
-| `etapa2b.syncServidor` | 15 | sync rodando no servidor, sem duplicar |
+| `etapa2b.syncServidor` | 17 | sync rodando no servidor, sem duplicar |
 | `etapa3.consumo` | 14 | medidor de consumo por escritório |
 | `etapa5.admin` | 36 | porta `/api/admin/*` da Perspecta Central |
+| `etapa6.papeis` | 22 | um vocabulário só de perfis, sem mexer em permissão |
 
 **Atenção:** os testes escrevem no banco apontado por `DATABASE_URL`. Rode
 sempre contra um banco descartável, **nunca contra produção**. Cada suíte apaga

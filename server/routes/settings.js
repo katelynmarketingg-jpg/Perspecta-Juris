@@ -7,6 +7,7 @@ import { planLimitFor, userCount, getPlans } from '../lib/plans.js'
 import { menuAccessFor, setMenuAccess } from '../lib/permissions.js'
 import { validarSenha } from '../lib/senha.js'
 import { criarAcesso, revogarAcesso, ErroDeRegra } from '../services/provisionamento.js'
+import { normalizarPapel, PAPEIS } from '../lib/roles.js'
 
 // Erro de regra do serviço → HTTP. As mesmas regras valem para a porta
 // /api/admin/*, que chama as mesmas funções.
@@ -173,6 +174,17 @@ export default async function settingsRoutes(app) {
     if (!existing) return reply.code(404).send({ message: 'Usuário não encontrado.' })
 
     const { password, passwordHash: _ph, id: _id, tenantId: _tid, menuAccess, login: _login, ...updates } = req.body
+    // Editar o perfil passa pela mesma lista de criar: sem isso dava para
+    // gravar qualquer string aqui e contornar a validação.
+    if (updates.role !== undefined) {
+      const papel = normalizarPapel(updates.role)
+      if (!papel || papel === 'master') {
+        return reply.code(400).send({
+          message: `Perfil inválido: "${updates.role}". Use um destes: ${PAPEIS.map(p => p.valor).join(', ')}.`,
+        })
+      }
+      updates.role = papel
+    }
     if (password !== undefined) {
       const erroSenha = validarSenha(password)
       if (erroSenha) return reply.code(400).send({ message: erroSenha })

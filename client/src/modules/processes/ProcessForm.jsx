@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import api from '../../lib/api'
 import { formatProcessNumber } from '../../lib/format'
-import { LEGAL_AREAS, PROCESS_TYPES, CONTRACT_TYPES } from '../../lib/constants'
+import { LEGAL_AREAS, PROCESS_TYPES, CONTRACT_TYPES, PAPEIS_JURIDICOS, PAPEIS_ANTIGOS } from '../../lib/constants'
 import { useUiStore } from '../../stores/uiStore'
 import { currentTenantId } from '../../lib/tenant'
 import { registrar } from '../../lib/auditLog'
@@ -210,7 +210,11 @@ export default function ProcessForm() {
   if (loadingData) return <div className="flex items-center justify-center h-full py-24"><Spinner size={32} className="text-brand-500" /></div>
 
   const processTypes = PROCESS_TYPES[data.area] ?? []
-  const lawyerOptions = users.filter(u => ['admin', 'advogado', 'lawyer', 'estagiario', 'staff'].includes(u.role))
+  // A lista tinha as cinco variantes escritas à mão porque havia dois
+  // vocabulários de perfil. Agora há um só, e os nomes antigos continuam
+  // sendo traduzidos — um banco anterior à unificação ainda pode tê-los.
+  const lawyerOptions = users
+    .filter(u => PAPEIS_JURIDICOS.includes(PAPEIS_ANTIGOS[u.role] ?? u.role))
     .map(u => ({ value: u.id, label: `${u.name}${u.oabNumber ? ` — OAB ${u.oabNumber}` : ''}` }))
 
   // preview dos débitos
