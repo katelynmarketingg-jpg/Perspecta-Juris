@@ -34,17 +34,29 @@ export async function fetchPublicacoes({ oab, uf, dataInicio, dataFim, nome, num
     if (res.ok) {
       const j = await res.json()
       // Backend já devolve normalizado em { data: [...] }
-      if (Array.isArray(j?.data)) return j.data
+      if (Array.isArray(j?.data)) {
+        // O servidor agora percorre as páginas e diz quantas publicações
+        // vieram, de que período, e se ficou faltando. Isso viaja junto com a
+        // lista em vez de mudar o formato do retorno, que dois outros arquivos
+        // já consomem como array.
+        Object.defineProperty(j.data, 'meta', {
+          value: { total: j.total ?? j.data.length, periodo: j.periodo ?? null, truncado: !!j.truncado, aviso: j.aviso ?? null },
+          enumerable: false,
+        })
+        return j.data
+      }
     }
     // 5xx / proxy vazio (backend offline) → cai para o proxy direto abaixo
   } catch { /* backend indisponível — usa proxy direto */ }
 
   // 2) Fallback: proxy direto do Vite (funciona em dev)
+  // Este caminho é o proxy do Vite, usado só em desenvolvimento quando o
+  // servidor não responde. Não pagina — mas avisa, em vez de calar.
   const params = new URLSearchParams({
     dataDisponibilizacaoInicio: dataInicio || isoDaysAgo(numeroProcesso ? 365 : 30),
     dataDisponibilizacaoFim: dataFim || isoDaysAgo(0),
     pagina: '1',
-    itensPorPagina: '50',
+    itensPorPagina: '100',
   })
   if (numeroProcesso) {
     params.set('numeroProcesso', String(numeroProcesso).replace(/\D/g, ''))
@@ -64,7 +76,17 @@ export async function fetchPublicacoes({ oab, uf, dataInicio, dataFim, nome, num
   if (!res.ok) throw new Error(`Diário retornou ${res.status}. Tente novamente mais tarde.`)
   const data = await res.json()
   const itens = data?.items ?? data?.content ?? data ?? []
-  return (Array.isArray(itens) ? itens : []).map(normalizar)
+  const lista = (Array.isArray(itens) ? itens : []).map(normalizar)
+  Object.defineProperty(lista, 'meta', {
+    value: {
+      total: lista.length, periodo: null, truncado: lista.length >= 100,
+      aviso: lista.length >= 100
+        ? 'Esta busca veio pelo proxy de desenvolvimento, que traz no máximo 100 publicações e não continua nas páginas seguintes. Pode haver mais no período.'
+        : null,
+    },
+    enumerable: false,
+  })
+  return lista
 }
 
 function normalizar(it) {
