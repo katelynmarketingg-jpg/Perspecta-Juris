@@ -31,6 +31,9 @@ export default function MovimentacoesPage() {
   const [pubs, setPubs] = useState(null)
   const [error, setError] = useState('')
   const [feita, setFeita] = useState({})  // { pubId: true } processado nesta sessão
+  // Quantas vieram, de que período, e se ficou faltando. Antes a busca parava
+  // em 50 publicações e o resto sumia sem nada na tela.
+  const [resumo, setResumo] = useState(null)
 
   useEffect(() => {
     api.processes.list().then(r => setProcessos(Array.isArray(r) ? r : (r?.data ?? []))).catch(() => setProcessos([]))
@@ -88,8 +91,10 @@ export default function MovimentacoesPage() {
       const lista = await fetchPublicacoes({ oab, uf })
       // guarda na tela + persiste
       setPubs(lista)
+      setResumo(lista.meta ?? { total: lista.length, periodo: null, truncado: false, aviso: null })
       lsSet('pj_movimentacoes', lista)
-      if (!lista.length) { setError('Nenhuma publicação encontrada nos últimos 30 dias.'); return }
+      if (lista.meta?.aviso) showToast(lista.meta.aviso, 'warning')
+      if (!lista.length) { setError('Nenhuma publicação encontrada no período consultado.'); return }
       if (auto) {
         const novas = lista.filter(p => !jaVisto(p.id) && matchProc(p))
         for (const p of novas) await processar(p)
@@ -102,6 +107,7 @@ export default function MovimentacoesPage() {
 
   const inputCls = 'px-3 py-2 rounded-lg bg-[var(--bg-input)] border border-[var(--border)] text-sm text-[var(--text-primary)] focus:border-brand-500 focus:outline-none'
   const naoVinculadas = (pubs ?? []).filter(p => !matchProc(p)).length
+  const fmtDia = (iso) => new Date(iso + 'T12:00:00').toLocaleDateString('pt-BR')
 
   return (
     <div className="p-6 space-y-5 max-w-[1100px] mx-auto">
@@ -142,8 +148,18 @@ export default function MovimentacoesPage() {
       {pubs && pubs.length > 0 && (
         <div className="flex items-center gap-3 text-xs text-[var(--text-muted)]">
           <span>{pubs.length} publicação(ões)</span>
+          {/* De que período vieram: sem isso não dá para saber o que a busca cobriu. */}
+          {resumo?.periodo && <span>· {fmtDia(resumo.periodo.de)} a {fmtDia(resumo.periodo.ate)}</span>}
           <span>· {pubs.length - naoVinculadas} vinculada(s) a processo</span>
           {naoVinculadas > 0 && <span>· {naoVinculadas} sem processo cadastrado</span>}
+        </div>
+      )}
+
+      {/* Ficou faltando publicação: isso precisa aparecer, não sumir num aviso
+          que some sozinho — é prazo que pode estar do lado de fora. */}
+      {resumo?.aviso && (
+        <div className="mt-2 px-4 py-2.5 rounded-lg border bg-amber-500/10 border-amber-500/40">
+          <p className="text-xs text-amber-300">⚠️ {resumo.aviso}</p>
         </div>
       )}
 

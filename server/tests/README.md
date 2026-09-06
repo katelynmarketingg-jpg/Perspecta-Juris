@@ -55,6 +55,18 @@ node server/tests/etapa9.avisos.mjs       # os avisos da tela e a validacao do p
 node server/tests/etapa10.vademecum.mjs   # o indice remissivo da legislacao
 ```
 
+Este sobe o PRÓPRIO servidor, numa porta separada (8798), e por isso roda
+sozinho — mas ainda precisa do banco:
+
+```bash
+node server/tests/etapa11.diario.mjs      # paginacao do Diario (DJEN)
+```
+
+Ele levanta um DJEN de mentira numa porta livre e sobe o servidor com
+`DJEN_URL` apontando para lá. É a única forma de exercitar três páginas,
+repetição entre páginas e falha no meio — a API real do CNJ não faz isso sob
+encomenda. Em produção `DJEN_URL` não é definida e vale o endereço do CNJ.
+
 Precisam de bundle, porque exercitam código do cliente (imports sem extensão,
 resolvidos pelo Vite):
 
@@ -70,7 +82,7 @@ for t in etapa0.resgate etapa2.datajud etapa8.sessao; do
 done
 ```
 
-Total atual: **423 asserções** em 12 suítes. Cada suíte sai com código 0 se passar.
+Total atual: **419 asserções** em 13 suítes. Cada suíte sai com código 0 se passar.
 
 | Suíte | Asserções | O que prova |
 |---|---:|---|
@@ -86,6 +98,7 @@ Total atual: **423 asserções** em 12 suítes. Cada suíte sai com código 0 se
 | `etapa8.sessao` | 14 | o laço de recarregamento na abertura |
 | `etapa9.avisos` | 26 | os avisos que ninguém desenhava |
 | `etapa10.vademecum` | 30 | busca e índice remissivo da legislação |
+| `etapa11.diario` | 30 | paginação do Diário: nada de parar na primeira página |
 
 **Atenção:** os testes escrevem no banco apontado por `DATABASE_URL`. Rode
 sempre contra um banco descartável, **nunca contra produção**. Cada suíte apaga
