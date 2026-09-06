@@ -94,6 +94,14 @@ export const VADE = [
     resumo: 'Limite de juros e vedação do anatocismo.', kw: ['usura', 'juros', 'anatocismo'] },
   { sigla: 'Arbitragem', nome: 'Lei de Arbitragem (Lei 9.307/1996)', cat: 'Leis', url: `${P}/leis/l9307.htm`,
     resumo: 'Convenção de arbitragem, árbitros e sentença arbitral.', kw: ['arbitragem', 'arbitral'] },
+  { sigla: 'Autoral', nome: 'Direitos Autorais (Lei 9.610/1998)', cat: 'Leis', url: `${P}/leis/l9610.htm`,
+    resumo: 'Obras protegidas, direitos morais e patrimoniais, e as limitações.', kw: ['direito autoral', 'plagio', 'obra', 'copyright'] },
+  { sigla: 'PlanoSaúde', nome: 'Planos de Saúde (Lei 9.656/1998)', cat: 'Leis', url: `${P}/leis/l9656.htm`,
+    resumo: 'Coberturas obrigatórias, carências, reajustes e rescisão do plano.', kw: ['plano de saude', 'operadora', 'carencia', 'cobertura'] },
+  { sigla: 'ACP', nome: 'Ação Civil Pública (Lei 7.347/1985)', cat: 'Leis', url: `${P}/leis/l7347orig.htm`,
+    resumo: 'Tutela coletiva do meio ambiente, consumidor e patrimônio público.', kw: ['acao civil publica', 'tutela coletiva', 'ministerio publico'] },
+  { sigla: 'Propriedade', nome: 'Propriedade Industrial (Lei 9.279/1996)', cat: 'Leis', url: `${P}/leis/l9279.htm`,
+    resumo: 'Patentes, marcas, desenho industrial e concorrência desleal.', kw: ['marca', 'patente', 'propriedade industrial', 'inpi'] },
 ]
 
 export const COD = Object.fromEntries(VADE.map(v => [v.sigla, v.url]))
@@ -150,7 +158,7 @@ export const INDICE = [
   { tema: 'Locação e despejo', kw: ['locacao', 'aluguel', 'despejo', 'inquilino', 'locador', 'locatario', 'renovatoria'], refs: [['Locação', 'Lei 8.245/91', 'Locação urbana, despejo e renovatória', 1]] },
 
   // ─────────────── PROCESSO CIVIL ───────────────
-  { tema: 'Prazos processuais', kw: ['prazo', 'prazos', 'dias uteis', 'preclusao', 'tempestividade'], refs: [['CPC', 'arts. 218 a 235', 'Dos prazos', 218], ['CPC', 'art. 219', 'Contagem em dias úteis', 219]] },
+  { tema: 'Prazos processuais', kw: ['prazo', 'prazos', 'dias uteis', 'preclusao', 'tempestividade', 'contagem de prazo', 'intimacao'], refs: [['CPC', 'arts. 218 a 235', 'Dos prazos', 218], ['CPC', 'art. 219', 'Contagem em dias úteis', 219]] },
   { tema: 'Petição inicial', kw: ['peticao inicial', 'inicial', 'inepcia', 'emenda da inicial'], refs: [['CPC', 'arts. 319 a 331', 'Da petição inicial', 319]] },
   { tema: 'Contestação e revelia', kw: ['contestacao', 'revelia', 'defesa', 'preliminares'], refs: [['CPC', 'arts. 335 a 346', 'Da contestação e da revelia', 335]] },
   { tema: 'Tutela de urgência e liminar', kw: ['tutela de urgencia', 'liminar', 'antecipacao de tutela', 'cautelar', 'tutela provisoria'], refs: [['CPC', 'arts. 294 a 311', 'Da tutela provisória', 294]] },
@@ -269,6 +277,32 @@ export const INDICE = [
   { tema: 'Licitações e contratos', kw: ['licitacao', 'pregao', 'dispensa de licitacao', 'contrato administrativo'], refs: [['Licitações', 'Lei 14.133/21', 'Licitações e contratos', 1]] },
   { tema: 'Mandado de segurança', kw: ['mandado de seguranca', 'direito liquido e certo', 'autoridade coatora'], refs: [['MS', 'Lei 12.016/09', 'Mandado de segurança', 1], ['CF/88', 'art. 5º, LXIX', 'Garantia do mandado de segurança', 5]] },
   { tema: 'LGPD e proteção de dados', kw: ['lgpd', 'dados pessoais', 'privacidade', 'consentimento', 'anpd'], refs: [['LGPD', 'Lei 13.709/18', 'Proteção de dados pessoais', 1]] },
+
+  // ─────────────── AMPLIAÇÃO ───────────────
+  { tema: 'Aborto', kw: ['aborto', 'interrupcao da gravidez', 'aborto legal'], refs: [['CP', 'arts. 124 a 128', 'Do aborto e as excludentes', 124]] },
+  { tema: 'Sequestro e cárcere privado', kw: ['sequestro', 'carcere privado', 'privacao de liberdade'], refs: [['CP', 'art. 148', 'Sequestro e cárcere privado', 148]] },
+  { tema: 'Violação de domicílio', kw: ['violacao de domicilio', 'invasao de domicilio', 'casa alheia'], refs: [['CP', 'art. 150', 'Violação de domicílio', 150], ['CF/88', 'art. 5º, XI', 'Inviolabilidade do domicílio', 5]] },
+  { tema: 'Moeda falsa e fé pública', kw: ['moeda falsa', 'fe publica', 'falsificacao de moeda'], refs: [['CP', 'arts. 289 a 295', 'Dos crimes contra a fé pública', 289]] },
+  { tema: 'Contrabando e descaminho', kw: ['contrabando', 'descaminho'], refs: [['CP', 'arts. 334 e 334-A', 'Descaminho e contrabando', 334]] },
+  { tema: 'Invasão de dispositivo informático', kw: ['invasao de dispositivo', 'crime cibernetico', 'hacker', 'vazamento de dados'], refs: [['CP', 'art. 154-A', 'Invasão de dispositivo informático', 154]] },
+  { tema: 'Embargos de terceiro', kw: ['embargos de terceiro', 'constricao indevida'], refs: [['CPC', 'arts. 674 a 681', 'Dos embargos de terceiro', 674]] },
+  { tema: 'Ação monitória', kw: ['monitoria', 'acao monitoria', 'prova escrita sem eficacia'], refs: [['CPC', 'arts. 700 a 702', 'Da ação monitória', 700]] },
+  { tema: 'Consignação em pagamento', kw: ['consignacao', 'consignacao em pagamento', 'deposito judicial'], refs: [['CC', 'arts. 334 a 345', 'Do pagamento em consignação', 334], ['CPC', 'arts. 539 a 549', 'Da ação de consignação', 539]] },
+  { tema: 'Ação civil pública', kw: ['acao civil publica', 'tutela coletiva', 'interesse difuso'], refs: [['ACP', 'Lei 7.347/85', 'Ação civil pública', 1]] },
+  { tema: 'Desapropriação', kw: ['desapropriacao', 'utilidade publica', 'justa indenizacao'], refs: [['CF/88', 'art. 5º, XXIV', 'Desapropriação por necessidade ou utilidade pública', 5]] },
+  { tema: 'Direito de vizinhança', kw: ['vizinhanca', 'uso anormal da propriedade', 'perturbacao', 'arvore limitrofe'], refs: [['CC', 'arts. 1.277 a 1.313', 'Dos direitos de vizinhança', 1277]] },
+  { tema: 'Títulos de crédito', kw: ['cheque', 'nota promissoria', 'duplicata', 'titulo de credito', 'endosso'], refs: [['CC', 'arts. 887 a 926', 'Dos títulos de crédito', 887]] },
+  { tema: 'Marca e patente', kw: ['marca', 'patente', 'propriedade industrial', 'concorrencia desleal'], refs: [['Propriedade', 'Lei 9.279/96', 'Propriedade industrial', 1]] },
+  { tema: 'Direito autoral', kw: ['direito autoral', 'plagio', 'obra intelectual', 'copyright'], refs: [['Autoral', 'Lei 9.610/98', 'Direitos autorais', 1]] },
+  { tema: 'Plano de saúde', kw: ['plano de saude', 'operadora', 'negativa de cobertura', 'carencia', 'reajuste'], refs: [['PlanoSaúde', 'Lei 9.656/98', 'Planos privados de assistência à saúde', 1], ['CDC', 'arts. 47 e 51', 'Interpretação favorável e cláusulas abusivas', 47]] },
+  { tema: 'Superendividamento', kw: ['superendividamento', 'repactuacao de dividas', 'minimo existencial'], refs: [['CDC', 'arts. 54-A a 54-G', 'Da prevenção do superendividamento', 54]] },
+  { tema: 'Transporte e bagagem', kw: ['transporte', 'bagagem', 'atraso de voo', 'overbooking', 'extravio'], refs: [['CC', 'arts. 730 a 756', 'Do contrato de transporte', 730], ['CDC', 'art. 14', 'Fato do serviço', 14]] },
+  { tema: 'Acidente de trabalho', kw: ['acidente de trabalho', 'cat', 'doenca ocupacional', 'nexo causal'], refs: [['L8213', 'arts. 19 a 23', 'Do acidente do trabalho', 19], ['CC', 'art. 927', 'Responsabilidade do empregador', 927]] },
+  { tema: 'Auxílio-reclusão', kw: ['auxilio-reclusao', 'dependente de preso'], refs: [['L8213', 'art. 80', 'Do auxílio-reclusão', 80]] },
+  { tema: 'Aposentadoria da pessoa com deficiência', kw: ['aposentadoria da pessoa com deficiencia', 'lc 142', 'deficiencia previdenciaria'], refs: [['L8213', 'art. 201, §1º CF', 'Aposentadoria da pessoa com deficiência', 201]] },
+  { tema: 'Trabalho intermitente e terceirização', kw: ['intermitente', 'terceirizacao', 'pejotizacao', 'trabalho temporario'], refs: [['CLT', 'art. 443, §3º', 'Contrato intermitente', 443], ['CLT', 'arts. 4º-A e 5º-A', 'Terceirização (Lei 6.019/74)', 4]] },
+  { tema: 'Adicional de transferência e sobreaviso', kw: ['adicional de transferencia', 'sobreaviso', 'prontidao'], refs: [['CLT', 'art. 469, §3º', 'Adicional de transferência', 469], ['CLT', 'art. 244, §2º', 'Sobreaviso', 244]] },
+  { tema: 'Equiparação salarial', kw: ['equiparacao salarial', 'paradigma', 'isonomia salarial'], refs: [['CLT', 'art. 461', 'Da equiparação salarial', 461]] },
 ]
 
 // ── Busca ─────────────────────────────────────────────────────────────────
@@ -294,12 +328,17 @@ const palavras = (s) => normalizar(s).split(' ').filter(p => p && !VAZIAS.has(p)
  * "m" não acha "casamento".
  */
 function pontuar(alvo, termos) {
+  // Os pesos precisam de folga entre si. Com tema=10 e kw=6, buscar "prazo"
+  // punha "Prescrição e decadência" na frente de "Prazos processuais": a
+  // palavra-chave "prazo prescricional" batia EXATA (6×2=12) e vencia o título
+  // "Prazos processuais", que só batia por início de palavra (10). Agora o
+  // título ganha por início de palavra de qualquer acerto em palavra-chave.
   const campos = [
-    { texto: normalizar(alvo.tema), peso: 10 },
+    { texto: normalizar(alvo.tema), peso: 20 },
+    { texto: normalizar(alvo.nome ?? '') + ' ' + normalizar(alvo.sigla ?? ''), peso: 16 },
     { texto: (alvo.kw ?? []).map(normalizar).join(' '), peso: 6 },
     { texto: normalizar((alvo.refs ?? []).map(r => r[2]).join(' ')), peso: 3 },
     { texto: normalizar(alvo.resumo ?? ''), peso: 2 },
-    { texto: normalizar(alvo.nome ?? '') + ' ' + normalizar(alvo.sigla ?? ''), peso: 8 },
   ]
   let total = 0
   for (const t of termos) {
