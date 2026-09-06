@@ -194,6 +194,10 @@ try {
   // servidor: antes dependia de alguém estar com o app aberto no navegador.
   const { agendarSync } = await import('./jobs/datajudSync.js')
   agendarSync()
+
+  // Reporta pro Perspecta Central quanto cada escritório usa do plano.
+  const { agendarRelatorioUso } = await import('./jobs/usoReport.js')
+  agendarRelatorioUso()
 } catch (err) {
   app.log.error(err)
   process.exit(1)
