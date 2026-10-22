@@ -34,6 +34,25 @@ localStorage.setItem('pj_session', JSON.stringify({ userId: login.user.id, tenan
 
 const TID = login.tenant.id
 
+// ── Limpa o que uma execução anterior deixou no servidor ─────────────────
+//
+// O resgate é idempotente de propósito: ele reconhece pelo CPF o cliente que
+// já está no banco e NÃO duplica. Ótimo em produção, péssimo para um teste
+// que confere "quantos foram enviados" — rodando duas vezes, a segunda
+// encontra tudo lá e envia zero. Sem esta limpeza a suíte passa uma vez e
+// falha para sempre depois, e o mais provável é alguém concluir que o
+// resgate quebrou.
+{
+  const { db } = await import('../db/index.js')
+  const sch = await import('../db/schema.js')
+  const { eq } = await import('drizzle-orm')
+  // Ordem importa: filhos antes dos pais (processes.clientId não tem cascata).
+  for (const tabela of [sch.processMovements, sch.deadlines, sch.tasks,
+                        sch.financialEntries, sch.processes, sch.clients]) {
+    await db.delete(tabela).where(eq(tabela.tenantId, TID))
+  }
+}
+
 // ── Dados "presos no navegador" ──────────────────────────────────────────
 localStorage.setItem('pj_local_clients', JSON.stringify([
   { id: 'c1', tenantId: TID, name: 'Maria da Silva', cpfCnpj: '111.444.777-35', phone: '51988887777', type: 'person', portalEnabled: true, portalPassword: 'seg' },

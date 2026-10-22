@@ -350,6 +350,12 @@ const api = {
     savePlans:      (plans)=> api.put('/api/master/plans', { plans }),
     branding:       ()     => api.get('/api/master/branding'),
     saveBranding:   (d)    => api.put('/api/master/branding', d),
+    // Acessos de cada escritório, vistos do painel: antes, para olhar (ou
+    // cortar) um acesso era preciso entrar no escritório como se fosse a pessoa.
+    companyUsers:   (id)   => api.get(`/api/master/companies/${id}/users`),
+    updateUser:     (id,d) => api.put(`/api/master/users/${id}`, d),
+    setCobranca:    (id,d) => api.put(`/api/master/companies/${id}/cobranca`, d),
+    changeMyPassword: (d)  => api.put('/api/master/me/password', d),
   },
 
   // Marca do sistema (pública — sem login)

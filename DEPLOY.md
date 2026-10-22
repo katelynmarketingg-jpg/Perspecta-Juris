@@ -54,6 +54,12 @@ npm run db:migrate   # cria todas as tabelas no Supabase
 npm run db:seed      # cria o seu login master (admin) com a MASTER_PASSWORD
 ```
 
+> **O seed só CRIA — nunca atualiza.** Se o usuário master já existe, ele diz
+> "já existe" e sai sem tocar em nada. Então **trocar a `MASTER_PASSWORD` no
+> Render depois não muda a sua senha**: a partir da criação, a senha que vale é
+> a que está no banco. Para trocá-la, entre no sistema e use
+> **Configurações → Usuários**.
+
 > Se preferir, dá pra rodar do seu computador: crie um arquivo `.env` com a `DATABASE_URL` e a `MASTER_PASSWORD` e rode os dois comandos.
 
 ---
@@ -61,7 +67,11 @@ npm run db:seed      # cria o seu login master (admin) com a MASTER_PASSWORD
 ## Passo 4 — Entrar e criar os escritórios
 
 1. Abra o endereço do Render.
-2. Faça login como **Empresa:** *(em branco)* · **Nome:** `admin` · **Senha:** *(a MASTER_PASSWORD)*.
+2. Faça login como **Empresa:** `Perspecta Juris` · **Nome:** `admin` (a `MASTER_LOGIN`) · **Senha:** *(a `MASTER_PASSWORD`)*.
+
+   > Aqui dizia "Empresa: *(em branco)*", e isso está errado: a rota de login
+   > exige a empresa e recusa o campo vazio. Quem seguisse a instrução levava
+   > erro e ia achar que tinha esquecido a senha.
 3. Você cai no **Painel Master** → **Empresas** → **Nova empresa**:
    - Crie **Perspecta** (o seu) e o **KN Advocacia Criminal**.
    - Ao criar cada empresa, o painel já gera o **login de admin** dela (você define nome e senha — ex.: `kat`, `karen`, `nathi`).
