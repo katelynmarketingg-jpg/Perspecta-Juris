@@ -25,9 +25,20 @@ export async function migrarNoArranque(log = console) {
   if (!process.env.DATABASE_URL) return { rodou: false, motivo: 'sem DATABASE_URL' }
 
   // Conexão própria, fechada no fim: não mexe no pool que a aplicação usa.
+  // Duas coisas aqui que não são detalhe:
+  //
+  // ssl: o banco de produção (Supabase) só aceita conexão cifrada — é o mesmo
+  // que db/index.js faz. Sem isto, a migração do arranque falharia logo na
+  // conexão, e o aviso no log seria tratado como "banco fora do ar" quando na
+  // verdade era configuração faltando aqui.
+  //
   // onnotice: o migrador faz CREATE ... IF NOT EXISTS e o Postgres responde
   // "já existe, pulando" a cada arranque. Isso enchia o log de ruído.
-  const client = postgres(process.env.DATABASE_URL, { max: 1, onnotice: () => {} })
+  const client = postgres(process.env.DATABASE_URL, {
+    max: 1,
+    ssl: process.env.NODE_ENV === 'production' ? 'require' : false,
+    onnotice: () => {},
+  })
   try {
     await migrate(drizzle(client), { migrationsFolder: './server/db/migrations' })
     log.info?.('[banco] migrações em dia.')
