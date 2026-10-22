@@ -49,7 +49,7 @@ export default function MasterPage() {
   // ── edição de planos ──
   const setPlanField = (i, field, value) =>
     setPlans(ps => ps.map((p, idx) => idx === i ? { ...p, [field]: value } : p))
-  const addPlan = () => setPlans(ps => [...ps, { key: '', name: '', maxUsers: '' }])
+  const addPlan = () => setPlans(ps => [...ps, { key: '', name: '', maxUsers: '', price: '' }])
   const removePlan = (i) => setPlans(ps => ps.filter((_, idx) => idx !== i))
   const salvarPlanos = async () => {
     setSavingPlans(true)
@@ -169,6 +169,77 @@ export default function MasterPage() {
   const totalProcessos = companies.reduce((s, c) => s + (c.processesCount ?? 0), 0)
   const totalUsuarios = companies.reduce((s, c) => s + (c.usersCount ?? 0), 0)
 
+  // ── Quem paga, quem está testando ──────────────────────────────────────
+  // O sistema nunca soube disso. Escritório sem classificação fica em "a
+  // definir" — inventar que alguém é pagante seria pior do que não contar.
+  const pagantes  = companies.filter(c => c.cobranca?.situacao === 'pagante')
+  const emTeste   = companies.filter(c => c.cobranca?.situacao === 'teste')
+  const cortesias = companies.filter(c => c.cobranca?.situacao === 'cortesia')
+  const aDefinir  = companies.filter(c => !c.cobranca?.situacao)
+  const receitaPrevista = pagantes.reduce((s, c) => s + (c.valorMensal ?? 0), 0)
+  const pagantesSemValor = pagantes.filter(c => c.valorMensal == null).length
+  const moeda = (v) => (v ?? 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+
+  // ── Acessos de cada escritório ─────────────────────────────────────────
+  const [acessos, setAcessos] = useState({})        // { tenantId: [users] }
+  const [abertos, setAbertos] = useState(() => new Set())
+  const [carregandoAcessos, setCarregandoAcessos] = useState(null)
+
+  const verAcessos = async (c) => {
+    setAbertos(prev => {
+      const n = new Set(prev)
+      n.has(c.id) ? n.delete(c.id) : n.add(c.id)
+      return n
+    })
+    if (acessos[c.id]) return
+    setCarregandoAcessos(c.id)
+    try {
+      const rows = await api.master.companyUsers(c.id)
+      setAcessos(prev => ({ ...prev, [c.id]: Array.isArray(rows) ? rows : [] }))
+    } catch (e) {
+      alert('Não foi possível carregar os acessos. ' + (e?.message ?? ''))
+    } finally { setCarregandoAcessos(null) }
+  }
+
+  const recarregarAcessos = async (tenantId) => {
+    try {
+      const rows = await api.master.companyUsers(tenantId)
+      setAcessos(prev => ({ ...prev, [tenantId]: Array.isArray(rows) ? rows : [] }))
+    } catch { /* a tela segue com o que tem */ }
+  }
+
+  // Suspender vale na hora: o servidor derruba as sessões abertas da pessoa.
+  const alternarAcesso = async (c, u) => {
+    const bloquear = u.isActive
+    if (bloquear && !window.confirm(
+      `Interromper o acesso de "${u.name}" (${u.loginName})?\n\n` +
+      `Ela é desconectada na hora e não consegue mais entrar até você liberar de novo.`
+    )) return
+    try {
+      await api.master.updateUser(u.id, { isActive: !u.isActive })
+      await recarregarAcessos(c.id)
+    } catch (e) {
+      alert('Não foi possível alterar este acesso. ' + (e?.message ?? ''))
+    }
+  }
+
+  const [resetAlvo, setResetAlvo] = useState(null)   // { empresa, usuario }
+  const [minhaConta, setMinhaConta] = useState(false)
+
+  // Classificar o escritório (pagante / teste / cortesia) e o valor dele.
+  const salvarCobranca = async (c, patch) => {
+    const antes = companies
+    setCompanies(prev => prev.map(x => x.id === c.id
+      ? { ...x, cobranca: { ...(x.cobranca ?? {}), ...patch },
+          valorMensal: patch.valorMensal !== undefined ? patch.valorMensal : x.valorMensal }
+      : x))
+    try { await api.master.setCobranca(c.id, patch) }
+    catch (e) {
+      setCompanies(antes)
+      alert('Não foi possível salvar. ' + (e?.message ?? ''))
+    }
+  }
+
   const handleLogout = async () => {
     await logout()
     navigate('/login')
@@ -195,6 +266,21 @@ export default function MasterPage() {
         </div>
 
         <div className="flex items-center gap-3">
+          {/* O menu que não existia aqui: do painel só dava para sair ou entrar
+              num escritório — para chegar nas Configurações era preciso saber
+              digitar /app no endereço. */}
+          <nav className="hidden sm:flex items-center gap-1 mr-1">
+            <button onClick={() => navigate('/app')}
+              className="px-3 py-1.5 rounded-lg text-xs text-[var(--text-secondary)] hover:text-white hover:bg-[var(--bg-hover)] transition-colors"
+              title="Abrir a área de trabalho (clientes, processos, prazos, financeiro)">
+              Abrir o sistema
+            </button>
+            <button onClick={() => setMinhaConta(true)}
+              className="px-3 py-1.5 rounded-lg text-xs text-[var(--text-secondary)] hover:text-white hover:bg-[var(--bg-hover)] transition-colors"
+              title="Trocar a minha senha">
+              Minha conta
+            </button>
+          </nav>
           <div className="flex items-center gap-2">
             <div className="w-6 h-6 rounded-full bg-brand-500 flex items-center justify-center text-[10px] font-bold text-white">
               {user?.name?.charAt(0)?.toUpperCase()}
@@ -245,17 +331,17 @@ export default function MasterPage() {
                   <IconPlus size={13} /> Adicionar plano
                 </button>
               </div>
-              <p className="text-[11px] text-[var(--text-muted)] mb-4">Defina o nome de cada plano e quantos acessos (usuários) ele permite. Deixe o limite em branco para <b>ilimitado</b>.</p>
+              <p className="text-[11px] text-[var(--text-muted)] mb-4">Defina o nome de cada plano, quantos acessos (usuários) ele permite e quanto custa por mês. Deixe o limite em branco para <b>ilimitado</b>; o preço em branco significa <b>a definir</b> — e aí o plano não entra na conta do previsto.</p>
 
               <div className="space-y-2">
-                <div className="grid grid-cols-[1fr_130px_32px] gap-2 px-1 text-[10px] uppercase tracking-wide text-[var(--text-muted)]">
-                  <span>Nome do plano</span><span>Limite de acessos</span><span></span>
+                <div className="grid grid-cols-[1fr_110px_110px_32px] gap-2 px-1 text-[10px] uppercase tracking-wide text-[var(--text-muted)]">
+                  <span>Nome do plano</span><span>Acessos</span><span>R$/mês</span><span></span>
                 </div>
                 {plans.length === 0 && (
                   <p className="text-sm text-[var(--text-muted)] py-4 text-center">Nenhum plano. Clique em "Adicionar plano".</p>
                 )}
                 {plans.map((p, i) => (
-                  <div key={i} className="grid grid-cols-[1fr_130px_32px] gap-2 items-center">
+                  <div key={i} className="grid grid-cols-[1fr_110px_110px_32px] gap-2 items-center">
                     <input
                       value={p.name ?? ''} onChange={e => setPlanField(i, 'name', e.target.value)}
                       placeholder="Ex: Escritório"
@@ -264,6 +350,11 @@ export default function MasterPage() {
                       type="number" min="1"
                       value={p.maxUsers ?? ''} onChange={e => setPlanField(i, 'maxUsers', e.target.value)}
                       placeholder="ilimitado"
+                      className="w-full px-3 py-2 rounded-lg bg-[var(--bg-input)] border border-[var(--border)] text-sm text-white focus:border-brand-500 focus:outline-none" />
+                    <input
+                      type="number" min="0" step="0.01"
+                      value={p.price ?? ''} onChange={e => setPlanField(i, 'price', e.target.value)}
+                      placeholder="a definir"
                       className="w-full px-3 py-2 rounded-lg bg-[var(--bg-input)] border border-[var(--border)] text-sm text-white focus:border-brand-500 focus:outline-none" />
                     <button onClick={() => removePlan(i)} title="Remover plano"
                       className="w-8 h-8 flex items-center justify-center rounded-lg text-[var(--text-muted)] hover:text-red-400 hover:bg-red-950/40">✕</button>
@@ -362,6 +453,44 @@ export default function MasterPage() {
         )}
 
         {tab === 'empresas' && (<>
+        {/* Dinheiro primeiro: é a pergunta que se faz ao abrir este painel. */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
+          <div className="card p-4 border-emerald-800/40">
+            <p className="text-2xl font-bold text-emerald-400 leading-none">{pagantes.length}</p>
+            <p className="text-[11px] text-[var(--text-muted)] mt-1">Pagantes</p>
+          </div>
+          <div className="card p-4 border-amber-800/40">
+            <p className="text-2xl font-bold text-amber-400 leading-none">{emTeste.length}</p>
+            <p className="text-[11px] text-[var(--text-muted)] mt-1">Em teste grátis</p>
+          </div>
+          <div className="card p-4">
+            <p className="text-2xl font-bold text-white leading-none">{cortesias.length}</p>
+            <p className="text-[11px] text-[var(--text-muted)] mt-1">Cortesia</p>
+          </div>
+          <div className="card p-4">
+            <p className="text-2xl font-bold text-white leading-none">{moeda(receitaPrevista)}</p>
+            <p className="text-[11px] text-[var(--text-muted)] mt-1">Previsto por mês</p>
+          </div>
+        </div>
+
+        {/* O painel diz o que ele NÃO sabe, em vez de contar errado. */}
+        {(aDefinir.length > 0 || pagantesSemValor > 0) && (
+          <div className="mb-6 px-4 py-2.5 rounded-lg border border-amber-500/40 bg-amber-500/10">
+            <p className="text-xs text-amber-300">
+              {aDefinir.length > 0 && <>
+                <b>{aDefinir.length} escritório(s) sem classificação.</b> O sistema nunca
+                guardou quem paga e quem está testando — marque em cada cartão abaixo
+                (Pagante · Teste · Cortesia) para estes números ficarem certos.
+              </>}
+              {aDefinir.length > 0 && pagantesSemValor > 0 && ' '}
+              {pagantesSemValor > 0 && <>
+                <b>{pagantesSemValor} pagante(s) sem valor definido</b> — não entram no
+                previsto do mês. Defina o valor no cartão, ou o preço do plano na aba Planos.
+              </>}
+            </p>
+          </div>
+        )}
+
         {/* Totais do sistema */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-8">
           {[
@@ -424,6 +553,93 @@ export default function MasterPage() {
                   </div>
                 </div>
 
+                {/* Situação comercial deste escritório */}
+                <div className="rounded-lg border border-[var(--border)] p-2.5 space-y-2">
+                  <div className="flex items-center gap-1">
+                    {[['pagante', 'Pagante'], ['teste', 'Teste'], ['cortesia', 'Cortesia']].map(([v, rotulo]) => (
+                      <button key={v}
+                        onClick={() => salvarCobranca(c, { situacao: c.cobranca?.situacao === v ? null : v })}
+                        className={`flex-1 text-[10px] py-1 rounded-md border transition-colors ${
+                          c.cobranca?.situacao === v
+                            ? (v === 'pagante' ? 'border-emerald-600 bg-emerald-950/50 text-emerald-300'
+                               : v === 'teste' ? 'border-amber-600 bg-amber-950/50 text-amber-300'
+                               : 'border-[var(--border-strong)] bg-[var(--bg-hover)] text-[var(--text-secondary)]')
+                            : 'border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text-secondary)]'}`}>
+                        {rotulo}
+                      </button>
+                    ))}
+                  </div>
+                  {!c.cobranca?.situacao && (
+                    <p className="text-[10px] text-amber-400">Sem classificação — não entra na conta.</p>
+                  )}
+                  {c.cobranca?.situacao === 'teste' && (
+                    <label className="flex items-center gap-2 text-[10px] text-[var(--text-muted)]">
+                      Teste até
+                      <input type="date" value={c.cobranca?.trialAte ?? ''}
+                        onChange={e => salvarCobranca(c, { trialAte: e.target.value })}
+                        className="flex-1 px-2 py-1 rounded-md bg-[var(--bg-input)] border border-[var(--border)] text-[11px] text-white focus:border-brand-500 focus:outline-none" />
+                    </label>
+                  )}
+                  {c.cobranca?.situacao === 'pagante' && (
+                    <label className="flex items-center gap-2 text-[10px] text-[var(--text-muted)]">
+                      R$/mês
+                      <input type="number" min="0" step="0.01"
+                        value={c.cobranca?.valorMensal ?? ''}
+                        placeholder={c.precoDoPlano != null ? String(c.precoDoPlano) : 'a definir'}
+                        onChange={e => salvarCobranca(c, { valorMensal: e.target.value === '' ? null : Number(e.target.value) })}
+                        className="flex-1 px-2 py-1 rounded-md bg-[var(--bg-input)] border border-[var(--border)] text-[11px] text-white focus:border-brand-500 focus:outline-none" />
+                    </label>
+                  )}
+                </div>
+
+                {/* Acessos deste escritório */}
+                <div>
+                  <button onClick={() => verAcessos(c)}
+                    className="w-full flex items-center justify-between px-2.5 py-2 rounded-lg border border-[var(--border)] text-xs text-[var(--text-secondary)] hover:border-brand-500/40 transition-colors">
+                    <span>👤 Acessos ({c.usersCount ?? 0})</span>
+                    <span className="text-[var(--text-muted)]">{abertos.has(c.id) ? '▴' : '▾'}</span>
+                  </button>
+
+                  {abertos.has(c.id) && (
+                    <div className="mt-2 space-y-2">
+                      {carregandoAcessos === c.id && !acessos[c.id] ? (
+                        <p className="text-[11px] text-[var(--text-muted)] text-center py-2">Carregando…</p>
+                      ) : !(acessos[c.id] ?? []).length ? (
+                        <p className="text-[11px] text-[var(--text-muted)] text-center py-2">Nenhum acesso cadastrado.</p>
+                      ) : acessos[c.id].map(u => (
+                        <div key={u.id} className="rounded-lg border border-[var(--border)] p-2.5">
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <p className="text-xs font-medium text-white truncate">{u.name}</p>
+                              <p className="text-[10px] text-[var(--text-muted)]">
+                                {u.loginName} · {u.role}
+                                {u.lastLoginAt
+                                  ? ` · entrou ${new Date(u.lastLoginAt).toLocaleDateString('pt-BR')}`
+                                  : ' · nunca entrou'}
+                              </p>
+                            </div>
+                            <span className={`badge border text-[9px] flex-shrink-0 ${u.isActive ? 'text-emerald-400 bg-emerald-950/40 border-emerald-800/30' : 'badge-red'}`}>
+                              {u.isActive ? 'Ativo' : 'Bloqueado'}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1.5 mt-2">
+                            <button onClick={() => setResetAlvo({ empresa: c, usuario: u })}
+                              className="text-[10px] px-2 py-1 rounded-md bg-[var(--bg-hover)] text-[var(--text-secondary)] hover:bg-[var(--bg-input)]">
+                              🔑 Nova senha
+                            </button>
+                            <button onClick={() => alternarAcesso(c, u)}
+                              className={`text-[10px] px-2 py-1 rounded-md ml-auto ${u.isActive
+                                ? 'text-[var(--text-muted)] hover:text-red-400'
+                                : 'text-emerald-400 hover:text-emerald-300'}`}>
+                              {u.isActive ? 'Interromper acesso' : 'Liberar acesso'}
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
                 {/* Entrar no escritório */}
                 <button
                   onClick={() => entrar(c)}
@@ -449,6 +665,19 @@ export default function MasterPage() {
         )}
         </>)}
       </div>
+
+      {/* Modal: redefinir a senha de um acesso */}
+      {resetAlvo && (
+        <ModalNovaSenha
+          empresa={resetAlvo.empresa}
+          usuario={resetAlvo.usuario}
+          onClose={() => setResetAlvo(null)}
+          onPronto={() => { recarregarAcessos(resetAlvo.empresa.id); setResetAlvo(null) }}
+        />
+      )}
+
+      {/* Modal: minha conta */}
+      {minhaConta && <ModalMinhaConta onClose={() => setMinhaConta(false)} />}
 
       {/* Modal: nova empresa */}
       {showNew && (
@@ -512,6 +741,182 @@ export default function MasterPage() {
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+// ── Nova senha de um acesso ───────────────────────────────────────────────
+//
+// Antes só dava para trocar a senha de alguém entrando no escritório como se
+// fosse a própria pessoa — e para isso era preciso saber a senha dela. Quando
+// alguém da equipe esquecia, não havia saída dentro do sistema.
+function ModalNovaSenha({ empresa, usuario, onClose, onPronto }) {
+  const [senha, setSenha] = useState('')
+  const [salvando, setSalvando] = useState(false)
+  const [erro, setErro] = useState('')
+  const [pronta, setPronta] = useState(false)
+
+  // Sem caracteres ambíguos: esta senha vai ser ditada ou copiada para alguém.
+  const gerar = () => {
+    const AB = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789'
+    const n = 4
+    const grupo = () => Array.from({ length: 4 }, () => AB[Math.floor(Math.random() * AB.length)]).join('')
+    setSenha(Array.from({ length: n }, grupo).join('-'))
+    setErro('')
+  }
+
+  const salvar = async () => {
+    if (senha.trim().length < 8) { setErro('A senha precisa ter pelo menos 8 caracteres.'); return }
+    setSalvando(true); setErro('')
+    try {
+      await api.master.updateUser(usuario.id, { password: senha })
+      setPronta(true)
+    } catch (e) {
+      setErro(e?.message ?? 'Não foi possível trocar a senha.')
+    } finally { setSalvando(false) }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/70 overflow-y-auto py-8 px-4" onClick={onClose}>
+      <div className="card w-full max-w-md" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--border)]">
+          <p className="text-sm font-semibold text-white">Nova senha de acesso</p>
+          <button onClick={onClose} className="text-[var(--text-muted)] hover:text-white">✕</button>
+        </div>
+
+        {pronta ? (
+          <div className="p-5 space-y-3">
+            <div className="px-3 py-2.5 rounded-lg border border-emerald-600/40 bg-emerald-950/30">
+              <p className="text-xs text-emerald-300">Senha trocada. As sessões abertas dessa pessoa foram encerradas.</p>
+            </div>
+            <div>
+              <p className="text-xs text-[var(--text-secondary)] mb-1">Passe esta senha para <b>{usuario.name}</b>:</p>
+              <div className="flex items-center gap-2">
+                <code className="flex-1 px-3 py-2 rounded-lg bg-[var(--bg-input)] border border-[var(--border)] text-sm text-white font-mono">{senha}</code>
+                <button onClick={() => navigator.clipboard?.writeText(senha)}
+                  className="px-3 py-2 rounded-lg bg-[var(--bg-hover)] text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-input)]">Copiar</button>
+              </div>
+              <p className="text-[11px] text-[var(--text-muted)] mt-2">
+                Peça para ela entrar e trocar em Configurações → Usuários. Esta janela é o
+                único lugar onde a senha aparece — depois de fechar, nem você nem o sistema
+                conseguem lê-la de novo.
+              </p>
+            </div>
+            <button onClick={onPronto} className="btn-primary w-full text-sm">Fechar</button>
+          </div>
+        ) : (
+          <>
+            <div className="p-5 space-y-3">
+              <p className="text-xs text-[var(--text-secondary)]">
+                Acesso de <b className="text-white">{usuario.name}</b> ({usuario.loginName}) —
+                escritório <b className="text-white">{empresa.name}</b>.
+              </p>
+              <div>
+                <label className="text-xs text-[var(--text-secondary)] mb-1 block">Senha nova (mín. 8 caracteres)</label>
+                <div className="flex items-center gap-2">
+                  <input value={senha} onChange={e => { setSenha(e.target.value); setErro('') }} autoFocus
+                    placeholder="digite ou gere uma"
+                    className="flex-1 px-3 py-2 rounded-lg bg-[var(--bg-input)] border border-[var(--border)] text-sm text-white focus:border-brand-500 focus:outline-none" />
+                  <button onClick={gerar} className="px-3 py-2 rounded-lg bg-[var(--bg-hover)] text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-input)] whitespace-nowrap">Gerar</button>
+                </div>
+              </div>
+              <p className="text-[11px] text-[var(--text-muted)]">
+                Ao salvar, as sessões abertas dessa pessoa são encerradas — ela precisa
+                entrar de novo com a senha nova.
+              </p>
+            </div>
+            {erro && (
+              <div className="mx-5 mb-1 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/40">
+                <p className="text-xs text-red-300">{erro}</p>
+              </div>
+            )}
+            <div className="px-5 py-4 border-t border-[var(--border)] flex justify-end gap-2">
+              <button onClick={onClose} className="px-3 py-2 rounded-lg text-sm text-[var(--text-muted)] hover:text-white">Cancelar</button>
+              <button onClick={salvar} disabled={salvando} className="btn-primary text-sm disabled:opacity-60">{salvando ? 'Salvando…' : 'Trocar senha'}</button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ── Minha conta: a dona troca a própria senha ─────────────────────────────
+//
+// Antes não havia caminho nenhum: o Painel Master não tinha esta opção, e para
+// chegar em Configurações era preciso digitar /app no endereço do navegador.
+function ModalMinhaConta({ onClose }) {
+  const [atual, setAtual] = useState('')
+  const [nova, setNova] = useState('')
+  const [confirma, setConfirma] = useState('')
+  const [salvando, setSalvando] = useState(false)
+  const [erro, setErro] = useState('')
+  const [pronta, setPronta] = useState(false)
+
+  const salvar = async () => {
+    if (nova.length < 8) { setErro('A senha nova precisa ter pelo menos 8 caracteres.'); return }
+    if (nova !== confirma) { setErro('A confirmação não bate com a senha nova.'); return }
+    setSalvando(true); setErro('')
+    try {
+      await api.master.changeMyPassword({ senhaAtual: atual, novaSenha: nova })
+      setPronta(true)
+    } catch (e) {
+      setErro(e?.message ?? 'Não foi possível trocar a senha.')
+    } finally { setSalvando(false) }
+  }
+
+  const campo = 'w-full px-3 py-2 rounded-lg bg-[var(--bg-input)] border border-[var(--border)] text-sm text-white focus:border-brand-500 focus:outline-none'
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/70 overflow-y-auto py-8 px-4" onClick={onClose}>
+      <div className="card w-full max-w-md" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--border)]">
+          <p className="text-sm font-semibold text-white">Minha conta</p>
+          <button onClick={onClose} className="text-[var(--text-muted)] hover:text-white">✕</button>
+        </div>
+
+        {pronta ? (
+          <div className="p-5 space-y-3">
+            <div className="px-3 py-2.5 rounded-lg border border-emerald-600/40 bg-emerald-950/30">
+              <p className="text-xs text-emerald-300">
+                Senha trocada. As outras sessões suas foram encerradas — se você estiver
+                logada em outro computador, vai precisar entrar de novo.
+              </p>
+            </div>
+            <button onClick={onClose} className="btn-primary w-full text-sm">Fechar</button>
+          </div>
+        ) : (
+          <>
+            <div className="p-5 space-y-3">
+              <div>
+                <label className="text-xs text-[var(--text-secondary)] mb-1 block">Senha atual</label>
+                <input type="password" value={atual} onChange={e => { setAtual(e.target.value); setErro('') }} autoFocus className={campo} />
+              </div>
+              <div>
+                <label className="text-xs text-[var(--text-secondary)] mb-1 block">Senha nova (mín. 8 caracteres)</label>
+                <input type="password" value={nova} onChange={e => { setNova(e.target.value); setErro('') }} className={campo} />
+              </div>
+              <div>
+                <label className="text-xs text-[var(--text-secondary)] mb-1 block">Repita a senha nova</label>
+                <input type="password" value={confirma} onChange={e => { setConfirma(e.target.value); setErro('') }} className={campo} />
+              </div>
+              <p className="text-[11px] text-[var(--text-muted)]">
+                Pedimos a senha atual de propósito: um painel deixado aberto não pode virar
+                a chave da casa na mão de quem passar pelo computador.
+              </p>
+            </div>
+            {erro && (
+              <div className="mx-5 mb-1 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/40">
+                <p className="text-xs text-red-300">{erro}</p>
+              </div>
+            )}
+            <div className="px-5 py-4 border-t border-[var(--border)] flex justify-end gap-2">
+              <button onClick={onClose} className="px-3 py-2 rounded-lg text-sm text-[var(--text-muted)] hover:text-white">Cancelar</button>
+              <button onClick={salvar} disabled={salvando} className="btn-primary text-sm disabled:opacity-60">{salvando ? 'Salvando…' : 'Trocar senha'}</button>
+            </div>
+          </>
+        )}
+      </div>
     </div>
   )
 }

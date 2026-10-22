@@ -4,14 +4,21 @@ import { tenants, users } from '../db/schema.js'
 
 // Planos padrão — a admin pode renomear e mudar os limites na aba "Planos".
 // maxUsers = null  →  ilimitado.
+// price = mensalidade de tabela, em reais. null = ainda não definida — o
+// sistema não inventa preço, e o painel mostra "a definir" até alguém dizer.
 export const DEFAULT_PLANS = [
-  { key: 'starter',      name: 'Starter',      maxUsers: 2 },
-  { key: 'professional', name: 'Profissional', maxUsers: 5 },
-  { key: 'enterprise',   name: 'Enterprise',   maxUsers: null },
+  { key: 'starter',      name: 'Starter',      maxUsers: 2,    price: null },
+  { key: 'professional', name: 'Profissional', maxUsers: 5,    price: null },
+  { key: 'enterprise',   name: 'Enterprise',   maxUsers: null, price: null },
 ]
 
+// Sem ORDER BY, o Postgres não promete QUAL linha volta num limit(1). Com
+// mais de uma empresa master (acontece nos testes, e aconteceria numa
+// migração malfeita), ler e gravar podiam cair em linhas diferentes: os
+// planos salvos sumiam na leitura seguinte. Ordenar torna isso determinístico.
 async function masterTenant() {
-  const [m] = await db.select().from(tenants).where(eq(tenants.plan, 'master')).limit(1)
+  const [m] = await db.select().from(tenants).where(eq(tenants.plan, 'master'))
+    .orderBy(tenants.createdAt, tenants.id).limit(1)
   return m ?? null
 }
 
@@ -34,6 +41,9 @@ export async function savePlans(rawPlans) {
       maxUsers: (p.maxUsers === null || p.maxUsers === '' || p.maxUsers === undefined)
         ? null
         : Math.max(1, parseInt(p.maxUsers, 10) || 1),
+      price: (p.price === null || p.price === '' || p.price === undefined || !Number.isFinite(Number(p.price)))
+        ? null
+        : Math.max(0, Number(p.price)),
     }))
   const settings = { ...(m.settings ?? {}), plans }
   await db.update(tenants).set({ settings, updatedAt: new Date().toISOString() }).where(eq(tenants.id, m.id))

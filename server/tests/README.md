@@ -48,6 +48,7 @@ node server/tests/etapa3.consumo.mjs      # medidor de consumo
 node server/tests/etapa2b.syncServidor.mjs  # sync do DataJud no servidor + trava
 node server/tests/etapa5.admin.mjs        # porta /api/admin/* (precisa do ADMIN_API_TOKEN)
 node server/tests/etapa6.papeis.mjs       # perfis de acesso num vocabulario so
+node server/tests/etapa13.painelmaster.mjs  # acessos, senhas, bloqueio e cobranca no Painel Master
 
 # Este roda sozinho: nao precisa de servidor nem de banco, e so matematica.
 node server/tests/etapa7.calculos.mjs     # motor de calculos juridicos
@@ -89,7 +90,7 @@ for t in etapa0.resgate etapa2.datajud etapa8.sessao; do
 done
 ```
 
-Total atual: **487 asserções** em 14 suítes. Cada suíte sai com código 0 se passar.
+Total atual: **531 asserções** em 15 suítes. Cada suíte sai com código 0 se passar.
 
 | Suíte | Asserções | O que prova |
 |---|---:|---|
@@ -106,6 +107,7 @@ Total atual: **487 asserções** em 14 suítes. Cada suíte sai com código 0 se
 | `etapa9.avisos` | 26 | os avisos que ninguém desenhava |
 | `etapa10.vademecum` | 30 | busca e índice remissivo da legislação |
 | `etapa11.diario` | 30 | paginação do Diário: nada de parar na primeira página |
+| `etapa13.painelmaster` | 44 | acessos por escritório, troca de senha, interromper acesso, cobrança (pagante/teste) |
 | `etapa12.buracos` | 67 | lançamento sem vencimento, parcelamento agrupado, arquivo que existe de verdade, teses, assinatura ponta a ponta, migração no arranque |
 
 **Atenção:** os testes escrevem no banco apontado por `DATABASE_URL`. Rode
