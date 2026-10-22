@@ -334,7 +334,19 @@ async function searchTRF4ByOAB(oabNum, cookies = {}) {
 // Exports públicos
 // ─────────────────────────────────────────────────────────────────
 
-export async function createSession(tribunal, credentials) {
+// A sessão do tribunal É a pessoa: quem tem os cookies dela busca processos
+// como ela, sigilosos inclusive. Por isso toda sessão nasce com dono, e só o
+// dono a enxerga ou usa.
+//
+// Antes não era assim. `listSessions()` devolvia TODAS as sessões do servidor,
+// com o sessionId, para qualquer usuário autenticado — de qualquer escritório.
+// Bastava chamar a rota, copiar o id e consultar o tribunal com a credencial
+// de outro advogado. Isolamento entre escritórios é a regra que não se quebra.
+const mesmoDono = (s, dono) =>
+  !!s && !!dono && s.tenantId === dono.tenantId && s.userId === dono.userId
+
+export async function createSession(tribunal, credentials, dono) {
+  if (!dono?.tenantId || !dono?.userId) throw new Error('Sessão sem dono identificado.')
   const id = generateId()
   let cookies = {}
 
@@ -351,15 +363,32 @@ export async function createSession(tribunal, credentials) {
   SESSIONS.set(id, {
     tribunal,
     cookies,
+    tenantId: dono.tenantId,
+    userId: dono.userId,
     expiresAt: Date.now() + 4 * 60 * 60 * 1000, // 4h
   })
 
   return id
 }
 
-export async function getProcessesByOAB(tribunal, oabNum, oabUF, sessionId) {
+// Quais cookies valem para esta busca. Fica separado porque é a regra que
+// decide se a consulta vai com a identidade de alguém ou anônima — e é o que
+// os testes precisam exercitar sem entrar em tribunal nenhum.
+//
+// Sessão de outra pessoa não vale: a busca segue SEM credencial (pública), em
+// vez de usar a identidade de quem não autorizou.
+export function cookiesDaSessao(tribunal, sessionId, dono) {
   const session = sessionId ? SESSIONS.get(sessionId) : null
-  const cookies = session?.tribunal === tribunal ? session.cookies : {}
+  return (session?.tribunal === tribunal && mesmoDono(session, dono)) ? session.cookies : {}
+}
+
+// O cofre de sessões, exposto para os testes conseguirem montar um cenário
+// sem credencial de tribunal de verdade. Não é alcançável por HTTP: quem
+// consegue importar este módulo já roda dentro do servidor.
+export const __sessoes = SESSIONS
+
+export async function getProcessesByOAB(tribunal, oabNum, oabUF, sessionId, dono) {
+  const cookies = cookiesDaSessao(tribunal, sessionId, dono)
 
   if (tribunal === 'tjrs') return searchTJRSByOAB(oabNum, oabUF, cookies)
   if (tribunal === 'trt4') return searchTRT4ByOAB(oabNum, cookies)
@@ -368,16 +397,20 @@ export async function getProcessesByOAB(tribunal, oabNum, oabUF, sessionId) {
   throw new Error(`Tribunal não suportado: ${tribunal}`)
 }
 
-export function listSessions() {
+export function listSessions(dono) {
   const now = Date.now()
   const result = {}
   for (const [id, s] of SESSIONS) {
     if (s.expiresAt < now) { SESSIONS.delete(id); continue }
+    if (!mesmoDono(s, dono)) continue
     result[s.tribunal] = { sessionId: id, expiresAt: new Date(s.expiresAt).toISOString() }
   }
   return result
 }
 
-export function logout(sessionId) {
+export function logout(sessionId, dono) {
+  const s = SESSIONS.get(sessionId)
+  if (!mesmoDono(s, dono)) return false   // derrubar sessão alheia também não
   SESSIONS.delete(sessionId)
+  return true
 }
