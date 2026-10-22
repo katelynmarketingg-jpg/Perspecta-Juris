@@ -29,6 +29,46 @@ function mergeCookies(base, incoming) {
   return { ...base, ...incoming }
 }
 
+// ── Entrou ou não entrou? ─────────────────────────────────────────
+//
+// A checagem antiga procurava duas frases de erro específicas ("senha
+// incorreta", "Usuário ou senha") e, fora isso, aceitava qualquer cookie de
+// sessão como prova de que entrou. Dois problemas:
+//
+//  - o cookie de sessão já vem no primeiro GET, ANTES de qualquer senha. Ele
+//    não prova nada;
+//  - qualquer outra redação de erro — ou um captcha — passava como sucesso, e
+//    a tela dizia "Conectado" sem estar.
+//
+// Dizer "conectado" sem estar é pior do que falhar: a pessoa confia que os
+// sigilosos vieram, e eles não vieram.
+//
+// O sinal usado agora é o contrário, e vale para CAS, Keycloak e e-Proc:
+// depois de entrar, nenhum desses portais devolve um campo de senha. Se o
+// campo ainda está lá, não entrou.
+export function aindaNaTelaDeLogin(html) {
+  return /<input[^>]*type=["']password["']/i.test(String(html ?? ''))
+}
+
+// Captcha e segundo fator não dão para resolver daqui. Melhor dizer isso do
+// que devolver "verifique CPF e senha", que manda a pessoa digitar de novo
+// uma senha que está certa.
+export function pedeVerificacaoHumana(html) {
+  const t = String(html ?? '')
+  return /captcha|recaptcha|hcaptcha|g-recaptcha|segundo fator|dois fatores|duas etapas|token de acesso|certificado digital/i.test(t)
+}
+
+export function conferirEntrada(tribunal, html) {
+  if (pedeVerificacaoHumana(html)) {
+    throw new Error(
+      `O portal do ${tribunal} pediu verificação humana (captcha, segundo fator ou certificado digital). ` +
+      'Esse passo não tem como ser feito pelo sistema — entre direto no portal.')
+  }
+  if (aindaNaTelaDeLogin(html)) {
+    throw new Error(`Entrada no ${tribunal} recusada: o portal devolveu a tela de login de novo. Confira o CPF e a senha.`)
+  }
+}
+
 // ── HTML helpers ──────────────────────────────────────────────────
 function extractAttr(html, tag, attr, id = '') {
   const idPart = id ? `[^>]*id=["']${id}["'][^>]*` : '[^>]*'
@@ -107,13 +147,7 @@ async function loginTJRS(cpf, password) {
   const cookies2 = mergeCookies(cookies1, parseCookies(r2))
   const html2 = await r2.text()
 
-  // Verifica se logou (deve redirecionar para o portal)
-  const success = !html2.includes('senha incorreta') && !html2.includes('Usuário ou senha') && Object.keys(cookies2).some(k => k.toLowerCase().includes('session') || k.toLowerCase().includes('jsession') || k.toLowerCase().includes('sso'))
-
-  if (!success) {
-    throw new Error('Login TJRS falhou. Verifique CPF e senha.')
-  }
-
+  conferirEntrada('TJRS (e-SAJ)', html2)
   return cookies2
 }
 
@@ -197,10 +231,7 @@ async function loginTRT4(cpf, password) {
   const cookies2 = mergeCookies(cookies1, parseCookies(r2))
   const html2 = await r2.text()
 
-  if (html2.includes('Invalid username') || html2.includes('Credenciais inválidas')) {
-    throw new Error('Login TRT-4 falhou. Verifique CPF e senha.')
-  }
-
+  conferirEntrada('TRT-4 (PJe)', html2)
   return cookies2
 }
 
@@ -284,10 +315,7 @@ async function loginTRF4(cpf, password) {
   const cookies2 = mergeCookies(cookies1, parseCookies(r2))
   const html2 = await r2.text()
 
-  if (html2.includes('Usuário ou senha inválidos') || html2.includes('login.php')) {
-    throw new Error('Login TRF-4 falhou. Verifique CPF e senha.')
-  }
-
+  conferirEntrada('TRF-4 (e-Proc)', html2)
   return cookies2
 }
 
@@ -334,7 +362,19 @@ async function searchTRF4ByOAB(oabNum, cookies = {}) {
 // Exports públicos
 // ─────────────────────────────────────────────────────────────────
 
-export async function createSession(tribunal, credentials) {
+// A sessão do tribunal É a pessoa: quem tem os cookies dela busca processos
+// como ela, sigilosos inclusive. Por isso toda sessão nasce com dono, e só o
+// dono a enxerga ou usa.
+//
+// Antes não era assim. `listSessions()` devolvia TODAS as sessões do servidor,
+// com o sessionId, para qualquer usuário autenticado — de qualquer escritório.
+// Bastava chamar a rota, copiar o id e consultar o tribunal com a credencial
+// de outro advogado. Isolamento entre escritórios é a regra que não se quebra.
+const mesmoDono = (s, dono) =>
+  !!s && !!dono && s.tenantId === dono.tenantId && s.userId === dono.userId
+
+export async function createSession(tribunal, credentials, dono) {
+  if (!dono?.tenantId || !dono?.userId) throw new Error('Sessão sem dono identificado.')
   const id = generateId()
   let cookies = {}
 
@@ -351,15 +391,32 @@ export async function createSession(tribunal, credentials) {
   SESSIONS.set(id, {
     tribunal,
     cookies,
+    tenantId: dono.tenantId,
+    userId: dono.userId,
     expiresAt: Date.now() + 4 * 60 * 60 * 1000, // 4h
   })
 
   return id
 }
 
-export async function getProcessesByOAB(tribunal, oabNum, oabUF, sessionId) {
+// Quais cookies valem para esta busca. Fica separado porque é a regra que
+// decide se a consulta vai com a identidade de alguém ou anônima — e é o que
+// os testes precisam exercitar sem entrar em tribunal nenhum.
+//
+// Sessão de outra pessoa não vale: a busca segue SEM credencial (pública), em
+// vez de usar a identidade de quem não autorizou.
+export function cookiesDaSessao(tribunal, sessionId, dono) {
   const session = sessionId ? SESSIONS.get(sessionId) : null
-  const cookies = session?.tribunal === tribunal ? session.cookies : {}
+  return (session?.tribunal === tribunal && mesmoDono(session, dono)) ? session.cookies : {}
+}
+
+// O cofre de sessões, exposto para os testes conseguirem montar um cenário
+// sem credencial de tribunal de verdade. Não é alcançável por HTTP: quem
+// consegue importar este módulo já roda dentro do servidor.
+export const __sessoes = SESSIONS
+
+export async function getProcessesByOAB(tribunal, oabNum, oabUF, sessionId, dono) {
+  const cookies = cookiesDaSessao(tribunal, sessionId, dono)
 
   if (tribunal === 'tjrs') return searchTJRSByOAB(oabNum, oabUF, cookies)
   if (tribunal === 'trt4') return searchTRT4ByOAB(oabNum, cookies)
@@ -368,16 +425,20 @@ export async function getProcessesByOAB(tribunal, oabNum, oabUF, sessionId) {
   throw new Error(`Tribunal não suportado: ${tribunal}`)
 }
 
-export function listSessions() {
+export function listSessions(dono) {
   const now = Date.now()
   const result = {}
   for (const [id, s] of SESSIONS) {
     if (s.expiresAt < now) { SESSIONS.delete(id); continue }
+    if (!mesmoDono(s, dono)) continue
     result[s.tribunal] = { sessionId: id, expiresAt: new Date(s.expiresAt).toISOString() }
   }
   return result
 }
 
-export function logout(sessionId) {
+export function logout(sessionId, dono) {
+  const s = SESSIONS.get(sessionId)
+  if (!mesmoDono(s, dono)) return false   // derrubar sessão alheia também não
   SESSIONS.delete(sessionId)
+  return true
 }

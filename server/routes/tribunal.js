@@ -30,7 +30,9 @@ export default async function tribunalRoutes(app) {
   }, async (req, reply) => {
     const { tribunal, cpf, password } = req.body
     try {
-      const sessionId = await createSession(tribunal, { cpf, password })
+      // A sessão nasce com dono: só quem a criou pode usá-la ou vê-la.
+      const dono = { tenantId: req.user.tenantId, userId: req.user.userId }
+      const sessionId = await createSession(tribunal, { cpf, password }, dono)
       reply.send({ ok: true, sessionId, tribunal })
     } catch (err) {
       reply.code(400).send({ ok: false, message: err.message })
@@ -56,7 +58,8 @@ export default async function tribunalRoutes(app) {
   }, async (req, reply) => {
     const { tribunal, oabNum, oabUF = 'RS', sessionId } = req.query
     try {
-      const processes = await getProcessesByOAB(tribunal, oabNum, oabUF, sessionId)
+      const dono = { tenantId: req.user.tenantId, userId: req.user.userId }
+      const processes = await getProcessesByOAB(tribunal, oabNum, oabUF, sessionId, dono)
       reply.send({ ok: true, tribunal, total: processes.length, processes })
     } catch (err) {
       reply.code(400).send({ ok: false, message: err.message })
@@ -68,7 +71,7 @@ export default async function tribunalRoutes(app) {
   app.get('/sessions', {
     preHandler: [app.authenticate],
   }, async (req, reply) => {
-    reply.send({ ok: true, sessions: listSessions() })
+    reply.send({ ok: true, sessions: listSessions({ tenantId: req.user.tenantId, userId: req.user.userId }) })
   })
 
   // DELETE /api/tribunal/sessions/:id
@@ -83,7 +86,8 @@ export default async function tribunalRoutes(app) {
       },
     },
   }, async (req, reply) => {
-    logout(req.params.id)
+    const ok = logout(req.params.id, { tenantId: req.user.tenantId, userId: req.user.userId })
+    if (!ok) return reply.code(404).send({ ok: false, message: 'Sessão não encontrada.' })
     reply.send({ ok: true })
   })
 }

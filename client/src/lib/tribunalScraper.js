@@ -32,22 +32,23 @@ export function getStoredSession(tribunal) {
   return getSessions()[tribunal] ?? null
 }
 
+// ─────────────────────────────────────────────────────────────────
+// Estas quatro funções chamavam `fetch` na mão e liam o token de
+// `localStorage.pj_token` — chave que NÃO existe: o token fica em
+// `pj_access_token`. Ou seja, iam sempre sem credencial, e o servidor
+// respondia 401 antes de qualquer coisa. Nenhuma versão desta tela chegou a
+// entrar em tribunal nenhum.
+//
+// Agora passam pelo `api`, que é quem sabe o nome da chave, renova o token
+// vencido e traz a mensagem de erro do servidor em vez de um 401 mudo.
+// ─────────────────────────────────────────────────────────────────
+
 // Login no portal do tribunal via backend (scraping autenticado)
 export async function tribunalLogin(tribunal, cpf, password) {
-  const res = await fetch('/api/tribunal/login', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${localStorage.getItem('pj_token') ?? ''}`,
-    },
-    body: JSON.stringify({ tribunal, cpf, password }),
-  })
-
-  const json = await res.json()
-  if (!res.ok || !json.ok) {
-    throw new Error(json.message ?? 'Login falhou')
+  const json = await api.post('/api/tribunal/login', { tribunal, cpf, password })
+  if (!json?.ok || !json.sessionId) {
+    throw new Error(json?.message ?? 'O tribunal não confirmou a entrada.')
   }
-
   saveSession(tribunal, json.sessionId)
   return json.sessionId
 }
@@ -58,20 +59,16 @@ export async function fetchTribunalProcesses(tribunal, oabNum, oabUF = 'RS') {
   const params = new URLSearchParams({ tribunal, oabNum, oabUF })
   if (stored?.sessionId) params.set('sessionId', stored.sessionId)
 
-  const res = await fetch(`/api/tribunal/processes?${params}`, {
-    headers: {
-      Authorization: `Bearer ${localStorage.getItem('pj_token') ?? ''}`,
-    },
-  })
-
-  const json = await res.json()
-  if (!res.ok || !json.ok) {
-    // Se sessão expirou, limpa localmente
-    if (res.status === 401 || json.message?.includes('sessão')) {
-      clearSession(tribunal)
-    }
-    throw new Error(json.message ?? 'Erro ao buscar processos')
+  let json
+  try {
+    json = await api.get(`/api/tribunal/processes?${params}`)
+  } catch (e) {
+    // Sessão vencida do lado do tribunal: limpa o cache local para a tela
+    // voltar a pedir a senha, em vez de insistir com uma sessão morta.
+    if (e?.status === 401 || /sess/i.test(e?.message ?? '')) clearSession(tribunal)
+    throw new Error(e?.message ?? 'Erro ao buscar processos no tribunal.')
   }
+  if (!json?.ok) throw new Error(json?.message ?? 'Erro ao buscar processos no tribunal.')
 
   return json.processes ?? []
 }
@@ -82,14 +79,9 @@ export async function tribunalLogout(tribunal) {
   if (!stored?.sessionId) return
 
   try {
-    await fetch(`/api/tribunal/sessions/${stored.sessionId}`, {
-      method: 'DELETE',
-      headers: {
-        Authorization: `Bearer ${localStorage.getItem('pj_token') ?? ''}`,
-      },
-    })
+    await api.delete(`/api/tribunal/sessions/${stored.sessionId}`)
   } catch {
-    // ignora erros de rede no logout
+    // Sessão já pode ter vencido no servidor. O que importa é soltar daqui.
   }
 
   clearSession(tribunal)
@@ -98,14 +90,8 @@ export async function tribunalLogout(tribunal) {
 // Lista sessões ativas (consulta o backend)
 export async function listTribunalSessions() {
   try {
-    const res = await fetch('/api/tribunal/sessions', {
-      headers: {
-        Authorization: `Bearer ${localStorage.getItem('pj_token') ?? ''}`,
-      },
-    })
-    if (!res.ok) return {}
-    const json = await res.json()
-    return json.sessions ?? {}
+    const json = await api.get('/api/tribunal/sessions')
+    return json?.sessions ?? {}
   } catch {
     return {}
   }
