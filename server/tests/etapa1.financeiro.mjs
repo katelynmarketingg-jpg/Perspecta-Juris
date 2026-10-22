@@ -60,14 +60,23 @@ if (Math.abs(soma - 1000) < 0.001) ok(`centavos fecham: soma = ${soma.toFixed(2)
 else bad(`soma das parcelas = ${soma} (esperava 1000.00)`)
 
 console.log('\n── 2. Lote é atômico: uma parcela inválida não deixa meio parcelamento ──')
+// A parcela inválida aqui era uma SEM VENCIMENTO, porque due_date era NOT NULL
+// no banco. Só que a tela de lançamentos sempre permitiu deixar o vencimento em
+// branco (ela mesma escreve "Sem vencimento"), e o NOT NULL fazia esse
+// lançamento virar 500 engolido pela interface: sumia sem avisar. O vencimento
+// passou a ser opcional, e a garantia de atomicidade passou a vir de uma
+// validação explícita na rota — que é onde ela devia estar desde o começo.
 const antes = (await db.select().from(financialEntries).where(eq(financialEntries.tenantId, TID))).length
 const r = await fetch(`${BASE}/api/financial/entries/lote`, {
   method: 'POST', headers: H,
   body: JSON.stringify({ entries: [
     { clientId: cliente.id, type: 'receivable', description: 'ok', amount: 10, dueDate: '2026-09-01', category: 'x' },
-    { clientId: cliente.id, type: 'receivable', description: 'sem dueDate (NOT NULL)', amount: 10, category: 'x' },
+    { clientId: cliente.id, type: 'receivable', description: '   ', amount: 10, dueDate: '2026-09-02', category: 'x' },
   ] }),
 })
+const corpoErro = await r.clone().json().catch(() => null)
+if (/Parcela 2 de 2/.test(corpoErro?.message ?? '')) ok('e a mensagem diz QUAL parcela está errada')
+else bad(`mensagem do lote inválido: ${corpoErro?.message}`)
 const depois = (await db.select().from(financialEntries).where(eq(financialEntries.tenantId, TID))).length
 if (r.status >= 400) ok(`lote inválido recusado (HTTP ${r.status})`)
 else bad(`lote inválido aceito com ${r.status}`)

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import api from '../../lib/api'
+import { useUiStore } from '../../stores/uiStore'
 import { IconPlus, IconTrendingUp, IconTrendingDown, IconCheck, IconClock } from '../../components/ui'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts'
 import { format } from 'date-fns'
@@ -28,6 +29,7 @@ const CustomTooltip = ({ active, payload, label }) => {
 }
 
 export default function FinancialPage() {
+  const { showToast } = useUiStore()
   const [tab, setTab] = useState('receivable')
   const [entries, setEntries] = useState([])
   const [erroCarga, setErroCarga] = useState(false)
@@ -70,9 +72,15 @@ export default function FinancialPage() {
   const totalPaid       = income.filter(e => e.status === 'paid').reduce((s, e) => s + e.amount, 0)
   const totalSpent      = expenses.filter(e => e.status === 'paid').reduce((s, e) => s + e.amount, 0)
 
+  // Marcava "pago" na tela e engolia a falha do servidor. Dinheiro marcado
+  // como recebido sem estar recebido é o pior tipo de erro silencioso.
   const markPaid = async (id) => {
+    const antes = entries
     setEntries(prev => prev.map(e => e.id === id ? { ...e, status: 'paid' } : e))
-    try { await api.financial.pay(id) } catch {}
+    try { await api.financial.pay(id) } catch (err) {
+      setEntries(antes)
+      showToast(`O lançamento NÃO foi marcado como pago: ${err?.message ?? 'falha de conexão'}.`, 'error')
+    }
   }
 
   const EntryRow = ({ e }) => (
@@ -234,12 +242,18 @@ const FREQS = {
 function NovoLancamentoModal({ clients, onClose, onSaved }) {
   const [form, setForm] = useState({ type: 'receivable', description: '', amount: '', dueDate: '', clientId: '', status: 'pending', freq: 'unica', repeticoes: 12 })
   const [saving, setSaving] = useState(false)
+  const [erro, setErro] = useState('')
   const set = (k) => (e) => setForm(d => ({ ...d, [k]: e.target.value }))
   const recorrente = form.freq !== 'unica'
 
+  // Duas coisas erradas aqui antes:
+  //   1. a falha era engolida e a janela fechava chamando onSaved() — ela via
+  //      a lista recarregar sem o lançamento e achava que tinha salvo;
+  //   2. as parcelas iam uma por uma: falhando na 30ª de 60, metade ficava
+  //      criada e ninguém era avisado. Agora vão num lote só, tudo ou nada.
   const salvar = async () => {
     if (!form.description.trim() || !form.amount) return
-    setSaving(true)
+    setSaving(true); setErro('')
     const base = {
       type: form.type, description: form.description, status: form.status,
       amount: parseFloat(String(form.amount).replace(',', '.')) || 0,
@@ -253,20 +267,29 @@ function NovoLancamentoModal({ clients, onClose, onSaved }) {
         const n = Math.min(60, Math.max(1, parseInt(form.repeticoes) || 1))
         const grupo = 'rec_' + Math.random().toString(36).slice(2, 8)
         const start = form.dueDate ? new Date(form.dueDate + 'T00:00:00') : new Date()
-        for (let i = 0; i < n; i++) {
+        const lote = Array.from({ length: n }, (_, i) => {
           const d = new Date(start)
           if (inc.dias)  d.setDate(d.getDate() + inc.dias * i)
           if (inc.meses) d.setMonth(d.getMonth() + inc.meses * i)
-          await api.financial.create({
+          return {
             ...base, description: `${form.description} (${i + 1}/${n})`,
             dueDate: d.toISOString().slice(0, 10),
-            recorrenciaId: grupo, frequencia: form.freq,
-          })
-        }
+            // Antes ia como recorrenciaId/frequencia — nomes que o servidor não
+            // conhece, e o Drizzle descarta chave desconhecida em silêncio. As
+            // parcelas nasciam sem grupo, e "excluir o parcelamento inteiro"
+            // nunca funcionava para elas.
+            groupId: grupo, recurrence: form.freq,
+            installmentOf: i + 1, installmentTotal: n,
+          }
+        })
+        await api.financial.createLote(lote)
       }
-    } catch {}
-    setSaving(false)
-    onSaved()
+      setSaving(false)
+      onSaved()
+    } catch (err) {
+      setSaving(false)
+      setErro(err?.message ?? 'Não foi possível salvar. Verifique a conexão e tente de novo.')
+    }
   }
   const inputCls = 'w-full px-3 py-2 rounded-lg bg-[var(--bg-input)] border border-[var(--border)] text-sm text-white focus:border-brand-500 focus:outline-none'
   const lbl = 'text-xs font-medium text-[var(--text-secondary)] mb-1 block'
@@ -326,6 +349,11 @@ function NovoLancamentoModal({ clients, onClose, onSaved }) {
           </div>
           {recorrente && <p className="text-[11px] text-[var(--text-muted)]">Serão criados <b>{Math.min(60, Math.max(1, parseInt(form.repeticoes) || 1))}</b> lançamentos ({FREQS[form.freq].label.toLowerCase()}), a partir do vencimento.</p>}
         </div>
+        {erro && (
+          <div className="mx-5 mb-1 px-3 py-2 rounded-lg border border-red-500/40 bg-red-500/10">
+            <p className="text-xs text-red-300"><b>O lançamento NÃO foi salvo.</b> {erro}</p>
+          </div>
+        )}
         <div className="px-5 py-3 border-t border-[var(--border)] flex justify-end gap-2">
           <button onClick={onClose} className="px-3 py-2 rounded-lg text-sm text-[var(--text-muted)] hover:text-white">Cancelar</button>
           <button onClick={salvar} disabled={saving || !form.description.trim() || !form.amount} className="btn-primary text-sm disabled:opacity-60">{saving ? 'Salvando…' : 'Salvar'}</button>

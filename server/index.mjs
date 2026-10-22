@@ -110,6 +110,7 @@ const { default: dashboardRoutes } = await import('./routes/dashboard.js')
 const { default: tribunalRoutes }  = await import('./routes/tribunal.js')
 const { default: signatureRoutes } = await import('./routes/signatures.js')
 const { default: diarioRoutes }    = await import('./routes/diario.js')
+const { default: thesesRoutes }    = await import('./routes/theses.js')
 const { default: masterRoutes }    = await import('./routes/master.js')
 const { default: auditRoutes }     = await import('./routes/audit.js')
 const { default: reportRoutes }    = await import('./routes/reports.js')
@@ -128,6 +129,7 @@ await app.register(dashboardRoutes, { prefix: '/api/dashboard' })
 await app.register(tribunalRoutes,  { prefix: '/api/tribunal' })
 await app.register(signatureRoutes, { prefix: '/api/signatures' })
 await app.register(diarioRoutes,    { prefix: '/api/diario' })
+await app.register(thesesRoutes,    { prefix: '/api/theses' })
 await app.register(masterRoutes,    { prefix: '/api/master' })
 await app.register(auditRoutes,     { prefix: '/api/audit' })
 await app.register(reportRoutes,    { prefix: '/api/reports' })
@@ -187,6 +189,11 @@ const PORT = parseInt(process.env.PORT ?? '8788')
 const HOST = process.env.HOST ?? '0.0.0.0'
 
 try {
+  // Antes de abrir a porta: o banco tem de estar na versão que este código
+  // espera. O deploy não rodava migração nenhuma.
+  const { migrarNoArranque } = await import('./db/autoMigrate.js')
+  await migrarNoArranque(app.log)
+
   await app.listen({ port: PORT, host: HOST })
   console.log(`\n🚀 Perspecta Juris rodando em http://localhost:${PORT}`)
 

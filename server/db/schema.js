@@ -235,7 +235,11 @@ export const financialEntries = pgTable('financial_entries', {
   description:     text('description').notNull(),
   amount:          real('amount').notNull(),
   status:          text('status').notNull().default('pending'),
-  dueDate:         text('due_date').notNull(),
+  // A tela de lançamentos nunca exigiu vencimento — ela própria mostra
+  // "Sem vencimento" quando o campo está vazio. O NOT NULL aqui fazia o
+  // POST estourar 500, e o erro era engolido na tela: o lançamento
+  // simplesmente não existia, sem aviso nenhum.
+  dueDate:         text('due_date'),
   paidDate:        text('paid_date'),
   paidAmount:      real('paid_amount'),
   processId:       text('process_id').references(() => processes.id),
@@ -285,6 +289,9 @@ export const documents = pgTable('documents', {
   version:      integer('version').notNull().default(1),
   parentDocId:  text('parent_doc_id'),
   isTemplate:   boolean('is_template').notNull().default(false),
+  // Pasta escolhida na aba Documentos do cliente (root, assinados,
+  // gerados ou uma criada por ela). Ficava só no navegador.
+  folder:       text('folder'),
   tags:         jsonb('tags').notNull().default([]),
   uploadedBy:   text('uploaded_by').references(() => users.id),
   createdAt:    text('created_at').notNull(),

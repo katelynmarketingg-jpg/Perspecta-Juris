@@ -5,6 +5,20 @@
 // ─────────────────────────────────────────────────────────────────
 import api from './api'
 import { tkey } from './tenant'
+import { useUiStore } from '../stores/uiStore'
+
+// Estas gravações eram todas `.catch(() => {})`. O cache local ficava com o
+// valor novo, o banco com o antigo, e ela só descobria ao abrir o sistema em
+// outro computador e ver a configuração velha de volta. Agora avisa.
+function avisarFalha(oque, err) {
+  const msg = err?.message ?? 'falha de conexão'
+  try {
+    useUiStore.getState().showToast(
+      `${oque} foi aplicado nesta tela, mas NÃO foi salvo no servidor (${msg}). ` +
+      'Em outro computador vai aparecer o valor antigo — tente de novo.', 'error', 8000)
+  } catch { /* sem interface (teste/ssr): o console basta */ }
+  console.warn('[config] não salvou no servidor:', oque, msg)
+}
 
 const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)) } catch { /* quota */ } }
 const lsGet = (k, fb) => { try { return JSON.parse(localStorage.getItem(k) ?? 'null') ?? fb } catch { return fb } }
@@ -27,7 +41,7 @@ export function setCfg(base, value) {
   CFG_TEXT_KEYS.forEach(k => {
     try { const v = localStorage.getItem(tkey(k)); if (v !== null) payload[k] = v } catch { /* ignore */ }
   })
-  api.settings.saveConfig(payload).catch(() => {})
+  api.settings.saveConfig(payload).catch(err => avisarFalha('A configuração', err))
 }
 
 // Grava uma chave de configuração no cache do escritório E no banco.
@@ -35,7 +49,7 @@ export function saveConfigKey(baseKey, value) {
   lsSet(tkey(baseKey), value)
   const payload = {}
   CONFIG_KEYS.forEach(k => { payload[k] = lsGet(tkey(k), null) })
-  api.settings.saveConfig(payload).catch(() => {})
+  api.settings.saveConfig(payload).catch(err => avisarFalha('A configuração', err))
 }
 
 // Baixa office + modelos do banco e grava no cache local do tenant atual.
@@ -59,10 +73,10 @@ export async function hydrateTenantData() {
 
 // Salva a lista de modelos no banco (write-through). Fire-and-forget.
 export function pushTemplates(list) {
-  api.settings.saveTemplates(Array.isArray(list) ? list : []).catch(() => {})
+  api.settings.saveTemplates(Array.isArray(list) ? list : []).catch(err => avisarFalha('O modelo', err))
 }
 
 // Salva os dados do escritório no banco (write-through). Fire-and-forget.
 export function pushOffice(data) {
-  api.settings.saveOffice(data ?? {}).catch(() => {})
+  api.settings.saveOffice(data ?? {}).catch(err => avisarFalha('Os dados do escritório', err))
 }

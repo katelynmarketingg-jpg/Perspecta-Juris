@@ -43,6 +43,13 @@
       "when": 1788568962960,
       "tag": "0005_white_ironclad",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1792628980873,
+      "tag": "0006_amazing_captain_flint",
+      "breakpoints": true
     }
   ]
 }

@@ -637,7 +637,7 @@ export const CALCULADORAS = [
   // ─────────────────────── TRABALHISTA ───────────────────────
   {
     id: 'verbas-rescisorias', ramo: 'trabalhista', titulo: 'Verbas rescisórias',
-    descricao: 'Cálculo completo do acerto: saldo, aviso, férias, 13º, FGTS e multa.',
+    descricao: 'Do bruto ao líquido: saldo, aviso, férias, 13º, FGTS, multas e os descontos de INSS e IRRF.',
     casos: 'Demissão sem justa causa, pedido de demissão, rescisão indireta, término de contrato.',
     baseLegal: 'CLT arts. 477, 487, 142, 146; Constituição art. 7º; Lei 8.036/90 (FGTS).',
     campos: [
@@ -652,7 +652,10 @@ export const CALCULADORAS = [
       ]},
       { name: 'diasTrabMes', label: 'Dias trabalhados no mês da saída', type: 'number', default: '30' },
       { name: 'feriasVencidas', label: 'Tem férias vencidas?', type: 'select', default: 'nao', options: [{ value: 'nao', label: 'Não' }, { value: 'sim', label: 'Sim' }] },
-      { name: 'fgtsDepositado', label: 'FGTS já depositado (saldo)', type: 'currency', help: 'Para cálculo da multa de 40%.' },
+      { name: 'fgtsDepositado', label: 'FGTS já depositado (saldo)', type: 'currency', help: 'Para a multa de 40%. Deixe vazio para estimar por 8% × salário × meses.' },
+      { name: 'dependentes', label: 'Dependentes (para o IRRF)', type: 'number', default: '0' },
+      { name: 'pagamento', label: 'Data em que as verbas foram pagas', type: 'date', help: 'Vazio = ainda não pagou. Serve para a multa do art. 477, §8º.' },
+      { name: 'outrosDescontos', label: 'Outros descontos (R$)', type: 'currency', help: 'Adiantamento, vale, pensão, contribuições.' },
     ],
     compute: (v) => {
       const sal = num(v.salario)
@@ -705,10 +708,52 @@ export const CALCULADORAS = [
       if (motivo === 'justa') memoria.push('Justa causa: sem aviso, 13º/férias proporcionais e multa.')
       if (motivo === 'pedido') memoria.push('Pedido de demissão: sem aviso indenizado (pode ser descontado) e sem multa de 40%.')
 
+      // ── Multa do art. 477, §8º ────────────────────────────────────
+      // Prazo de 10 dias corridos da saída. É de direito material: começa no
+      // dia seguinte mesmo sendo domingo; só o vencimento prorroga (art. 132 CC).
+      let multa477 = 0
+      if (motivo !== 'justa' && v.saida) {
+        const limite = calcularPrazo(v.saida, 10, { uteis: false, recesso: false, inicioNoDiaUtil: false })
+        const atrasou = !v.pagamento || emUTCPrazo(v.pagamento) > emUTCPrazo(limite.vencimento)
+        if (atrasou) {
+          multa477 = sal
+          linhas.push({ label: 'Multa do art. 477, §8º (1 salário)', value: brl(multa477) })
+          memoria.push(`Acerto vencia em ${fmtPrazo(limite.vencimento)} (10 dias da saída). ${v.pagamento ? `Pago em ${fmtPrazo(v.pagamento)} — fora do prazo.` : 'Ainda não pago.'} Multa = ${brl(multa477)}`)
+        }
+      }
+
+      // ── Do bruto ao líquido ───────────────────────────────────────
+      // Não incidem INSS nem IRRF sobre férias indenizadas e seu 1/3, aviso
+      // indenizado, FGTS e multa de 40% (Súm. 688 STF; art. 28, §9º, Lei
+      // 8.212/91). Incidem sobre saldo de salário e 13º.
+      const tributavel = saldo + decimo
+      const isento = aviso + fp + fpTerco + fv + multa + multa477
+      const bruto = total + multa477
+
+      const inss = descontoINSS(sal)
+      const ir = descontoIRRF(tributavel - inss.valor, num(v.dependentes))
+      const outros = num(v.outrosDescontos)
+      const liquido = bruto - inss.valor - ir.valor - outros
+
+      linhas.push({ label: '── TOTAL BRUTO', value: brl(bruto) })
+      linhas.push({ label: `(−) INSS${inss.tetoAtingido ? ' (no teto)' : ''}`, value: '- ' + brl(inss.valor) })
+      if (ir.aplicavel && ir.valor) linhas.push({ label: '(−) IRRF', value: '- ' + brl(ir.valor) })
+      if (outros) linhas.push({ label: '(−) Outros descontos', value: '- ' + brl(outros) })
+      linhas.push({ label: '── LÍQUIDO A RECEBER', value: brl(liquido) })
+
+      memoria.push(
+        `Com incidência (saldo + 13º): ${brl(tributavel)} · Sem incidência: ${brl(isento)}`,
+        `INSS sobre ${brl(inss.base)} = ${brl(inss.valor)}`,
+        ir.aplicavel
+          ? `IRRF: base ${brl(ir.base)} → ${brl(ir.valor)}${ir.usouSimplificado ? ' (desconto simplificado)' : ` (${num(v.dependentes)} dependente(s))`}`
+          : '⚠️ IRRF não aplicado: tabela não cadastrada. O líquido está MAIOR que o real.',
+        `LÍQUIDO = ${brl(bruto)} − ${brl(inss.valor)} − ${brl(ir.valor)}${outros ? ` − ${brl(outros)}` : ''} = ${brl(liquido)}`,
+      )
+
       return {
-        headline: { label: 'Total rescisório (bruto)', value: brl(total) },
+        headline: { label: 'Líquido a receber', value: brl(liquido) },
         linhas, memoria,
-        criterios: [`Motivo: ${{sem_justa:'Sem justa causa',pedido:'Pedido de demissão',justa:'Justa causa',indireta:'Rescisão indireta'}[motivo]}`, `Tempo: ${anosCompletos} ano(s) completos`, `13º: ${meses13}/12 avos (ano civil) · Férias: ${mesesFerias}/12 avos (período aquisitivo)`, 'Não inclui INSS/IRRF nem horas extras/adicionais.', 'Não projeta o aviso-prévio indenizado sobre 13º e férias (art. 487, §1º, CLT) — some se o caso exigir.'],
+        criterios: [`Motivo: ${{sem_justa:'Sem justa causa',pedido:'Pedido de demissão',justa:'Justa causa',indireta:'Rescisão indireta'}[motivo]}`, `Tempo: ${anosCompletos} ano(s) completos`, `13º: ${meses13}/12 avos (ano civil) · Férias: ${mesesFerias}/12 avos (período aquisitivo)`, 'INSS e IRRF incidem só sobre saldo de salário e 13º. Férias indenizadas, 1/3, aviso indenizado, FGTS e multa de 40% são isentos.', 'Não inclui horas extras nem adicionais — use a Reclamatória trabalhista para somar tudo.', 'Não projeta o aviso-prévio indenizado sobre 13º e férias (art. 487, §1º, CLT) — some se o caso exigir.'],
       }
     },
   },
@@ -1673,7 +1718,383 @@ export const CALCULADORAS = [
       }
     },
   },
+
+  // ═══════════ CENÁRIOS COMPLETOS: os dados uma vez, tudo de uma vez ═══════════
+
+  {
+    id: 'reclamatoria-trabalhista', ramo: 'trabalhista', titulo: 'Reclamatória trabalhista (completa)',
+    descricao: 'Verbas + horas extras + DSR + adicionais + multas, com o total do pedido.',
+    casos: 'Montar o valor da causa de uma reclamação trabalhista inteira.',
+    baseLegal: 'CLT arts. 59, 71, 73, 192, 193, 457, 467, 477, 487; CF art. 7º; Lei 605/49 (Súm. 172 TST); Lei 8.036/90.',
+    campos: [
+      { name: 'salario', label: 'Último salário mensal', type: 'currency', required: true },
+      { name: 'meses', label: 'Meses do período reclamado', type: 'number', default: '12', required: true,
+        help: 'Normalmente os 5 anos anteriores à ação (art. 7º, XXIX, CF).' },
+      { name: 'horasExtrasMes', label: 'Horas extras por mês', type: 'number', default: '0' },
+      { name: 'adicionalHE', label: 'Adicional das extras (%)', type: 'percent', default: '50' },
+      { name: 'divisor', label: 'Divisor mensal', type: 'number', default: '220' },
+      { name: 'horasNoturnasMes', label: 'Horas noturnas por mês', type: 'number', default: '0' },
+      { name: 'insalubridade', label: 'Insalubridade', type: 'select', default: 'nao', options: [
+        { value: 'nao', label: 'Não' }, { value: '10', label: 'Grau mínimo (10%)' },
+        { value: '20', label: 'Grau médio (20%)' }, { value: '40', label: 'Grau máximo (40%)' },
+      ]},
+      { name: 'periculosidade', label: 'Periculosidade (30% do salário-base)', type: 'select', default: 'nao',
+        options: [{ value: 'nao', label: 'Não' }, { value: 'sim', label: 'Sim' }] },
+      { name: 'verbasRescisorias', label: 'Verbas rescisórias já apuradas (R$)', type: 'currency',
+        help: 'Traga o total bruto da calculadora de Verbas rescisórias.' },
+      { name: 'incontroversas', label: 'Verbas incontroversas não pagas (R$)', type: 'currency', help: 'Multa do art. 467.' },
+      { name: 'multa477', label: 'Houve atraso no acerto?', type: 'select', default: 'nao',
+        options: [{ value: 'nao', label: 'Não' }, { value: 'sim', label: 'Sim — 1 salário (art. 477, §8º)' }] },
+    ],
+    compute: (v) => {
+      const sal = num(v.salario), n = Math.max(0, num(v.meses))
+      const horaNormal = sal / Math.max(1, num(v.divisor))
+      const linhas = [], memoria = []
+
+      // Extras + DSR. As 4,33 semanas do mês dão ~5 repousos para 25 dias úteis.
+      const extrasMes = horaNormal * (1 + pct(v.adicionalHE)) * num(v.horasExtrasMes)
+      const dsrMes = extrasMes / 25 * 5
+      const extras = extrasMes * n, dsr = dsrMes * n
+      if (extras) {
+        linhas.push({ label: `Horas extras (${num(v.horasExtrasMes)}h/mês × ${n} meses)`, value: brl(extras) })
+        linhas.push({ label: 'DSR sobre as extras', value: brl(dsr) })
+        memoria.push(`Hora normal = ${brl(sal)} ÷ ${num(v.divisor)} = ${brl(horaNormal)}`)
+        memoria.push(`Extras/mês = ${brl(horaNormal)} × ${(1 + pct(v.adicionalHE)).toFixed(2)} × ${num(v.horasExtrasMes)} = ${brl(extrasMes)}`)
+        memoria.push(`DSR/mês = ${brl(extrasMes)} ÷ 25 × 5 = ${brl(dsrMes)} (Súm. 172 TST)`)
+      }
+
+      const noturnoMes = horaNormal * 0.20 * num(v.horasNoturnasMes)
+      const noturno = noturnoMes * n
+      if (noturno) {
+        linhas.push({ label: `Adicional noturno (${num(v.horasNoturnasMes)}h/mês)`, value: brl(noturno) })
+        memoria.push(`Noturno/mês = ${brl(horaNormal)} × 20% × ${num(v.horasNoturnasMes)} = ${brl(noturnoMes)}`)
+      }
+
+      // Insalubridade: base é o salário mínimo (Súm. Vinc. 4 STF, enquanto não
+      // houver norma coletiva ou decisão em contrário).
+      const insal = v.insalubridade !== 'nao' ? PARAMS.salarioMinimo * pct(v.insalubridade) * n : 0
+      if (insal) {
+        linhas.push({ label: `Insalubridade ${v.insalubridade}% (${n} meses)`, value: brl(insal) })
+        memoria.push(`Insalubridade = ${brl(PARAMS.salarioMinimo)} (mínimo) × ${v.insalubridade}% × ${n} = ${brl(insal)}`)
+      }
+      const peric = v.periculosidade === 'sim' ? sal * 0.30 * n : 0
+      if (peric) {
+        linhas.push({ label: `Periculosidade 30% (${n} meses)`, value: brl(peric) })
+        memoria.push(`Periculosidade = ${brl(sal)} × 30% × ${n} = ${brl(peric)}`)
+      }
+      if (insal && peric) memoria.push('⚠️ Insalubridade e periculosidade não se acumulam (art. 193, §2º CLT): escolha uma.')
+
+      // FGTS de 8% sobre tudo que é salarial, mais a multa de 40%.
+      const baseFgts = extras + dsr + noturno + insal + peric
+      const fgts = baseFgts * 0.08
+      const multaFgts = fgts * 0.40
+      if (fgts) {
+        linhas.push({ label: 'FGTS 8% sobre os reflexos', value: brl(fgts) })
+        linhas.push({ label: 'Multa 40% sobre esse FGTS', value: brl(multaFgts) })
+        memoria.push(`FGTS = ${brl(baseFgts)} × 8% = ${brl(fgts)}; multa 40% = ${brl(multaFgts)}`)
+      }
+
+      const rescisorias = num(v.verbasRescisorias)
+      if (rescisorias) linhas.push({ label: 'Verbas rescisórias (informadas)', value: brl(rescisorias) })
+
+      const m477 = v.multa477 === 'sim' ? sal : 0
+      if (m477) { linhas.push({ label: 'Multa do art. 477, §8º', value: brl(m477) }); memoria.push(`Art. 477, §8º = 1 salário = ${brl(m477)}`) }
+      const m467 = num(v.incontroversas) * 0.50
+      if (m467) { linhas.push({ label: 'Multa do art. 467 (50%)', value: brl(m467) }); memoria.push(`Art. 467 = ${brl(num(v.incontroversas))} × 50% = ${brl(m467)}`) }
+
+      const total = extras + dsr + noturno + insal + peric + fgts + multaFgts + rescisorias + m477 + m467
+      memoria.push(`TOTAL DO PEDIDO = ${brl(total)}`)
+      return {
+        headline: { label: 'Total do pedido (valor da causa)', value: brl(total) },
+        linhas, memoria,
+        criterios: [
+          `Período reclamado: ${n} meses`,
+          'Valores nominais: some a correção e os juros na Atualização monetária de dívida.',
+          'Insalubridade e periculosidade não se acumulam (art. 193, §2º CLT).',
+          'Prescrição: 5 anos retroativos, até 2 anos após o fim do contrato (art. 7º, XXIX, CF).',
+        ],
+      }
+    },
+  },
+
+  {
+    id: 'inventario-completo', ramo: 'sucessorio', titulo: 'Inventário completo',
+    descricao: 'Do acervo ao quinhão: meação, dívidas, ITCMD, custas e honorários.',
+    casos: 'Estimar o inventário inteiro numa conta só.',
+    baseLegal: 'CC arts. 1.784 e ss.; meação conforme o regime de bens; ITCMD estadual (até 8%, Res. Senado 9/92); honorários art. 85 CPC.',
+    campos: [
+      { name: 'bens', label: 'Valor total dos bens', type: 'currency', required: true },
+      { name: 'bensComuns', label: 'Dos quais são bens comuns (para a meação)', type: 'currency',
+        help: 'A meação do cônjuge é metade DESTES, e não integra a herança.' },
+      { name: 'dividas', label: 'Dívidas do espólio', type: 'currency' },
+      { name: 'herdeiros', label: 'Nº de herdeiros', type: 'number', default: '1', required: true },
+      { name: 'itcmd', label: 'Alíquota do ITCMD (%)', type: 'percent', default: '4', help: 'Varia por estado.' },
+      { name: 'custas', label: 'Custas e emolumentos (%)', type: 'percent', default: '1' },
+      { name: 'honorarios', label: 'Honorários advocatícios (%)', type: 'percent', default: '6' },
+    ],
+    compute: (v) => {
+      const bens = num(v.bens)
+      const meacao = num(v.bensComuns) / 2
+      const dividas = num(v.dividas)
+      // A meação sai antes: é do cônjuge, nunca foi do falecido.
+      const herancaBruta = Math.max(0, bens - meacao)
+      const itcmd = herancaBruta * pct(v.itcmd)
+      const custas = herancaBruta * pct(v.custas)
+      const honor = herancaBruta * pct(v.honorarios)
+      const liquido = Math.max(0, herancaBruta - dividas - itcmd - custas - honor)
+      const herdeiros = Math.max(1, num(v.herdeiros))
+      const quinhao = liquido / herdeiros
+
+      return {
+        headline: { label: `Quinhão de cada herdeiro (÷${herdeiros})`, value: brl(quinhao) },
+        linhas: [
+          { label: 'Acervo total', value: brl(bens) },
+          ...(meacao ? [{ label: '(−) Meação do cônjuge', value: '- ' + brl(meacao) }] : []),
+          { label: 'Herança bruta', value: brl(herancaBruta) },
+          ...(dividas ? [{ label: '(−) Dívidas do espólio', value: '- ' + brl(dividas) }] : []),
+          { label: `(−) ITCMD (${(pct(v.itcmd) * 100).toFixed(1)}%)`, value: '- ' + brl(itcmd) },
+          ...(custas ? [{ label: `(−) Custas (${(pct(v.custas) * 100).toFixed(1)}%)`, value: '- ' + brl(custas) }] : []),
+          ...(honor ? [{ label: `(−) Honorários (${(pct(v.honorarios) * 100).toFixed(1)}%)`, value: '- ' + brl(honor) }] : []),
+          { label: '── Herança líquida', value: brl(liquido) },
+          { label: `Quinhão (÷${herdeiros})`, value: brl(quinhao) },
+        ],
+        memoria: [
+          meacao ? `Meação = ${brl(num(v.bensComuns))} ÷ 2 = ${brl(meacao)} — sai antes, não é herança` : 'Sem bens comuns: não há meação.',
+          `Herança bruta = ${brl(bens)} − ${brl(meacao)} = ${brl(herancaBruta)}`,
+          `ITCMD = ${brl(herancaBruta)} × ${(pct(v.itcmd) * 100).toFixed(1)}% = ${brl(itcmd)}`,
+          custas ? `Custas = ${brl(custas)}` : '',
+          honor ? `Honorários = ${brl(honor)}` : '',
+          `Líquido = ${brl(liquido)} · Quinhão = ${brl(liquido)} ÷ ${herdeiros} = ${brl(quinhao)}`,
+        ].filter(Boolean),
+        criterios: [
+          'A meação do cônjuge NÃO integra a herança — sai antes da divisão.',
+          'Confira a alíquota do ITCMD do estado competente e a ordem de vocação hereditária (art. 1.829 CC).',
+          'Quinhão igual entre herdeiros da mesma classe; herdeiro necessário tem a legítima garantida.',
+        ],
+      }
+    },
+  },
+
+  {
+    id: 'aposentadoria-regras', ramo: 'previdenciario', titulo: 'Aposentadoria: em que regra a pessoa se encaixa',
+    descricao: 'Testa de uma vez todas as regras de transição da EC 103/2019 e diz quais já estão cumpridas.',
+    casos: 'Planejamento previdenciário — a primeira pergunta de todo cliente.',
+    baseLegal: 'EC 103/2019: art. 15 (pontos), art. 16 (idade progressiva), art. 17 (pedágio 50%), art. 20 (pedágio 100%); art. 19 (regra permanente: 62/65 anos).',
+    campos: [
+      { name: 'sexo', label: 'Sexo', type: 'select', default: 'F', options: [
+        { value: 'F', label: 'Feminino' }, { value: 'M', label: 'Masculino' }]},
+      { name: 'idade', label: 'Idade hoje (anos)', type: 'number', required: true },
+      { name: 'tempoHoje', label: 'Tempo de contribuição hoje (anos)', type: 'number', required: true },
+      { name: 'tempoEm2019', label: 'Tempo em 13/11/2019 (anos)', type: 'number',
+        help: 'Necessário para as regras de pedágio. Deixe vazio se não souber.' },
+      { name: 'ano', label: 'Ano de análise', type: 'number', default: String(new Date().getFullYear()) },
+    ],
+    compute: (v) => {
+      const fem = v.sexo === 'F'
+      const idade = num(v.idade), tempo = num(v.tempoHoje), ano = num(v.ano) || new Date().getFullYear()
+      const tempoMin = fem ? 30 : 35
+      const regras = []
+
+      // Regra permanente (art. 19): 62 (mulher) / 65 (homem) + 15 anos.
+      const idadePerm = fem ? 62 : 65
+      regras.push({
+        nome: 'Regra permanente (art. 19)',
+        exige: `${idadePerm} anos de idade + 15 de contribuição`,
+        cumpre: idade >= idadePerm && tempo >= 15,
+        falta: idade < idadePerm ? `${(idadePerm - idade).toFixed(1)} anos de idade` : (tempo < 15 ? `${(15 - tempo).toFixed(1)} anos de contribuição` : ''),
+      })
+
+      // Pontos (art. 15): 86/96 em 2019, +1 por ano, teto 100/105.
+      const ptsExigidos = fem ? Math.min(100, 86 + (ano - 2019)) : Math.min(105, 96 + (ano - 2019))
+      const pontos = idade + tempo
+      regras.push({
+        nome: 'Pontos (art. 15)',
+        exige: `${ptsExigidos} pontos + ${tempoMin} anos de contribuição`,
+        cumpre: pontos >= ptsExigidos && tempo >= tempoMin,
+        falta: pontos < ptsExigidos ? `${(ptsExigidos - pontos).toFixed(1)} pontos` : (tempo < tempoMin ? `${(tempoMin - tempo).toFixed(1)} anos de contribuição` : ''),
+        detalhe: `Você tem ${pontos.toFixed(1)} pontos (${idade} de idade + ${tempo} de contribuição)`,
+      })
+
+      // Idade progressiva (art. 16): 56/61 em 2019, +6 meses por ano,
+      // travando em 62 (mulher) e 65 (homem).
+      const idadeExigida = fem
+        ? Math.min(62, 56 + (ano - 2019) * 0.5)
+        : Math.min(65, 61 + (ano - 2019) * 0.5)
+      regras.push({
+        nome: 'Idade progressiva (art. 16)',
+        exige: `${idadeExigida.toFixed(1)} anos de idade + ${tempoMin} de contribuição`,
+        cumpre: idade >= idadeExigida && tempo >= tempoMin,
+        falta: idade < idadeExigida ? `${(idadeExigida - idade).toFixed(1)} anos de idade` : (tempo < tempoMin ? `${(tempoMin - tempo).toFixed(1)} anos de contribuição` : ''),
+      })
+
+      // Pedágios: só para quem estava perto em 13/11/2019.
+      const t2019 = num(v.tempoEm2019)
+      if (t2019 > 0) {
+        const faltava = Math.max(0, tempoMin - t2019)
+        if (faltava > 0 && faltava <= 2) {
+          const alvo = t2019 + faltava + faltava * 0.5
+          regras.push({
+            nome: 'Pedágio de 50% (art. 17)',
+            exige: `${alvo.toFixed(2)} anos de contribuição (faltavam ${faltava.toFixed(2)} + 50%)`,
+            cumpre: tempo >= alvo,
+            falta: tempo < alvo ? `${(alvo - tempo).toFixed(2)} anos de contribuição` : '',
+            detalhe: 'Sujeita ao fator previdenciário.',
+          })
+        }
+        const alvo100 = t2019 + faltava * 2
+        const idadeMin100 = fem ? 57 : 60
+        regras.push({
+          nome: 'Pedágio de 100% (art. 20)',
+          exige: `${idadeMin100} anos de idade + ${alvo100.toFixed(2)} de contribuição`,
+          cumpre: idade >= idadeMin100 && tempo >= alvo100,
+          falta: idade < idadeMin100 ? `${(idadeMin100 - idade).toFixed(1)} anos de idade` : (tempo < alvo100 ? `${(alvo100 - tempo).toFixed(2)} anos de contribuição` : ''),
+          detalhe: 'Benefício de 100% da média, sem redutor.',
+        })
+      }
+
+      const cumpridas = regras.filter(r => r.cumpre)
+      const maisPerto = regras.filter(r => !r.cumpre)
+        .sort((a, b) => (parseFloat(a.falta) || 99) - (parseFloat(b.falta) || 99))[0]
+
+      return {
+        headline: {
+          label: cumpridas.length ? 'Já pode se aposentar por' : 'Regra mais próxima',
+          value: cumpridas.length ? cumpridas.map(r => r.nome).join(' · ') : (maisPerto ? `${maisPerto.nome} — faltam ${maisPerto.falta}` : '—'),
+        },
+        linhas: regras.map(r => ({
+          label: `${r.cumpre ? '✅' : '❌'} ${r.nome}`,
+          value: r.cumpre ? 'cumprida' : `faltam ${r.falta}`,
+        })),
+        memoria: [
+          `Idade ${idade} · Contribuição ${tempo} anos · Pontos ${(idade + tempo).toFixed(1)} · Análise em ${ano}`,
+          ...regras.map(r => `${r.nome}: exige ${r.exige}${r.detalhe ? ` — ${r.detalhe}` : ''} → ${r.cumpre ? 'CUMPRIDA' : `faltam ${r.falta}`}`),
+          t2019 > 0 ? '' : 'Sem o tempo em 13/11/2019, as regras de pedágio não foram avaliadas.',
+        ].filter(Boolean),
+        criterios: [
+          'Estimativa de requisito objetivo. Não calcula o valor do benefício — use a RMI para isso.',
+          'Não considera tempo especial, rural nem contribuições em atraso.',
+          'A regra mais vantajosa nem sempre é a primeira cumprida: compare o VALOR de cada uma antes de dar entrada.',
+        ],
+      }
+    },
+  },
 ]
+
+// ════════════════════════════════════════════════════════════════════════════
+//  CORREÇÃO MONETÁRIA ACOPLÁVEL
+//
+//  Quase todo resultado em dinheiro pode precisar ser trazido para valor de
+//  hoje. Em vez de repetir os campos em cada calculadora — e depois esquecer
+//  de repetir uma correção quando ela mudasse — o bloco é UM e se acopla a
+//  todas as que produzem dinheiro.
+//
+//  Fica DESLIGADO por padrão: quem calcula é que sabe se o caso pede correção,
+//  de que data e por qual índice. Ligar sozinho seria inventar premissa.
+// ════════════════════════════════════════════════════════════════════════════
+
+// Desfaz o brl(): "R$ 1.234,56" → 1234.56. Devolve null se não for dinheiro,
+// que é como o acoplamento sabe quando não deve fazer nada.
+export function valorBrl(texto) {
+  const t = String(texto ?? '')
+  if (!/R\$/.test(t)) return null
+  const n = Number(t.replace(/[^\d,-]/g, '').replace(/\./g, '').replace(',', '.'))
+  return isFinite(n) ? n : null
+}
+
+export const camposCorrecao = [
+  { name: 'corrigir', label: '💰 Corrigir o resultado?', type: 'select', default: 'nao', options: [
+    { value: 'nao', label: 'Não — valor nominal' },
+    { value: 'sim', label: 'Sim — trazer para valor atualizado' },
+  ]},
+  { name: 'corrDataInicial', label: 'Corrigir desde', type: 'date' },
+  { name: 'corrDataFinal', label: 'Até', type: 'date' },
+  { name: 'corrIndice', label: 'Índice', type: 'select', default: 'ipca-e', options: INDICES },
+  { name: 'corrTaxa', label: 'Índice acumulado no período (%)', type: 'percent',
+    help: 'Consulte a tabela oficial do índice escolhido e informe o acumulado.' },
+  { name: 'corrJuros', label: 'Juros ao mês (%)', type: 'percent', default: '0' },
+  { name: 'corrJurosTipo', label: 'Tipo de juros', type: 'select', default: 'simples', options: [
+    { value: 'simples', label: 'Simples' }, { value: 'composto', label: 'Compostos' },
+  ]},
+]
+
+/**
+ * Acopla a correção ao resultado de uma calculadora.
+ *
+ * Trabalha sobre o valor do título (o headline), que é o total daquela conta.
+ * Se o título não for dinheiro — uma pena, um prazo, uma pontuação — devolve o
+ * resultado intocado: corrigir monetariamente uma data não significa nada.
+ */
+export function aplicarCorrecao(res, v) {
+  if (v?.corrigir !== 'sim') return res
+  const base = valorBrl(res?.headline?.value)
+  if (base == null) return res
+
+  const meses = v.corrDataInicial && v.corrDataFinal
+    ? mesesEntre(v.corrDataInicial, v.corrDataFinal) : 0
+  const taxa = pct(v.corrTaxa)
+  const correcao = base * taxa
+  const corrigido = base + correcao
+
+  const i = pct(v.corrJuros)
+  const composto = v.corrJurosTipo === 'composto'
+  // A SELIC já engloba juros: somar juros por cima seria cobrar duas vezes.
+  const juros = v.corrIndice === 'selic' ? 0
+    : (composto ? corrigido * (Math.pow(1 + i, meses) - 1) : corrigido * i * meses)
+  const total = corrigido + juros
+
+  const nomeIndice = INDICES.find(x => x.value === v.corrIndice)?.label ?? v.corrIndice
+  return {
+    ...res,
+    headline: { label: `${res.headline.label} — atualizado`, value: brl(total) },
+    linhas: [
+      ...res.linhas,
+      { label: '── Valor nominal', value: brl(base) },
+      { label: `(+) Correção (${(taxa * 100).toFixed(2)}%)`, value: brl(correcao) },
+      ...(juros ? [{ label: `(+) Juros ${composto ? 'compostos' : 'simples'} (${(i * 100).toFixed(2)}% × ${meses}m)`, value: brl(juros) }] : []),
+      { label: '── VALOR ATUALIZADO', value: brl(total) },
+    ],
+    memoria: [
+      ...res.memoria,
+      '───── correção monetária ─────',
+      `Nominal = ${brl(base)}`,
+      `Correção = ${brl(base)} × ${(taxa * 100).toFixed(2)}% = ${brl(correcao)} → ${brl(corrigido)}`,
+      v.corrIndice === 'selic'
+        ? 'SELIC engloba juros: nenhum juro somado por cima.'
+        : (juros ? `Juros = ${brl(corrigido)} × ${(i * 100).toFixed(2)}%${composto ? ` composto por ${meses}m` : ` × ${meses} meses`} = ${brl(juros)}` : 'Sem juros.'),
+      `ATUALIZADO = ${brl(total)}`,
+    ],
+    criterios: [
+      ...res.criterios,
+      `Correção: ${nomeIndice}${meses ? `, ${meses} ${meses === 1 ? 'mês' : 'meses'} (${fmtPrazo(v.corrDataInicial)} a ${fmtPrazo(v.corrDataFinal)})` : ''}.`,
+      'O índice acumulado é informado por você — confira na tabela oficial.',
+    ],
+  }
+}
+
+// Estas já corrigem por dentro: acoplar de novo corrigiria duas vezes.
+const JA_CORRIGEM = new Set([
+  'atualizacao-divida', 'cumprimento-sentenca', 'juros-moratorios',
+  'debito-tributario', 'restituicao-trib', 'alimentos-atrasados',
+  'aluguel-atraso', 'condominio-atraso', 'repeticao-indebito',
+  'diferencas-salariais', 'reajuste-aluguel',
+])
+
+// Estas não produzem dinheiro: prazo, pena, tempo, pontuação, elegibilidade.
+const NAO_SAO_DINHEIRO = new Set([
+  'prazo-processual', 'dosimetria', 'detracao', 'remicao', 'progressao',
+  'tempo-contribuicao', 'regra-pontos', 'pedagio-50', 'pedagio-100',
+  'conversao-especial', 'fator-previdenciario', 'aposentadoria-regras',
+])
+
+// Acopla o bloco a tudo o que sobra. Feito aqui, uma vez, em vez de repetido
+// em 60 lugares — quem adicionar uma calculadora nova ganha a correção de graça.
+for (const c of CALCULADORAS) {
+  if (JA_CORRIGEM.has(c.id) || NAO_SAO_DINHEIRO.has(c.id)) continue
+  const calcular = c.compute
+  c.campos = [...c.campos, ...camposCorrecao]
+  c.compute = (v) => aplicarCorrecao(calcular(v), v)
+  c.corrigivel = true
+}
 
 export const getCalc = (id) => CALCULADORAS.find(c => c.id === id)
 export const calcsByRamo = (ramo) => CALCULADORAS.filter(c => c.ramo === ramo)

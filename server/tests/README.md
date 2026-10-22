@@ -51,7 +51,28 @@ node server/tests/etapa6.papeis.mjs       # perfis de acesso num vocabulario so
 
 # Este roda sozinho: nao precisa de servidor nem de banco, e so matematica.
 node server/tests/etapa7.calculos.mjs     # motor de calculos juridicos
+node server/tests/etapa9.avisos.mjs       # os avisos da tela e a validacao do planejamento
+node server/tests/etapa10.vademecum.mjs   # o indice remissivo da legislacao
 ```
+
+Este sobe o PRÓPRIO servidor, numa porta separada (8798), e por isso roda
+sozinho — mas ainda precisa do banco:
+
+```bash
+node server/tests/etapa11.diario.mjs      # paginacao do Diario (DJEN)
+```
+
+Precisa de servidor e banco, e grava arquivo em disco — aponte o `FILES_DIR`
+para uma pasta descartável:
+
+```bash
+FILES_DIR=/tmp/pj-files node server/tests/etapa12.buracos.mjs
+```
+
+Ele levanta um DJEN de mentira numa porta livre e sobe o servidor com
+`DJEN_URL` apontando para lá. É a única forma de exercitar três páginas,
+repetição entre páginas e falha no meio — a API real do CNJ não faz isso sob
+encomenda. Em produção `DJEN_URL` não é definida e vale o endereço do CNJ.
 
 Precisam de bundle, porque exercitam código do cliente (imports sem extensão,
 resolvidos pelo Vite):
@@ -68,20 +89,24 @@ for t in etapa0.resgate etapa2.datajud etapa8.sessao; do
 done
 ```
 
-Total atual: **299 asserções** em 10 suítes. Cada suíte sai com código 0 se passar.
+Total atual: **487 asserções** em 14 suítes. Cada suíte sai com código 0 se passar.
 
 | Suíte | Asserções | O que prova |
 |---|---:|---|
 | `etapa0.integracao` | 16 | autenticação, allowlist do tenant, senha |
 | `etapa0.resgate` | 17 | resgate do que ficou no navegador |
-| `etapa1.financeiro` | 20 | financeiro unificado no banco |
+| `etapa1.financeiro` | 21 | financeiro unificado no banco |
 | `etapa2.datajud` | 12 | movimentações do CNJ gravadas no banco |
 | `etapa2b.syncServidor` | 17 | sync rodando no servidor, sem duplicar |
 | `etapa3.consumo` | 14 | medidor de consumo por escritório |
 | `etapa5.admin` | 36 | porta `/api/admin/*` da Perspecta Central |
 | `etapa6.papeis` | 22 | um vocabulário só de perfis, sem mexer em permissão |
-| `etapa7.calculos` | 131 | correção monetária, rescisão, dosimetria, locação, prazos, INSS/IRRF |
+| `etapa7.calculos` | 165 | correção monetária, rescisão, dosimetria, locação, prazos, INSS/IRRF |
 | `etapa8.sessao` | 14 | o laço de recarregamento na abertura |
+| `etapa9.avisos` | 26 | os avisos que ninguém desenhava |
+| `etapa10.vademecum` | 30 | busca e índice remissivo da legislação |
+| `etapa11.diario` | 30 | paginação do Diário: nada de parar na primeira página |
+| `etapa12.buracos` | 67 | lançamento sem vencimento, parcelamento agrupado, arquivo que existe de verdade, teses, assinatura ponta a ponta, migração no arranque |
 
 **Atenção:** os testes escrevem no banco apontado por `DATABASE_URL`. Rode
 sempre contra um banco descartável, **nunca contra produção**. Cada suíte apaga

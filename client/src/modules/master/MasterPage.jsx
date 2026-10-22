@@ -147,7 +147,10 @@ export default function MasterPage() {
   }
   const deleteCompany = async (c) => {
     if (!window.confirm(`Excluir a empresa "${c.name}" e todos os seus acessos?`)) return
-    await api.master.deleteCompany(c.id).catch(() => {})
+    // Engolia a falha e recarregava a lista: a empresa reaparecia e ninguém
+    // sabia se tinha sido recusada ou se era problema de conexão.
+    try { await api.master.deleteCompany(c.id) }
+    catch (err) { alert('A empresa NÃO foi excluída. ' + (err?.message ?? 'Falha de conexão.')) }
     loadCompanies()
   }
   const entrar = async (c) => {
