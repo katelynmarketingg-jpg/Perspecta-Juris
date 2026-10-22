@@ -62,6 +62,13 @@ sozinho — mas ainda precisa do banco:
 node server/tests/etapa11.diario.mjs      # paginacao do Diario (DJEN)
 ```
 
+Precisa de servidor e banco, e grava arquivo em disco — aponte o `FILES_DIR`
+para uma pasta descartável:
+
+```bash
+FILES_DIR=/tmp/pj-files node server/tests/etapa12.buracos.mjs
+```
+
 Ele levanta um DJEN de mentira numa porta livre e sobe o servidor com
 `DJEN_URL` apontando para lá. É a única forma de exercitar três páginas,
 repetição entre páginas e falha no meio — a API real do CNJ não faz isso sob
@@ -82,13 +89,13 @@ for t in etapa0.resgate etapa2.datajud etapa8.sessao; do
 done
 ```
 
-Total atual: **419 asserções** em 13 suítes. Cada suíte sai com código 0 se passar.
+Total atual: **487 asserções** em 14 suítes. Cada suíte sai com código 0 se passar.
 
 | Suíte | Asserções | O que prova |
 |---|---:|---|
 | `etapa0.integracao` | 16 | autenticação, allowlist do tenant, senha |
 | `etapa0.resgate` | 17 | resgate do que ficou no navegador |
-| `etapa1.financeiro` | 20 | financeiro unificado no banco |
+| `etapa1.financeiro` | 21 | financeiro unificado no banco |
 | `etapa2.datajud` | 12 | movimentações do CNJ gravadas no banco |
 | `etapa2b.syncServidor` | 17 | sync rodando no servidor, sem duplicar |
 | `etapa3.consumo` | 14 | medidor de consumo por escritório |
@@ -99,6 +106,7 @@ Total atual: **419 asserções** em 13 suítes. Cada suíte sai com código 0 se
 | `etapa9.avisos` | 26 | os avisos que ninguém desenhava |
 | `etapa10.vademecum` | 30 | busca e índice remissivo da legislação |
 | `etapa11.diario` | 30 | paginação do Diário: nada de parar na primeira página |
+| `etapa12.buracos` | 67 | lançamento sem vencimento, parcelamento agrupado, arquivo que existe de verdade, teses, assinatura ponta a ponta, migração no arranque |
 
 **Atenção:** os testes escrevem no banco apontado por `DATABASE_URL`. Rode
 sempre contra um banco descartável, **nunca contra produção**. Cada suíte apaga

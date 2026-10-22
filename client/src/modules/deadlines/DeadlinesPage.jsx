@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import api from '../../lib/api'
+import { useUiStore } from '../../stores/uiStore'
 import { IconCalendar, IconPlus, IconCheck, IconClock, IconChevronLeft, IconChevronRight } from '../../components/ui'
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, addMonths, subMonths, startOfWeek, endOfWeek } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
@@ -22,6 +23,7 @@ const STATUS = {
 }
 
 export default function DeadlinesPage() {
+  const { showToast } = useUiStore()
   const [deadlines, setDeadlines] = useState([])
   const [loading, setLoading] = useState(true)
   const [month, setMonth] = useState(new Date())
@@ -56,9 +58,15 @@ export default function DeadlinesPage() {
     done:    deadlines.filter(d => d.status === 'done').length,
   }
 
+  // Marcava como concluído na tela e engolia a falha do servidor: na próxima
+  // abertura o prazo voltava a aparecer pendente, sem explicação.
   const markDone = async (id) => {
+    const antes = deadlines
     setDeadlines(prev => prev.map(d => d.id === id ? { ...d, status: 'done' } : d))
-    try { await api.deadlines.complete(id) } catch {}
+    try { await api.deadlines.complete(id) } catch (err) {
+      setDeadlines(antes)
+      showToast(`O prazo NÃO foi concluído: ${err?.message ?? 'falha de conexão'}.`, 'error')
+    }
   }
 
   return (
@@ -181,12 +189,22 @@ export default function DeadlinesPage() {
 function NovoPrazoModal({ onClose, onSaved }) {
   const [form, setForm] = useState({ title: '', dueDate: '', processTitle: '', status: 'pending' })
   const [saving, setSaving] = useState(false)
+  const [erro, setErro] = useState('')
   const set = (k) => (e) => setForm(d => ({ ...d, [k]: e.target.value }))
+  // Isto engolia a falha e fechava a janela chamando onSaved(): a tela recarregava
+  // sem o prazo e ela ficava achando que o prazo estava anotado. Num sistema de
+  // prazo, é o erro mais caro que existe.
   const salvar = async () => {
     if (!form.title.trim() || !form.dueDate) return
-    setSaving(true)
-    try { await api.deadlines.create({ ...form, dueDate: new Date(form.dueDate + 'T12:00:00').toISOString() }) } catch {}
-    setSaving(false); onSaved()
+    setSaving(true); setErro('')
+    try {
+      await api.deadlines.create({ ...form, dueDate: new Date(form.dueDate + 'T12:00:00').toISOString() })
+      setSaving(false)
+      onSaved()
+    } catch (err) {
+      setSaving(false)
+      setErro(err?.message ?? 'Não foi possível salvar o prazo. Verifique a conexão e tente de novo.')
+    }
   }
   const inputCls = 'w-full px-3 py-2 rounded-lg bg-[var(--bg-input)] border border-[var(--border)] text-sm text-white focus:border-brand-500 focus:outline-none'
   const lbl = 'text-xs font-medium text-[var(--text-secondary)] mb-1 block'
@@ -216,6 +234,11 @@ function NovoPrazoModal({ onClose, onSaved }) {
             <input value={form.processTitle} onChange={set('processTitle')} placeholder="Nº ou título do processo" className={inputCls} />
           </div>
         </div>
+        {erro && (
+          <div className="mx-5 mb-1 px-3 py-2 rounded-lg border border-red-500/40 bg-red-500/10">
+            <p className="text-xs text-red-300"><b>O prazo NÃO foi salvo.</b> {erro}</p>
+          </div>
+        )}
         <div className="px-5 py-3 border-t border-[var(--border)] flex justify-end gap-2">
           <button onClick={onClose} className="px-3 py-2 rounded-lg text-sm text-[var(--text-muted)] hover:text-white">Cancelar</button>
           <button onClick={salvar} disabled={saving || !form.title.trim() || !form.dueDate} className="btn-primary text-sm disabled:opacity-60">{saving ? 'Salvando…' : 'Salvar'}</button>

@@ -281,10 +281,21 @@ const api = {
     log:  (d) => api.post('/api/audit', d),
   },
 
+  // Teses do escritório. A tabela existia; a rota, não — e a Área de Trabalho
+  // do cliente lia uma chave do navegador que ninguém escrevia.
+  theses: {
+    list:   (p)     => api.get('/api/theses?' + new URLSearchParams(p ?? {})),
+    create: (d)     => api.post('/api/theses', d),
+    update: (id, d) => api.put(`/api/theses/${id}`, d),
+    remove: (id)    => api.delete(`/api/theses/${id}`),
+  },
+
   documents: {
     list:   (p)  => api.get('/api/documents?' + new URLSearchParams(p ?? {})),
     upload: (fd) => api.upload('/api/documents/upload', fd),
     remove: (id) => api.delete(`/api/documents/${id}`),
+    // Mover de pasta / renomear.
+    patch:  (id, d) => api.patch(`/api/documents/${id}`, d),
     // O arquivo exige token, então não dá para usar link direto: baixamos o blob.
     blob: async (id) => {
       const token = getToken()

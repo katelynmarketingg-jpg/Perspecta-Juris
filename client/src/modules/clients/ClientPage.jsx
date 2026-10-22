@@ -949,6 +949,33 @@ function DocumentsSection({ clientId, client, processes }) {
   const fileRef = useRef()
   const fileRefAssinado = useRef()
 
+  // Os arquivos de verdade vivem no servidor. Antes "Enviar arquivo" só
+  // guardava nome e tamanho no navegador e DESCARTAVA o arquivo: a linha
+  // aparecia na lista, não dava para abrir nem baixar, e em outro computador
+  // não existia. Agora o arquivo sobe e esta lista vem do servidor.
+  const [remotos, setRemotos] = useState([])
+  const [subindo, setSubindo] = useState(false)
+  const carregarRemotos = () => api.documents.list({ clientId })
+    .then(rows => {
+      const lista = (Array.isArray(rows) ? rows : (rows?.data ?? [])).map(d => ({
+        id: d.id, name: d.name, size: d.fileSize, type: d.mimeType,
+        folderId: d.folder || 'root', uploadedAt: d.createdAt, remoto: true,
+      }))
+      setRemotos(lista)
+      // Pasta que veio no documento mas não existe na lista deste navegador:
+      // sem isto o arquivo não apareceria em pasta nenhuma — sumiria da tela.
+      setFolders(atuais => {
+        const conhecidas = new Set(atuais.map(f => f.id))
+        const faltando = [...new Set(lista.map(d => d.folderId))].filter(id => !conhecidas.has(id))
+        if (!faltando.length) return atuais
+        const novas = [...atuais, ...faltando.map(id => ({ id, name: id, color: '#64748b' }))]
+        lsSet(FOLDERS_KEY, novas)
+        return novas
+      })
+    })
+    .catch(() => { /* offline: mostra só o que é local, sem apagar nada */ })
+  useEffect(() => { carregarRemotos() }, [clientId])
+
   const loadSignReqs = () => api.signatures.list()
     .then(rows => {
       const mine = (Array.isArray(rows) ? rows : (rows?.data ?? [])).filter(r => r.clientId === clientId)
@@ -971,8 +998,14 @@ function DocumentsSection({ clientId, client, processes }) {
   useEffect(() => { loadSignReqs() }, [clientId])
 
   const removerAssinatura = async (id) => {
-    try { await deleteRequest(id) } catch {}
-    setSignReqs(list => list.filter(r => r.id !== id))
+    // Tirava da tela mesmo quando o servidor recusava: voltava na próxima
+    // abertura, como se tivesse ressuscitado.
+    try {
+      await deleteRequest(id)
+      setSignReqs(list => list.filter(r => r.id !== id))
+    } catch (err) {
+      showToast(`O pedido de assinatura NÃO foi excluído: ${err?.message ?? 'falha de conexão'}.`, 'error')
+    }
   }
 
   const saveFolders = f => { setFolders(f); lsSet(FOLDERS_KEY, f) }
@@ -980,20 +1013,46 @@ function DocumentsSection({ clientId, client, processes }) {
 
   const createFolder = () => {
     if (!folderName.trim()) return
-    const f = { id: uid(), name: folderName.trim(), color: '#' + Math.floor(Math.random()*0xffffff).toString(16).padStart(6,'0') }
+    // O id é o próprio nome. O documento guarda a pasta no servidor, mas a
+    // LISTA de pastas é local: com um id aleatório, a pasta criada neste
+    // computador não existiria no outro, e o documento dentro dela ficaria
+    // invisível. Com o nome como id, a pasta se reconstrói sozinha.
+    const nome = folderName.trim()
+    if (folders.some(x => x.id === nome || x.name === nome)) { showToast('Já existe uma pasta com esse nome.', 'error'); return }
+    const f = { id: nome, name: nome, color: '#' + Math.floor(Math.random()*0xffffff).toString(16).padStart(6,'0') }
     saveFolders([...folders, f])
     setFolderName(''); setNewFolder(false)
     showToast(`Pasta "${f.name}" criada.`, 'success')
   }
 
-  const uploadFile = (folderId = 'root') => e => {
+  const uploadFile = (folderId = 'root') => async e => {
     const files = [...(e.target.files ?? [])]
-    const kind = folderId === 'assinados' ? 'signed' : undefined
-    const newDocs = files.map(f => ({ id: uid(), name: f.name, size: f.size, type: f.type, kind, folderId, uploadedAt: new Date().toISOString() }))
-    saveDocs([...docs, ...newDocs])
-    showToast(`${files.length} arquivo${files.length!==1?'s':''} adicionado${files.length!==1?'s':''}${folderId === 'assinados' ? ' em Assinados' : ''}.`, 'success')
-    if (folderId === 'assinados') registrar('assinatura', `enviou documento assinado (impresso) — ${files.map(f => f.name).join(', ')}`, { cliente: client.name })
     e.target.value = ''
+    if (!files.length) return
+    setSubindo(true)
+    try {
+      const fd = new FormData()
+      for (const f of files) fd.append('file', f, f.name)
+      fd.append('clientId', clientId)
+      fd.append('folder', folderId)
+      await api.documents.upload(fd)
+      await carregarRemotos()
+      showToast(`${files.length} arquivo${files.length!==1?'s':''} enviado${files.length!==1?'s':''}${folderId === 'assinados' ? ' em Assinados' : ''}.`, 'success')
+      if (folderId === 'assinados') registrar('assinatura', `enviou documento assinado (impresso) — ${files.map(f => f.name).join(', ')}`, { cliente: client.name })
+    } catch (err) {
+      // Dizer "adicionado" quando o arquivo não subiu é o pior resultado
+      // possível: ela confia que o documento está guardado.
+      showToast(`Não foi possível enviar: ${err?.message ?? 'falha de conexão'}. O arquivo NÃO foi guardado — tente de novo.`, 'error')
+    } finally { setSubindo(false) }
+  }
+
+  const baixar = async (doc) => {
+    try { await api.documents.download(doc.id, doc.name) }
+    catch (err) { showToast(`Não foi possível baixar: ${err?.message ?? 'falha de conexão'}.`, 'error') }
+  }
+  const abrir = async (doc) => {
+    try { await api.documents.view(doc.id) }
+    catch (err) { showToast(`Não foi possível abrir: ${err?.message ?? 'falha de conexão'}.`, 'error') }
   }
 
   // Migra documentos gerados que ainda estavam em "Geral" para a pasta "Gerados"
@@ -1002,17 +1061,43 @@ function DocumentsSection({ clientId, client, processes }) {
     if (precisa) saveDocs(docs.map(d => (d.kind === 'generated' && d.folderId === 'root') ? { ...d, folderId: 'gerados' } : d))
   }, [])
 
-  const deleteFolder = id => {
+  const deleteFolder = async id => {
     if (id === 'root') return
     saveDocs(docs.map(d => d.folderId === id ? { ...d, folderId: 'root' } : d))
     saveFolders(folders.filter(f => f.id !== id))
+    // Os arquivos que estavam nela voltam para Geral NO SERVIDOR também, senão
+    // na próxima abertura a pasta ressuscitaria (ou o arquivo desapareceria).
+    const presos = remotos.filter(d => d.folderId === id).map(d => d.id)
+    if (!presos.length) return
+    setRemotos(prev => prev.map(d => presos.includes(d.id) ? { ...d, folderId: 'root' } : d))
+    try { await Promise.all(presos.map(docId => api.documents.patch(docId, { folder: 'root' }))) }
+    catch (err) {
+      showToast(`Os arquivos não foram movidos para Geral no servidor: ${err?.message ?? 'falha de conexão'}.`, 'error')
+      carregarRemotos()
+    }
   }
 
   // Move um ou vários documentos (seleção múltipla) para uma pasta
-  const moveDocs = (ids, folderId) => { saveDocs(docs.map(d => ids.includes(d.id) ? { ...d, folderId } : d)); setDragging(null); setOver(null); setSel(new Set()) }
+  const moveDocs = async (ids, folderId) => {
+    setDragging(null); setOver(null); setSel(new Set())
+    const idsRemotos = new Set(remotos.filter(d => ids.includes(d.id)).map(d => d.id))
+    // locais (gerados/assinados) continuam no navegador
+    if (ids.some(id => !idsRemotos.has(id))) saveDocs(docs.map(d => ids.includes(d.id) ? { ...d, folderId } : d))
+    if (!idsRemotos.size) return
+    setRemotos(prev => prev.map(d => idsRemotos.has(d.id) ? { ...d, folderId } : d))
+    try { await Promise.all([...idsRemotos].map(id => api.documents.patch(id, { folder: folderId }))) }
+    catch (err) {
+      showToast(`A pasta não foi salva no servidor: ${err?.message ?? 'falha de conexão'}.`, 'error')
+      carregarRemotos()   // desfaz a mudança otimista
+    }
+  }
   const startDrag = (docId) => setDragging(sel.has(docId) && sel.size ? [...sel] : [docId])
   const toggleSel = (docId) => setSel(s => { const n = new Set(s); n.has(docId) ? n.delete(docId) : n.add(docId); return n })
-  const deleteDoc = (docId) => saveDocs(docs.filter(d => d.id !== docId))
+  const deleteDoc = async (docId) => {
+    if (!remotos.some(d => d.id === docId)) { saveDocs(docs.filter(d => d.id !== docId)); return }
+    try { await api.documents.remove(docId); setRemotos(prev => prev.filter(d => d.id !== docId)) }
+    catch (err) { showToast(`Não foi possível excluir: ${err?.message ?? 'falha de conexão'}.`, 'error') }
+  }
 
   // Documentos gerados (com dados do cliente) ficam salvos automaticamente na pasta "Gerados"
   const onGenerated = (rendered, procId) => {
@@ -1027,9 +1112,9 @@ function DocumentsSection({ clientId, client, processes }) {
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2 flex-wrap">
-        <Button variant="secondary" size="sm" onClick={() => fileRef.current?.click()}>⬆️ Enviar arquivo</Button>
+        <Button variant="secondary" size="sm" loading={subindo} onClick={() => fileRef.current?.click()}>⬆️ Enviar arquivo</Button>
         <input ref={fileRef} type="file" multiple className="hidden" onChange={uploadFile('root')} />
-        <Button variant="secondary" size="sm" onClick={() => fileRefAssinado.current?.click()}>✅ Enviar assinado (impresso)</Button>
+        <Button variant="secondary" size="sm" loading={subindo} onClick={() => fileRefAssinado.current?.click()}>✅ Enviar assinado (impresso)</Button>
         <input ref={fileRefAssinado} type="file" multiple className="hidden" onChange={uploadFile('assinados')} />
         <Button variant="secondary" size="sm" onClick={() => setNewFolder(true)}>📁 Nova pasta</Button>
         <Button variant="secondary" size="sm" onClick={() => setPrintModal(true)}>🖨️ Gerar documento</Button>
@@ -1107,7 +1192,7 @@ function DocumentsSection({ clientId, client, processes }) {
 
       <div className="space-y-3">
         {folders.map(folder => {
-          const folderDocs = docs.filter(d => d.folderId === folder.id)
+          const folderDocs = [...remotos, ...docs].filter(d => d.folderId === folder.id)
           const isOver = over === folder.id
           return (
             <div key={folder.id}
@@ -1166,6 +1251,24 @@ function DocumentsSection({ clientId, client, processes }) {
                             <button onClick={() => deleteDoc(doc.id)} className="text-[10px] px-2 py-1 rounded-md text-[var(--text-muted)] hover:text-red-400 ml-auto">Excluir</button>
                           </div>
                         )}
+                        {/* Arquivo enviado: dá para abrir e baixar. Antes não tinha
+                            botão nenhum, porque o arquivo não existia em lugar algum. */}
+                        {doc.remoto && (
+                          <div className="flex items-center gap-1.5 flex-wrap pt-1.5 border-t border-[var(--border)]">
+                            <button onClick={() => abrir(doc)} className="text-[10px] px-2 py-1 rounded-md bg-[var(--bg-hover)] text-[var(--text-secondary)] hover:bg-[var(--bg-input)]">👁️ Abrir</button>
+                            <button onClick={() => baixar(doc)} className="text-[10px] px-2 py-1 rounded-md bg-brand-500/15 text-accent-400 hover:bg-brand-500/25">⬇️ Baixar</button>
+                            <button onClick={() => deleteDoc(doc.id)} className="text-[10px] px-2 py-1 rounded-md text-[var(--text-muted)] hover:text-red-400 ml-auto">Excluir</button>
+                          </div>
+                        )}
+                        {/* Linha antiga: foi criada quando o envio só guardava o
+                            nome. O arquivo nunca existiu — melhor dizer do que
+                            deixar ela achar que está guardado. */}
+                        {!doc.remoto && !gerado && !assinadoDoc && (
+                          <div className="flex items-center gap-1.5 flex-wrap pt-1.5 border-t border-amber-500/30">
+                            <span className="text-[10px] text-amber-400">⚠️ arquivo não foi guardado — envie de novo</span>
+                            <button onClick={() => deleteDoc(doc.id)} className="text-[10px] px-2 py-1 rounded-md text-[var(--text-muted)] hover:text-red-400 ml-auto">Excluir</button>
+                          </div>
+                        )}
                       </div>
                     )})}
                   </div>
@@ -1192,6 +1295,18 @@ function WorkspaceSection({ clientId, client, processes }) {
   const [picker, setPicker] = useState(null) // 'calculo' | 'tese' | 'modelo'
   const [preview, setPreview] = useState(null)
 
+  // As teses vêm do servidor. Antes esta lista lia `pj_local_theses` do
+  // navegador — chave que nada escrevia, então "+ Vincular" era um beco sem
+  // saída que mandava "criar na aba Teses", onde não havia como criar.
+  const [teses, setTeses] = useState([])
+  useEffect(() => {
+    api.theses.list()
+      .then(r => setTeses((Array.isArray(r) ? r : (r?.data ?? [])).map(t => ({
+        id: t.id, title: t.title, summary: (t.content ?? '').slice(0, 180),
+      }))))
+      .catch(() => setTeses([]))
+  }, [])
+
   const save = (next) => { setWs(next); lsSet(KEY, next) }
   const addItem = (tipo, item) => save({ ...ws, [tipo]: [{ ...item, id: uid(), addedAt: new Date().toISOString(), addedBy: currentUser }, ...ws[tipo]] })
   const delItem = (tipo, id) => save({ ...ws, [tipo]: ws[tipo].filter(x => x.id !== id) })
@@ -1206,7 +1321,6 @@ function WorkspaceSection({ clientId, client, processes }) {
   if (preview) return <PrintPreview text={preview.text} templateName={preview.name} onClose={() => setPreview(null)} />
 
   const calcHistory = lsGet(tkey('pj_calc_history'), [])
-  const teses = lsGet('pj_local_theses', [])
   const templates = getTemplates()
 
   return (
@@ -1308,7 +1422,7 @@ function WorkspaceSection({ clientId, client, processes }) {
                   </button>
                 )))}
               {picker === 'tese' && (teses.length === 0
-                ? <p className="text-sm text-[var(--text-muted)] text-center py-6">Nenhuma tese cadastrada. Crie na aba Teses.</p>
+                ? <p className="text-sm text-[var(--text-muted)] text-center py-6">Nenhuma tese guardada. Crie em <b>Legislação</b> → <b>Teses do escritório</b>.</p>
                 : teses.map(t => (
                   <button key={t.id} onClick={() => { addItem('teses', { titulo: t.title, resumo: t.summary }); setPicker(null); showToast('Tese vinculada.', 'success') }}
                     className="w-full text-left rounded-lg border border-[var(--border)] p-3 hover:border-brand-500/40">

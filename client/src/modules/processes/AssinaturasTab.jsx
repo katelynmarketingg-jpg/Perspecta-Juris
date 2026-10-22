@@ -174,6 +174,7 @@ function RequestCard({ req, onDelete }) {
 
 // ── Tab principal ───────────────────────────────────────────────────────────
 export default function AssinaturasTab({ process }) {
+  const { showToast } = useUiStore()
   const [client, setClient] = useState(null)
   const [reqs, setReqs] = useState([])
   const [nova, setNova] = useState(false)
@@ -184,7 +185,11 @@ export default function AssinaturasTab({ process }) {
 
   const refresh = () => getRequestsByProcess(process.id).then(setReqs).catch(() => setReqs([]))
   useEffect(() => { refresh() }, [process.id])
-  const onDelete = async (id) => { await deleteRequest(id).catch(() => {}); refresh() }
+  const onDelete = async (id) => {
+    try { await deleteRequest(id) }
+    catch (err) { showToast(`O pedido de assinatura NÃO foi excluído: ${err?.message ?? 'falha de conexão'}.`, 'error') }
+    refresh()
+  }
 
   return (
     <div className="space-y-4">

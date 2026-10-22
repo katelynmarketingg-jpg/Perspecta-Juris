@@ -1,8 +1,10 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { IconSearch, IconBookOpen, IconExternalLink } from '../../components/ui'
 import {
   VADE, COD, CATS, INDICE, buscarTemas, buscarCodigos, linkDoArtigo,
 } from '../../lib/vademecum'
+import api from '../../lib/api'
+import { useUiStore } from '../../stores/uiStore'
 
 // ─────────────────────────────────────────────────────────────────────────
 //  Vade Mecum — legislação oficial (Planalto) + índice remissivo por tema.
@@ -17,7 +19,57 @@ const googleSite = (t) => `https://www.google.com/search?q=${encodeURIComponent(
 const googleTerm = (t) => `https://www.google.com/search?q=${encodeURIComponent(t)}`
 
 export default function ThesesPage() {
+  const { showToast } = useUiStore()
   const [q, setQ] = useState('')
+
+  // ── Teses do escritório ────────────────────────────────────────────────
+  // A Área de Trabalho do cliente tem um botão "+ Vincular tese" que abria uma
+  // lista lendo `pj_local_theses` do navegador — chave que NADA no sistema
+  // escrevia, então a lista nunca ia ter nada. A tabela no banco existia desde
+  // o começo e estava vazia porque não havia por onde salvar. É aqui.
+  const [teses, setTeses] = useState([])
+  const [carregandoTeses, setCarregandoTeses] = useState(true)
+  const [formTese, setFormTese] = useState(null)   // null | { title, area, content }
+  const [salvandoTese, setSalvandoTese] = useState(false)
+
+  const carregarTeses = () => api.theses.list()
+    .then(r => setTeses(Array.isArray(r) ? r : (r?.data ?? [])))
+    .catch(() => setTeses([]))
+    .finally(() => setCarregandoTeses(false))
+  useEffect(() => { carregarTeses() }, [])
+
+  const salvarTese = async () => {
+    if (!formTese?.title?.trim() || !formTese?.content?.trim()) {
+      showToast('Informe o título e o conteúdo da tese.', 'error'); return
+    }
+    setSalvandoTese(true)
+    try {
+      await api.theses.create({
+        title: formTese.title.trim(), area: formTese.area || 'geral',
+        content: formTese.content.trim(), source: formTese.source || null,
+      })
+      await carregarTeses()
+      setFormTese(null)
+      showToast('Tese salva. Já aparece para vincular no cliente.', 'success')
+    } catch (err) {
+      showToast(`A tese NÃO foi salva: ${err?.message ?? 'falha de conexão'}.`, 'error')
+    } finally { setSalvandoTese(false) }
+  }
+
+  const excluirTese = async (t) => {
+    if (!window.confirm(`Excluir a tese "${t.title}"?`)) return
+    try { await api.theses.remove(t.id); setTeses(prev => prev.filter(x => x.id !== t.id)) }
+    catch (err) { showToast(`Não foi possível excluir: ${err?.message ?? 'falha de conexão'}.`, 'error') }
+  }
+
+  // Salvar um tema do índice como tese já preenchida: título do tema e as
+  // referências de artigo que o próprio índice mostra.
+  const temaComoTese = (tm) => setFormTese({
+    title: tm.tema,
+    area: 'geral',
+    content: tm.refs.map(r => `${r[0]} ${r[1]} — ${r[2]}`).join('\n'),
+    source: 'Vade Mecum — índice remissivo',
+  })
   const termo = q.trim()
   const t = termo.toLowerCase()
 
@@ -47,13 +99,66 @@ export default function ThesesPage() {
           className="w-full pl-9 pr-3 py-2.5 rounded-lg bg-[var(--bg-input)] border border-[var(--border)] text-sm text-[var(--text-primary)] focus:border-brand-500 focus:outline-none" />
       </div>
 
+      {/* Teses do escritório */}
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--bg-card)]">
+        <div className="flex items-center gap-2 px-4 py-2.5 border-b border-[var(--border)]">
+          <span>⭐</span>
+          <span className="text-sm font-medium text-[var(--text-primary)]">Teses do escritório</span>
+          <span className="text-[10px] text-[var(--text-muted)] bg-[var(--bg-hover)] px-1.5 py-0.5 rounded-full">{teses.length}</span>
+          <button onClick={() => setFormTese(formTese ? null : { title: '', area: 'geral', content: '' })}
+            className="ml-auto text-[11px] text-accent-400 hover:underline">{formTese ? 'Fechar' : '+ Nova tese'}</button>
+        </div>
+
+        {formTese && (
+          <div className="p-4 space-y-2 border-b border-[var(--border)]">
+            <input value={formTese.title} onChange={e => setFormTese(f => ({ ...f, title: e.target.value }))}
+              placeholder="Título da tese (ex.: Dano moral por negativação indevida)"
+              className="w-full px-3 py-2 rounded-lg bg-[var(--bg-input)] border border-[var(--border)] text-sm text-[var(--text-primary)] focus:border-brand-500 focus:outline-none" />
+            <textarea value={formTese.content} onChange={e => setFormTese(f => ({ ...f, content: e.target.value }))}
+              rows={5} placeholder="Fundamentos, artigos, súmulas, jurisprudência — o que você quer ter à mão na hora de peticionar."
+              className="w-full px-3 py-2 rounded-lg bg-[var(--bg-input)] border border-[var(--border)] text-sm text-[var(--text-primary)] focus:border-brand-500 focus:outline-none" />
+            <div className="flex items-center gap-2">
+              <button onClick={salvarTese} disabled={salvandoTese} className="btn-primary text-sm disabled:opacity-60">{salvandoTese ? 'Salvando…' : 'Salvar tese'}</button>
+              <button onClick={() => setFormTese(null)} className="text-sm text-[var(--text-muted)] hover:text-[var(--text-secondary)]">Cancelar</button>
+            </div>
+          </div>
+        )}
+
+        <div className="p-3">
+          {carregandoTeses ? (
+            <p className="text-center py-3 text-xs text-[var(--text-muted)]">Carregando…</p>
+          ) : teses.length === 0 ? (
+            <p className="text-center py-3 text-xs text-[var(--text-muted)]">
+              Nenhuma tese guardada ainda. Use <b>+ Nova tese</b>, ou <b>⭐ Salvar como tese</b> num
+              resultado da busca. Depois ela aparece para vincular na Área de Trabalho do cliente.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {teses.map(t => (
+                <div key={t.id} className="rounded-lg border border-[var(--border)] p-3 group">
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="text-sm font-medium text-[var(--text-primary)]">{t.title}</p>
+                    <button onClick={() => excluirTese(t)} className="text-[var(--text-muted)] hover:text-red-400 text-xs opacity-0 group-hover:opacity-100 flex-shrink-0">✕</button>
+                  </div>
+                  <p className="text-xs text-[var(--text-secondary)] mt-1 whitespace-pre-line line-clamp-3">{t.content}</p>
+                  {t.source && <p className="text-[10px] text-[var(--text-muted)] mt-1">fonte: {t.source}</p>}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
       {/* Resultados temáticos (o "índice remissivo") */}
       {termo && temas.length > 0 && (
         <div className="space-y-2">
           <p className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wide">Onde está sobre “{termo}”</p>
           {temas.map(tm => (
             <div key={tm.tema} className="rounded-xl border border-brand-500/25 bg-brand-500/5 p-3">
-              <p className="text-sm font-semibold text-[var(--text-primary)] mb-1.5">{tm.tema}</p>
+              <div className="flex items-start justify-between gap-2 mb-1.5">
+                <p className="text-sm font-semibold text-[var(--text-primary)]">{tm.tema}</p>
+                <button onClick={() => temaComoTese(tm)} className="text-[11px] text-[var(--text-muted)] hover:text-accent-400 flex-shrink-0" title="Guardar nas teses do escritório">⭐ Salvar como tese</button>
+              </div>
               <div className="space-y-1.5">
                 {tm.refs.map((r, i) => (
                   <div key={i} className="flex items-center gap-2 flex-wrap">

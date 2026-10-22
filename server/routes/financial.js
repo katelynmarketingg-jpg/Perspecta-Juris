@@ -21,6 +21,25 @@ function limpar(body) {
   return out
 }
 
+// O que um lançamento precisa ter para ser um lançamento.
+//
+// Isto existe por causa de um efeito colateral: a garantia "ou entram todas as
+// parcelas, ou nenhuma" vinha de um NOT NULL do banco (due_date). Quando o
+// vencimento passou a ser opcional — a tela sempre permitiu deixar em branco —
+// essa rede sumiu, e lixo passaria a entrar calado. Validar aqui devolve 400
+// com explicação, em vez de 500 (ou pior: aceitar).
+const TIPOS_VALIDOS = new Set(['receivable', 'payable', 'income', 'expense'])
+
+function validar(campos) {
+  if (!String(campos.description ?? '').trim()) return 'Informe a descrição do lançamento.'
+  const valor = Number(campos.amount)
+  if (!Number.isFinite(valor)) return 'Informe um valor numérico para o lançamento.'
+  if (campos.type !== undefined && !TIPOS_VALIDOS.has(campos.type)) {
+    return `Tipo inválido: "${campos.type}". Use receivable (a receber) ou payable (a pagar).`
+  }
+  return null
+}
+
 // Lançamentos de ÊXITO são estimativa, não caixa: nunca entram nos totais.
 const semExito = or(isNull(financialEntries.feeKind), ne(financialEntries.feeKind, 'exito'))
 
@@ -58,6 +77,8 @@ export default async function financialRoutes(app) {
     const now = new Date().toISOString()
     const id = nanoid()
     const campos = limpar(req.body)
+    const problema = validar(campos)
+    if (problema) return reply.code(400).send({ message: problema })
     await db.insert(financialEntries).values({
       id, tenantId: tid, ...campos,
       category: categoriaDe(campos),
@@ -107,6 +128,13 @@ export default async function financialRoutes(app) {
     if (itens.length > 60) return reply.code(400).send({ message: 'No máximo 60 parcelas por vez.' })
 
     const now = new Date().toISOString()
+    // Valida o lote INTEIRO antes de gravar qualquer coisa: é isso que faz
+    // "ou todas ou nenhuma" valer também para erro de preenchimento.
+    for (let i = 0; i < itens.length; i++) {
+      const problema = validar(limpar(itens[i]))
+      if (problema) return reply.code(400).send({ message: `Parcela ${i + 1} de ${itens.length}: ${problema}` })
+    }
+
     const linhas = itens.map(e => {
       const campos = limpar(e)
       return {

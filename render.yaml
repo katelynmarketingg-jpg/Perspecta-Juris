@@ -5,6 +5,10 @@ services:
     plan: starter
     buildCommand: npm install && npm run build
     startCommand: node server/index.mjs
+    # Cinto e suspensório: o servidor também aplica as migrações no
+    # arranque. Aqui o deploy para se o banco não puder ser atualizado,
+    # em vez de publicar código novo contra banco velho.
+    preDeployCommand: npm run db:migrate
     healthCheckPath: /api/health
     envVars:
       - key: NODE_ENV

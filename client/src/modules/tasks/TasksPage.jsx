@@ -131,6 +131,7 @@ function TaskDetail({ task, currentUser, onAck, onReopen, onClose }) {
 }
 
 export default function TasksPage() {
+  const { showToast } = useUiStore()
   const currentUser = useAuthStore(s => s.user)
   const [tasks, setTasks] = useState([])
   const [users, setUsers] = useState([])
@@ -146,9 +147,15 @@ export default function TasksPage() {
     api.settings.users().then(u => setUsers(Array.isArray(u) ? u : (u?.data ?? []))).catch(() => setUsers([]))
   }, [])
 
+  // Mudava o quadro na tela e engolia a falha: a tarefa voltava ao estado
+  // antigo na próxima abertura, sem ninguém entender por quê.
   const patch = async (id, data) => {
+    const antes = tasks
     setTasks(prev => prev.map(t => t.id === id ? { ...t, ...data } : t))
-    try { await api.tasks.update(id, data) } catch {}
+    try { await api.tasks.update(id, data) } catch (err) {
+      setTasks(antes)
+      showToast(`A tarefa NÃO foi alterada: ${err?.message ?? 'falha de conexão'}.`, 'error')
+    }
   }
   const moveTask = (t, newStatus) => {
     const extra = newStatus === 'done'
