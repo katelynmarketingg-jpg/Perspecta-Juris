@@ -91,7 +91,7 @@ for t in etapa0.resgate etapa2.datajud etapa8.sessao; do
 done
 ```
 
-Total atual: **554 asserções** em 16 suítes. Cada suíte sai com código 0 se passar.
+Total atual: **566 asserções** em 16 suítes. Cada suíte sai com código 0 se passar.
 
 | Suíte | Asserções | O que prova |
 |---|---:|---|
@@ -108,7 +108,7 @@ Total atual: **554 asserções** em 16 suítes. Cada suíte sai com código 0 se
 | `etapa9.avisos` | 26 | os avisos que ninguém desenhava |
 | `etapa10.vademecum` | 30 | busca e índice remissivo da legislação |
 | `etapa11.diario` | 30 | paginação do Diário: nada de parar na primeira página |
-| `etapa14.tribunal` | 23 | sessões dos portais dos tribunais: cada uma com dono, nenhuma emprestada |
+| `etapa14.tribunal` | 35 | sessões dos portais com dono, e "entrou" significando entrou |
 | `etapa13.painelmaster` | 44 | acessos por escritório, troca de senha, interromper acesso, cobrança (pagante/teste) |
 | `etapa12.buracos` | 67 | lançamento sem vencimento, parcelamento agrupado, arquivo que existe de verdade, teses, assinatura ponta a ponta, migração no arranque |
 

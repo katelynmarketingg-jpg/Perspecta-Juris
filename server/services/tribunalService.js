@@ -29,6 +29,46 @@ function mergeCookies(base, incoming) {
   return { ...base, ...incoming }
 }
 
+// ── Entrou ou não entrou? ─────────────────────────────────────────
+//
+// A checagem antiga procurava duas frases de erro específicas ("senha
+// incorreta", "Usuário ou senha") e, fora isso, aceitava qualquer cookie de
+// sessão como prova de que entrou. Dois problemas:
+//
+//  - o cookie de sessão já vem no primeiro GET, ANTES de qualquer senha. Ele
+//    não prova nada;
+//  - qualquer outra redação de erro — ou um captcha — passava como sucesso, e
+//    a tela dizia "Conectado" sem estar.
+//
+// Dizer "conectado" sem estar é pior do que falhar: a pessoa confia que os
+// sigilosos vieram, e eles não vieram.
+//
+// O sinal usado agora é o contrário, e vale para CAS, Keycloak e e-Proc:
+// depois de entrar, nenhum desses portais devolve um campo de senha. Se o
+// campo ainda está lá, não entrou.
+export function aindaNaTelaDeLogin(html) {
+  return /<input[^>]*type=["']password["']/i.test(String(html ?? ''))
+}
+
+// Captcha e segundo fator não dão para resolver daqui. Melhor dizer isso do
+// que devolver "verifique CPF e senha", que manda a pessoa digitar de novo
+// uma senha que está certa.
+export function pedeVerificacaoHumana(html) {
+  const t = String(html ?? '')
+  return /captcha|recaptcha|hcaptcha|g-recaptcha|segundo fator|dois fatores|duas etapas|token de acesso|certificado digital/i.test(t)
+}
+
+export function conferirEntrada(tribunal, html) {
+  if (pedeVerificacaoHumana(html)) {
+    throw new Error(
+      `O portal do ${tribunal} pediu verificação humana (captcha, segundo fator ou certificado digital). ` +
+      'Esse passo não tem como ser feito pelo sistema — entre direto no portal.')
+  }
+  if (aindaNaTelaDeLogin(html)) {
+    throw new Error(`Entrada no ${tribunal} recusada: o portal devolveu a tela de login de novo. Confira o CPF e a senha.`)
+  }
+}
+
 // ── HTML helpers ──────────────────────────────────────────────────
 function extractAttr(html, tag, attr, id = '') {
   const idPart = id ? `[^>]*id=["']${id}["'][^>]*` : '[^>]*'
@@ -107,13 +147,7 @@ async function loginTJRS(cpf, password) {
   const cookies2 = mergeCookies(cookies1, parseCookies(r2))
   const html2 = await r2.text()
 
-  // Verifica se logou (deve redirecionar para o portal)
-  const success = !html2.includes('senha incorreta') && !html2.includes('Usuário ou senha') && Object.keys(cookies2).some(k => k.toLowerCase().includes('session') || k.toLowerCase().includes('jsession') || k.toLowerCase().includes('sso'))
-
-  if (!success) {
-    throw new Error('Login TJRS falhou. Verifique CPF e senha.')
-  }
-
+  conferirEntrada('TJRS (e-SAJ)', html2)
   return cookies2
 }
 
@@ -197,10 +231,7 @@ async function loginTRT4(cpf, password) {
   const cookies2 = mergeCookies(cookies1, parseCookies(r2))
   const html2 = await r2.text()
 
-  if (html2.includes('Invalid username') || html2.includes('Credenciais inválidas')) {
-    throw new Error('Login TRT-4 falhou. Verifique CPF e senha.')
-  }
-
+  conferirEntrada('TRT-4 (PJe)', html2)
   return cookies2
 }
 
@@ -284,10 +315,7 @@ async function loginTRF4(cpf, password) {
   const cookies2 = mergeCookies(cookies1, parseCookies(r2))
   const html2 = await r2.text()
 
-  if (html2.includes('Usuário ou senha inválidos') || html2.includes('login.php')) {
-    throw new Error('Login TRF-4 falhou. Verifique CPF e senha.')
-  }
-
+  conferirEntrada('TRF-4 (e-Proc)', html2)
   return cookies2
 }
 

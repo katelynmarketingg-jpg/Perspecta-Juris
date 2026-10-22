@@ -223,6 +223,14 @@ function PortalCard({ portal, oab, oabUF, onImported }) {
 
   const doLogin = async () => {
     if (!cpf.trim() || !password.trim()) { setError('Informe CPF e senha.'); return }
+    // O servidor manda para o portal só os dígitos do CPF. Com um nome aqui,
+    // sobrava string vazia e o tribunal recusava com uma mensagem genérica —
+    // parecia senha errada. Melhor barrar aqui e dizer o que é.
+    const digitos = cpf.replace(/\D/g, '')
+    if (digitos.length !== 11) {
+      setError('O CPF precisa ter 11 dígitos. É o CPF de quem acessa o portal, não o nome.')
+      return
+    }
     if (!oab.trim()) { setError('Salve o número de OAB acima antes de conectar.'); return }
     setError('')
     setLoading(true)
@@ -811,9 +819,20 @@ export default function IntegrationTab() {
             Acesse os sistemas dos tribunais com suas credenciais para importar todos os processos,
             incluindo os com segredo de justiça. O sistema entra no portal como se fosse você.
           </p>
-          <div className="mt-2 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/20 text-xs text-amber-400">
-            ⚠️ Requer que o servidor backend esteja rodando (<span className="font-mono">npm run dev</span> na pasta <span className="font-mono">sgj/</span>).
-            As credenciais são enviadas diretamente ao tribunal — nunca armazenadas em banco de dados.
+          {/* O aviso aqui mandava rodar `npm run dev` numa pasta `sgj/` que não
+              existe neste projeto — texto que sobrou de outra fase. Pior: dizia
+              que a credencial vai "diretamente ao tribunal", o que não é
+              verdade. Ela passa pelo servidor do sistema, que é quem entra no
+              portal. Isso muda o que a pessoa está aceitando ao digitar. */}
+          <div className="mt-2 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/20 text-xs text-amber-400 leading-relaxed">
+            ⚠️ <b>Leia antes de usar.</b> Sua senha do portal vai para o servidor do Perspecta,
+            que entra no tribunal no seu lugar. Ela <b>não é guardada</b> — nem em banco, nem em
+            arquivo: o servidor fica só com a sessão aberta, por até 4 horas, e essa sessão é
+            sua (ninguém mais no sistema a enxerga ou usa).
+            <br />
+            Ainda assim: a senha do portal é a sua identidade no tribunal. Se o portal pedir
+            captcha, segundo fator ou certificado digital, não há como o sistema entrar — e ele
+            vai dizer isso, em vez de fingir que conectou.
           </div>
         </div>
 

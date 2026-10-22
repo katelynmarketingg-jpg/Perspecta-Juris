@@ -21,8 +21,8 @@ const bad = (m) => { console.log(`  ❌ ${m}`); falhas++ }
 const eq  = (real, esperado, msg) =>
   real === esperado ? ok(`${msg} = ${real}`) : bad(`${msg}: deu ${real}, esperado ${esperado}`)
 
-const { createSession, listSessions, logout, cookiesDaSessao, __sessoes } =
-  await import('../services/tribunalService.js')
+const servicoTrib = await import('../services/tribunalService.js')
+const { createSession, listSessions, logout, cookiesDaSessao, __sessoes } = servicoTrib
 
 const DONA   = { tenantId: 'tnt_trib_a', userId: 'usr_trib_a' }
 const VIZINHO = { tenantId: 'tnt_trib_b', userId: 'usr_trib_b' }
@@ -118,7 +118,68 @@ console.log('\n── 6. As rotas passam o dono adiante ──')
   }
 }
 
-console.log('\n── 7. Sem login não se chega perto ──')
+console.log('\n── 7. "Entrou" tem de significar entrou ──')
+{
+  // A checagem antiga procurava duas frases de erro específicas e, fora isso,
+  // aceitava qualquer cookie de sessão como prova. Só que o cookie de sessão
+  // vem no primeiro GET, ANTES de qualquer senha — não prova nada. Resultado:
+  // senha errada podia virar "Conectado", e a pessoa confiaria que os
+  // sigilosos vieram.
+  const { aindaNaTelaDeLogin, pedeVerificacaoHumana, conferirEntrada } = servicoTrib
+
+  const telaDeLogin = `<html><form action="/login">
+    <input name="username" type="text"><input name="password" type="password">
+    <input type="submit" value="Entrar"></form></html>`
+  const jaDentro = `<html><div id="menu">Bem-vindo, Dra. Karen</div>
+    <a href="/sair">Sair</a><table id="processos"></table></html>`
+  const comCaptcha = `<html><form><input type="password" name="senha">
+    <div class="g-recaptcha" data-sitekey="x"></div></form></html>`
+
+  eq(aindaNaTelaDeLogin(telaDeLogin), true, 'reconhece a tela de login pelo campo de senha')
+  eq(aindaNaTelaDeLogin(jaDentro), false, 'e não confunde a página de dentro')
+  eq(aindaNaTelaDeLogin(''), false, 'resposta vazia não vira tela de login')
+  eq(pedeVerificacaoHumana(comCaptcha), true, 'reconhece captcha')
+  eq(pedeVerificacaoHumana(jaDentro), false, 'e não vê captcha onde não tem')
+
+  // O caso que o código antigo deixava passar: erro com outra redação.
+  const erroComOutraRedacao = `<html><p>Dados de acesso não conferem.</p>
+    <form><input name="password" type="password"></form></html>`
+  let recusou = false
+  try { conferirEntrada('TJRS', erroComOutraRedacao) } catch { recusou = true }
+  eq(recusou, true, 'erro com redação diferente é recusado (o antigo aceitaria)')
+
+  let msgCaptcha = ''
+  try { conferirEntrada('TRT-4', comCaptcha) } catch (e) { msgCaptcha = e.message }
+  if (/captcha|verificação humana/i.test(msgCaptcha)) ok('captcha dá mensagem própria, não "confira a senha"')
+  else bad(`mensagem do captcha: ${msgCaptcha}`)
+
+  let passou = true
+  try { conferirEntrada('TJRS', jaDentro) } catch { passou = false }
+  eq(passou, true, 'página de dentro passa')
+}
+
+console.log('\n── 8. O cliente manda o token certo ──')
+{
+  // As quatro chamadas liam localStorage.pj_token — chave que não existe (o
+  // token mora em pj_access_token). Iam sempre sem credencial, e o servidor
+  // respondia 401 antes de qualquer coisa: esta tela nunca entrou em tribunal
+  // nenhum. Agora passam pelo api.js, que sabe o nome da chave e renova token
+  // vencido.
+  const { readFileSync } = await import('node:fs')
+  const cli = readFileSync('client/src/lib/tribunalScraper.js', 'utf8')
+    .split('\n').map(l => l.replace(/\/\/.*$/, '')).join('\n')
+
+  if (!/localStorage\.getItem\(['\"]pj_token['\"]\)/.test(cli)) ok('não lê mais a chave que não existe')
+  else bad('ainda lê localStorage.pj_token')
+  if (!/fetch\(\s*['\"`]\/api\/tribunal/.test(cli)) ok('não chama fetch na mão para /api/tribunal')
+  else bad('ainda chama fetch direto, sem o api.js')
+  for (const chamada of ['api.post(\'/api/tribunal/login\'', 'api.get(\'/api/tribunal/sessions\'']) {
+    if (cli.includes(chamada)) ok(`usa ${chamada.split('(')[0]} para falar com o servidor`)
+    else bad(`não encontrei ${chamada}`)
+  }
+}
+
+console.log('\n── 9. Sem login não se chega perto ──')
 {
   for (const [rota, metodo] of [['/api/tribunal/sessions', 'GET'], ['/api/tribunal/login', 'POST']]) {
     const r = await fetch(`${BASE}${rota}`, {
