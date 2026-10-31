@@ -421,3 +421,32 @@ export const auditLogs = pgTable('audit_logs', {
 }, t => ({
   tenantIdx: index('audit_tenant_idx').on(t.tenantId, t.createdAt),
 }))
+
+// ── Cálculos salvos ───────────────────────────────────────────
+//
+//  Antes o histórico da calculadora vivia só em `localStorage`, e só quando
+//  a pessoa clicava em "Salvar no histórico". Dois defeitos sérios num
+//  escritório: quem calculou num computador não via nada no outro, e não
+//  havia como saber QUEM fez o cálculo. Agora é do escritório, fica no
+//  banco, guarda o autor e pode ser vinculado ao cliente e ao processo.
+export const calculations = pgTable('calculations', {
+  id:        text('id').primaryKey(),
+  tenantId:  text('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),
+  clientId:  text('client_id').references(() => clients.id, { onDelete: 'set null' }),
+  processId: text('process_id').references(() => processes.id, { onDelete: 'set null' }),
+  calcId:    text('calc_id').notNull(),        // qual calculadora (ex.: 'rescisao')
+  titulo:    text('titulo').notNull(),
+  ramo:      text('ramo'),
+  headline:  jsonb('headline').notNull().default({}),  // { label, value }
+  inputs:    jsonb('inputs').notNull().default({}),
+  resultado: jsonb('resultado').notNull().default({}), // linhas + memória de cálculo
+  // Nome gravado no momento do cálculo: se o acesso for apagado depois, o
+  // histórico continua dizendo quem fez.
+  createdBy:   text('created_by').references(() => users.id, { onDelete: 'set null' }),
+  createdByName: text('created_by_name'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+}, t => ({
+  tenantIdx: index('calculations_tenant_idx').on(t.tenantId, t.createdAt),
+  clientIdx: index('calculations_client_idx').on(t.clientId),
+}))

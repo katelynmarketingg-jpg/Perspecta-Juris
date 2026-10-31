@@ -354,6 +354,53 @@ export function avosFeriasProporcionais(admissaoISO, saidaISO) {
   return Math.min(12, meses + (sobra >= 15 ? 1 : 0))
 }
 
+// ── Aviso-prévio e sua projeção ───────────────────────────────────────────
+//
+//  O aviso-prévio INDENIZADO não é só dinheiro: ele PROJETA a data de saída
+//  para todos os efeitos (art. 487, §1º, CLT; Súmula 371 e OJ 82 da SDI-1 do
+//  TST). Quem sai em 30/10 com 48 dias de aviso tem o contrato projetado até
+//  17/12 — e é essa data que conta os avos de 13º e de férias.
+//
+//  Ignorar a projeção subtrai um a dois avos de cada verba. Num salário de
+//  R$ 3.000 isso é mais de R$ 500 a menos, sempre contra o trabalhador.
+
+/** Anos COMPLETOS de serviço, contados por calendário (não por 365 dias). */
+export function anosDeServico(admissaoISO, saidaISO) {
+  const a = emUTC(admissaoISO), b = emUTC(saidaISO)
+  if (!a || !b || b < a) return 0
+  let anos = b.getUTCFullYear() - a.getUTCFullYear()
+  const aniversario = new Date(Date.UTC(b.getUTCFullYear(), a.getUTCMonth(), a.getUTCDate()))
+  if (b < aniversario) anos -= 1
+  return Math.max(0, anos)
+}
+
+/** Dias de aviso-prévio: 30 + 3 por ano completo, no máximo 90 (Lei 12.506/2011). */
+export function diasDeAvisoPrevio(admissaoISO, saidaISO) {
+  return Math.min(90, 30 + anosDeServico(admissaoISO, saidaISO) * 3)
+}
+
+/** Soma dias corridos a uma data ISO e devolve ISO. */
+export function somarDiasISO(iso, dias) {
+  const d = emUTC(iso)
+  if (!d) return iso
+  return new Date(d.getTime() + Math.round(Number(dias) || 0) * 86400000).toISOString().slice(0, 10)
+}
+
+/**
+ * Aniversário de admissão que cai DEPOIS da saída e ATÉ a data projetada.
+ * Se existe, a projeção do aviso completou um novo período aquisitivo de
+ * férias — que passa a ser devido por inteiro, e não em avos.
+ */
+export function aniversarioNaProjecao(admissaoISO, saidaISO, fimProjetadoISO) {
+  const adm = emUTC(admissaoISO), sai = emUTC(saidaISO), fim = emUTC(fimProjetadoISO)
+  if (!adm || !sai || !fim || fim <= sai) return null
+  for (let ano = sai.getUTCFullYear(); ano <= fim.getUTCFullYear(); ano++) {
+    const aniv = new Date(Date.UTC(ano, adm.getUTCMonth(), adm.getUTCDate()))
+    if (aniv > sai && aniv <= fim) return aniv.toISOString().slice(0, 10)
+  }
+  return null
+}
+
 // dias entre datas
 /**
  * Dias de um vínculo, contando o primeiro E o último dia.
@@ -637,9 +684,9 @@ export const CALCULADORAS = [
   // ─────────────────────── TRABALHISTA ───────────────────────
   {
     id: 'verbas-rescisorias', ramo: 'trabalhista', titulo: 'Verbas rescisórias',
-    descricao: 'Do bruto ao líquido: saldo, aviso, férias, 13º, FGTS, multas e os descontos de INSS e IRRF.',
+    descricao: 'Do bruto ao líquido: saldo, aviso projetado, férias, 13º, FGTS, multas e os descontos de INSS e IRRF.',
     casos: 'Demissão sem justa causa, pedido de demissão, rescisão indireta, término de contrato.',
-    baseLegal: 'CLT arts. 477, 487, 142, 146; Constituição art. 7º; Lei 8.036/90 (FGTS).',
+    baseLegal: 'CLT arts. 477, 487, 137, 142, 146; Lei 12.506/2011; Súmula 371 e OJ 82 da SDI-1 do TST; Lei 8.036/90 (FGTS); Lei 8.212/91 art. 28, §9º; Lei 7.713/88 art. 26.',
     campos: [
       { name: 'salario', label: 'Último salário mensal', type: 'currency', required: true },
       { name: 'admissao', label: 'Data de admissão', type: 'date', required: true },
@@ -651,109 +698,229 @@ export const CALCULADORAS = [
         { value: 'indireta', label: 'Rescisão indireta' },
       ]},
       { name: 'diasTrabMes', label: 'Dias trabalhados no mês da saída', type: 'number', default: '30' },
-      { name: 'feriasVencidas', label: 'Tem férias vencidas?', type: 'select', default: 'nao', options: [{ value: 'nao', label: 'Não' }, { value: 'sim', label: 'Sim' }] },
-      { name: 'fgtsDepositado', label: 'FGTS já depositado (saldo)', type: 'currency', help: 'Para a multa de 40%. Deixe vazio para estimar por 8% × salário × meses.' },
+      { name: 'projetarAviso', label: 'Projetar o aviso-prévio indenizado', type: 'select', default: 'sim',
+        options: [{ value: 'sim', label: 'Sim — projeta 13º, férias e tempo de serviço' }, { value: 'nao', label: 'Não' }],
+        help: 'Art. 487, §1º, CLT e Súmula 371 do TST: o aviso indenizado empurra a data de saída. Só desmarque se a decisão do caso disser o contrário.' },
+      { name: 'feriasVencidasPeriodos', label: 'Períodos de férias vencidas', type: 'number', default: '0',
+        help: 'Quantos períodos aquisitivos completos ainda não foram gozados.' },
+      { name: 'feriasEmDobro', label: 'Férias vencidas em dobro?', type: 'select', default: 'nao',
+        options: [{ value: 'nao', label: 'Não — pagamento simples' }, { value: 'sim', label: 'Sim — período concessivo vencido (art. 137)' }],
+        help: 'Em dobro quando o empregador deixou passar os 12 meses seguintes ao período aquisitivo sem conceder as férias.' },
+      { name: 'fgtsDepositado', label: 'FGTS já depositado (saldo)', type: 'currency', help: 'Para a multa de 40%. Vazio = estimado por 8% × salário × meses de contrato.' },
       { name: 'dependentes', label: 'Dependentes (para o IRRF)', type: 'number', default: '0' },
-      { name: 'pagamento', label: 'Data em que as verbas foram pagas', type: 'date', help: 'Vazio = ainda não pagou. Serve para a multa do art. 477, §8º.' },
+      { name: 'pagamento', label: 'Data em que as verbas foram pagas', type: 'date', help: 'Serve para a multa do art. 477, §8º. Vazio = ainda não pago.' },
       { name: 'outrosDescontos', label: 'Outros descontos (R$)', type: 'currency', help: 'Adiantamento, vale, pensão, contribuições.' },
     ],
     compute: (v) => {
       const sal = num(v.salario)
-      const anosCompletos = Math.max(0, Math.floor(diasEntre(v.admissao, v.saida) / 365))
-      // 13º conta pelo ANO CIVIL; férias, pelo PERÍODO AQUISITIVO (aniversário
-      // da admissão). São contas diferentes e antes usavam o mesmo número.
-      const meses13   = avosDecimoTerceiro(v.admissao, v.saida)
-      const mesesFerias = avosFeriasProporcionais(v.admissao, v.saida)
       const motivo = v.motivo
       const temAviso = motivo === 'sem_justa' || motivo === 'indireta'
       const temMulta = motivo === 'sem_justa' || motivo === 'indireta'
       const dias = num(v.diasTrabMes) || 30
+      const anosCompletos = anosDeServico(v.admissao, v.saida)
+
+      // ── Projeção do aviso-prévio indenizado ──────────────────────────
+      // Art. 487, §1º, CLT + Súmula 371 do TST: o aviso indenizado integra o
+      // tempo de serviço para TODOS os efeitos. Antes o sistema pagava o
+      // aviso em dinheiro mas contava os avos de 13º e de férias pela data
+      // da saída — um a dois avos a menos em cada verba, sempre contra o
+      // trabalhador, e sem nada na tela dizendo isso.
+      const diasAviso = temAviso ? diasDeAvisoPrevio(v.admissao, v.saida) : 0
+      const projetar = temAviso && v.projetarAviso !== 'nao' && diasAviso > 0
+      const fimProjetado = projetar ? somarDiasISO(v.saida, diasAviso) : v.saida
+
+      // 13º conta pelo ANO CIVIL; férias, pelo PERÍODO AQUISITIVO (aniversário
+      // da admissão). São contas diferentes e antes usavam o mesmo número.
+      // Quando a projeção vira o ano, o 13º do ano da saída fecha em 31/12 e
+      // os meses que sobram geram avos do ano seguinte.
+      const anoSaida = Number(String(v.saida ?? '').slice(0, 4))
+      const anoFim   = Number(String(fimProjetado ?? '').slice(0, 4))
+      const viraAno  = Boolean(anoFim && anoSaida && anoFim > anoSaida)
+      const meses13      = avosDecimoTerceiro(v.admissao, viraAno ? `${anoSaida}-12-31` : fimProjetado)
+      const meses13Prox  = viraAno ? avosDecimoTerceiro(`${anoFim}-01-01`, fimProjetado) : 0
+      const avos13       = Math.min(24, meses13 + meses13Prox)
+      const mesesFerias  = avosFeriasProporcionais(v.admissao, fimProjetado)
+      // Se a projeção passou por um aniversário de admissão, o período
+      // aquisitivo FECHOU dentro do aviso: vira férias integrais, não avos.
+      const anivProjetado = projetar ? aniversarioNaProjecao(v.admissao, v.saida, fimProjetado) : null
 
       const linhas = [], memoria = []
-      // Saldo de salário
-      const saldo = sal / 30 * dias
-      linhas.push({ label: `Saldo de salário (${dias} dias)`, value: brl(saldo) })
-      memoria.push(`Saldo de salário = ${brl(sal)} ÷ 30 × ${dias} = ${brl(saldo)}`)
 
-      // Aviso prévio
+      // ── Saldo de salário ─────────────────────────────────────────────
+      const saldo = centavos(sal / 30 * dias)
+      linhas.push({ label: `Saldo de salário (${dias} dias)`, value: brl(saldo) })
+      memoria.push(`Saldo de salário = ${brl(sal)} ÷ 30 × ${dias} = ${brl(saldo)} (art. 457 da CLT)`)
+
+      // ── Aviso-prévio indenizado ──────────────────────────────────────
       let aviso = 0
       if (temAviso) {
-        const diasAviso = Math.min(90, 30 + anosCompletos * 3)
-        aviso = sal / 30 * diasAviso
+        aviso = centavos(sal / 30 * diasAviso)
         linhas.push({ label: `Aviso-prévio indenizado (${diasAviso} dias)`, value: brl(aviso) })
-        memoria.push(`Aviso-prévio = 30 + ${anosCompletos}×3 = ${diasAviso} dias → ${brl(sal)} ÷ 30 × ${diasAviso} = ${brl(aviso)}`)
+        memoria.push(`Aviso-prévio = 30 + ${anosCompletos}×3 = ${diasAviso} dias (Lei 12.506/2011) → ${brl(sal)} ÷ 30 × ${diasAviso} = ${brl(aviso)}`)
+        memoria.push(projetar
+          ? `Projeção: contrato projetado de ${fmtPrazo(v.saida)} até ${fmtPrazo(fimProjetado)} (art. 487, §1º, CLT; Súmula 371 do TST). É essa data que conta os avos abaixo.`
+          : `⚠️ Projeção DESLIGADA: 13º e férias foram contados até ${fmtPrazo(v.saida)}. Pela Súmula 371 do TST o normal é projetar — confira se o caso justifica não projetar.`)
+      } else if (motivo === 'pedido') {
+        memoria.push('Pedido de demissão: não há aviso indenizado a receber. Se o aviso não foi trabalhado, o empregador pode descontar um salário (art. 487, §2º) — lance em "Outros descontos".')
       }
 
-      // 13º proporcional
-      const decimo = motivo === 'justa' ? 0 : sal / 12 * meses13
-      if (decimo) { linhas.push({ label: `13º proporcional (${meses13}/12)`, value: brl(decimo) }); memoria.push(`13º proporcional = ${brl(sal)} ÷ 12 × ${meses13} avos do ano civil = ${brl(decimo)}`) }
+      // ── 13º proporcional ─────────────────────────────────────────────
+      const decimo = motivo === 'justa' ? 0 : centavos(sal / 12 * avos13)
+      if (decimo) {
+        linhas.push({ label: `13º proporcional (${avos13}/12)`, value: brl(decimo) })
+        memoria.push(viraAno
+          ? `13º = ${meses13}/12 avos de ${anoSaida} + ${meses13Prox}/12 avos de ${anoFim} (a projeção virou o ano) = ${avos13} avos → ${brl(sal)} ÷ 12 × ${avos13} = ${brl(decimo)}`
+          : `13º proporcional = ${brl(sal)} ÷ 12 × ${avos13} avos do ano civil (Lei 4.090/62) = ${brl(decimo)}`)
+      }
 
-      // Férias proporcionais + 1/3 — avos do período aquisitivo
-      // (quem pede demissão com menos de 12 meses de casa também tem direito:
-      //  Súmula 261 do TST derrubou a regra antiga.)
-      const fp = motivo === 'justa' ? 0 : (sal / 12 * mesesFerias)
-      const fpTerco = fp / 3
-      if (fp) { linhas.push({ label: `Férias proporcionais + 1/3 (${mesesFerias}/12)`, value: brl(fp + fpTerco) }); memoria.push(`Férias prop. = ${brl(sal)} ÷ 12 × ${mesesFerias} avos do período aquisitivo = ${brl(fp)}; +1/3 = ${brl(fpTerco)}`) }
+      // ── Férias proporcionais + 1/3 ───────────────────────────────────
+      // Quem pede demissão com menos de 12 meses de casa também tem direito:
+      // a Súmula 261 do TST derrubou a regra antiga.
+      const fp = motivo === 'justa' ? 0 : centavos(sal / 12 * mesesFerias)
+      const fpTerco = centavos(fp / 3)
+      if (fp) {
+        linhas.push({ label: `Férias proporcionais + 1/3 (${mesesFerias}/12)`, value: brl(fp + fpTerco) })
+        memoria.push(`Férias prop. = ${brl(sal)} ÷ 12 × ${mesesFerias} avos do período aquisitivo (art. 146, § único, CLT) = ${brl(fp)}; +1/3 constitucional = ${brl(fpTerco)}`)
+      }
 
-      // Férias vencidas + 1/3
+      // Período aquisitivo fechado DENTRO da projeção: férias integrais.
+      let feriasProjetadas = 0
+      if (anivProjetado && motivo !== 'justa') {
+        feriasProjetadas = centavos(sal + sal / 3)
+        linhas.push({ label: 'Férias integrais + 1/3 (período completado na projeção)', value: brl(feriasProjetadas) })
+        memoria.push(`A projeção do aviso passou por ${fmtPrazo(anivProjetado)}, aniversário da admissão: o período aquisitivo fechou dentro do aviso e vira férias INTEGRais + 1/3 = ${brl(feriasProjetadas)} (Súmula 371 do TST).`.replace('INTEGRais', 'integrais'))
+      }
+
+      // ── Férias vencidas + 1/3 (simples ou em dobro) ──────────────────
+      // Antes era um "sim/não" que pagava sempre UM período simples. Férias
+      // vencidas podem ser vários períodos, e quando o prazo concessivo
+      // passou são devidas EM DOBRO (art. 137 da CLT).
+      const periodosVencidos = Math.max(0, Math.floor(
+        num(v.feriasVencidasPeriodos) || (v.feriasVencidas === 'sim' ? 1 : 0)))
+      const emDobro = v.feriasEmDobro === 'sim'
       let fv = 0
-      if (v.feriasVencidas === 'sim') { fv = sal + sal / 3; linhas.push({ label: 'Férias vencidas + 1/3', value: brl(fv) }); memoria.push(`Férias vencidas = ${brl(sal)} + 1/3 = ${brl(fv)}`) }
+      if (periodosVencidos > 0) {
+        const umPeriodo = centavos(sal + sal / 3)
+        fv = centavos(umPeriodo * periodosVencidos * (emDobro ? 2 : 1))
+        linhas.push({ label: `Férias vencidas + 1/3 (${periodosVencidos} período${periodosVencidos > 1 ? 's' : ''}${emDobro ? ', em dobro' : ''})`, value: brl(fv) })
+        memoria.push(`Férias vencidas = (${brl(sal)} + 1/3) × ${periodosVencidos} período(s)${emDobro ? ' × 2 (art. 137 da CLT — prazo concessivo vencido)' : ''} = ${brl(fv)}`)
+      }
 
-      // Multa 40% FGTS
+      // ── FGTS: depósitos, depósitos rescisórios e multa de 40% ────────
+      // Antes, com o campo em branco a multa saía ZERO calada — o texto de
+      // ajuda prometia uma estimativa que o código nunca fez.
+      const mesesContrato = mesesEntre(v.admissao, v.saida)
+      const fgtsInformado = num(v.fgtsDepositado)
+      const fgtsEstimado  = centavos(0.08 * sal * mesesContrato)
+      const fgtsDepositos = fgtsInformado > 0 ? fgtsInformado : fgtsEstimado
+      // O FGTS incide sobre o saldo, sobre o aviso indenizado (Súmula 305 do
+      // TST) e sobre o 13º — e esses depósitos ainda entram na base da multa.
+      const fgtsRescisorio = centavos(0.08 * (saldo + aviso + decimo))
+      const baseMulta = centavos(fgtsDepositos + fgtsRescisorio)
       let multa = 0
-      if (temMulta) { multa = num(v.fgtsDepositado) * 0.40; linhas.push({ label: 'Multa 40% do FGTS', value: brl(multa) }); memoria.push(`Multa FGTS = ${brl(num(v.fgtsDepositado))} × 40% = ${brl(multa)}`) }
+      if (temMulta) {
+        multa = centavos(baseMulta * 0.40)
+        linhas.push({ label: 'Multa 40% do FGTS', value: brl(multa) })
+        memoria.push(
+          fgtsInformado > 0
+            ? `FGTS depositado (informado) = ${brl(fgtsDepositos)}`
+            : `⚠️ FGTS depositado ESTIMADO = 8% × ${brl(sal)} × ${mesesContrato} meses = ${brl(fgtsEstimado)}. Informe o extrato para o valor exato.`,
+          `FGTS rescisório (8% sobre saldo + aviso + 13º) = ${brl(fgtsRescisorio)}`,
+          `Multa de 40% = (${brl(fgtsDepositos)} + ${brl(fgtsRescisorio)}) × 40% = ${brl(multa)} (art. 18, §1º, da Lei 8.036/90)`,
+        )
+      }
 
-      const total = saldo + aviso + decimo + fp + fpTerco + fv + multa
-      memoria.push(`TOTAL BRUTO = ${brl(total)}`)
-      if (motivo === 'justa') memoria.push('Justa causa: sem aviso, 13º/férias proporcionais e multa.')
-      if (motivo === 'pedido') memoria.push('Pedido de demissão: sem aviso indenizado (pode ser descontado) e sem multa de 40%.')
-
-      // ── Multa do art. 477, §8º ────────────────────────────────────
-      // Prazo de 10 dias corridos da saída. É de direito material: começa no
-      // dia seguinte mesmo sendo domingo; só o vencimento prorroga (art. 132 CC).
+      // ── Multa do art. 477, §8º ───────────────────────────────────────
+      // Prazo de 10 dias corridos da saída (art. 477, §6º, após a Lei
+      // 13.467/2017). É de direito material: começa no dia seguinte mesmo
+      // sendo domingo; só o vencimento prorroga (art. 132 do Código Civil).
+      //
+      // Antes a multa era aplicada sempre que a data de pagamento estava em
+      // branco — inclusive dentro do prazo, quando atraso nenhum existe. Um
+      // salário inteiro a mais num número que parece exato.
       let multa477 = 0
-      if (motivo !== 'justa' && v.saida) {
+      if (v.saida) {
         const limite = calcularPrazo(v.saida, 10, { uteis: false, recesso: false, inicioNoDiaUtil: false })
-        const atrasou = !v.pagamento || emUTCPrazo(v.pagamento) > emUTCPrazo(limite.vencimento)
-        if (atrasou) {
+        const venc = limite?.vencimento
+        const hoje = new Date().toISOString().slice(0, 10)
+        const prazoVencido = venc ? emUTCPrazo(hoje) > emUTCPrazo(venc) : false
+        const pagouAtrasado = v.pagamento && venc && emUTCPrazo(v.pagamento) > emUTCPrazo(venc)
+        if (pagouAtrasado || (!v.pagamento && prazoVencido)) {
           multa477 = sal
           linhas.push({ label: 'Multa do art. 477, §8º (1 salário)', value: brl(multa477) })
-          memoria.push(`Acerto vencia em ${fmtPrazo(limite.vencimento)} (10 dias da saída). ${v.pagamento ? `Pago em ${fmtPrazo(v.pagamento)} — fora do prazo.` : 'Ainda não pago.'} Multa = ${brl(multa477)}`)
+          memoria.push(`O acerto vencia em ${fmtPrazo(venc)} (10 dias corridos da saída). ${v.pagamento ? `Pago em ${fmtPrazo(v.pagamento)} — fora do prazo.` : 'Nenhum pagamento informado e o prazo já passou.'} Multa = ${brl(multa477)}`)
+        } else if (venc && !v.pagamento) {
+          memoria.push(`O acerto vence em ${fmtPrazo(venc)} (10 dias corridos da saída) e esse prazo ainda não passou — por isso NÃO há multa do art. 477 aqui. Informe a data do pagamento depois para conferir.`)
+        } else if (venc && v.pagamento) {
+          memoria.push(`Pago em ${fmtPrazo(v.pagamento)}, dentro do prazo que vencia em ${fmtPrazo(venc)} — sem multa do art. 477.`)
         }
       }
 
-      // ── Do bruto ao líquido ───────────────────────────────────────
-      // Não incidem INSS nem IRRF sobre férias indenizadas e seu 1/3, aviso
-      // indenizado, FGTS e multa de 40% (Súm. 688 STF; art. 28, §9º, Lei
-      // 8.212/91). Incidem sobre saldo de salário e 13º.
-      const tributavel = saldo + decimo
-      const isento = aviso + fp + fpTerco + fv + multa + multa477
-      const bruto = total + multa477
+      if (motivo === 'justa') memoria.push('Justa causa: sem aviso, sem 13º e férias proporcionais e sem multa de 40%. Saldo de salário e férias vencidas continuam devidos.')
 
-      const inss = descontoINSS(sal)
-      const ir = descontoIRRF(tributavel - inss.valor, num(v.dependentes))
+      // ── Do bruto ao líquido ──────────────────────────────────────────
+      // Não incidem INSS nem IRRF sobre férias indenizadas e seu 1/3, aviso
+      // indenizado, FGTS e multa de 40% (Súmula 688 do STF; art. 28, §9º, da
+      // Lei 8.212/91; Súmula 386 do STJ).
+      const bruto = centavos(saldo + aviso + decimo + fp + fpTerco + feriasProjetadas + fv + multa + multa477)
+      const isento = centavos(aviso + fp + fpTerco + feriasProjetadas + fv + multa + multa477)
+
+      // INSS: o 13º tem base PRÓPRIA e isolada (art. 214, §6º, do Decreto
+      // 3.048/99). Somar o 13º ao saldo empurra tudo para uma faixa mais alta
+      // e cobra imposto a mais. Antes o sistema calculava o INSS sobre o
+      // SALÁRIO cheio — nem sobre o saldo, nem sobre a base certa.
+      const inssSaldo = descontoINSS(saldo)
+      const inss13    = decimo ? descontoINSS(decimo) : { valor: 0, base: 0, tetoAtingido: false }
+      const inssTotal = centavos(inssSaldo.valor + inss13.valor)
+
+      // IRRF: o 13º é tributado EXCLUSIVAMENTE NA FONTE, em separado dos
+      // demais rendimentos (art. 26 da Lei 7.713/88). Somar as duas bases
+      // numa só joga o trabalhador para uma alíquota que ele não deve.
+      const dep = num(v.dependentes)
+      const irMensal = descontoIRRF(saldo - inssSaldo.valor, dep)
+      const ir13     = decimo ? descontoIRRF(decimo - inss13.valor, dep) : { aplicavel: true, valor: 0, base: 0 }
+      const irTotal  = centavos((irMensal.valor || 0) + (ir13.valor || 0))
+
       const outros = num(v.outrosDescontos)
-      const liquido = bruto - inss.valor - ir.valor - outros
+      const liquido = centavos(bruto - inssTotal - irTotal - outros)
 
       linhas.push({ label: '── TOTAL BRUTO', value: brl(bruto) })
-      linhas.push({ label: `(−) INSS${inss.tetoAtingido ? ' (no teto)' : ''}`, value: '- ' + brl(inss.valor) })
-      if (ir.aplicavel && ir.valor) linhas.push({ label: '(−) IRRF', value: '- ' + brl(ir.valor) })
+      linhas.push({ label: `(−) INSS${inssSaldo.tetoAtingido ? ' (no teto)' : ''}`, value: '- ' + brl(inssTotal) })
+      if (irTotal) linhas.push({ label: '(−) IRRF', value: '- ' + brl(irTotal) })
       if (outros) linhas.push({ label: '(−) Outros descontos', value: '- ' + brl(outros) })
       linhas.push({ label: '── LÍQUIDO A RECEBER', value: brl(liquido) })
+      // O FGTS não é pago pelo empregador na rescisão: é sacado na Caixa.
+      // Misturá-lo ao líquido faz o cliente esperar dinheiro que não vem.
+      if (temMulta) linhas.push({ label: 'FGTS a sacar na Caixa (fora do líquido acima)', value: brl(centavos(baseMulta + multa)) })
 
       memoria.push(
-        `Com incidência (saldo + 13º): ${brl(tributavel)} · Sem incidência: ${brl(isento)}`,
-        `INSS sobre ${brl(inss.base)} = ${brl(inss.valor)}`,
-        ir.aplicavel
-          ? `IRRF: base ${brl(ir.base)} → ${brl(ir.valor)}${ir.usouSimplificado ? ' (desconto simplificado)' : ` (${num(v.dependentes)} dependente(s))`}`
+        `TOTAL BRUTO = ${brl(bruto)}`,
+        `Com incidência de INSS/IRRF: saldo ${brl(saldo)} + 13º ${brl(decimo)} · Sem incidência: ${brl(isento)}`,
+        `INSS sobre o saldo (${brl(inssSaldo.base)}) = ${brl(inssSaldo.valor)}`,
+        decimo ? `INSS sobre o 13º, em base separada (${brl(inss13.base)}) = ${brl(inss13.valor)} — art. 214, §6º, do Decreto 3.048/99` : null,
+        irMensal.aplicavel
+          ? `IRRF mensal: base ${brl(irMensal.base)} → ${brl(irMensal.valor)}${irMensal.usouSimplificado ? ' (desconto simplificado)' : ` (${dep} dependente(s))`}`
           : '⚠️ IRRF não aplicado: tabela não cadastrada. O líquido está MAIOR que o real.',
-        `LÍQUIDO = ${brl(bruto)} − ${brl(inss.valor)} − ${brl(ir.valor)}${outros ? ` − ${brl(outros)}` : ''} = ${brl(liquido)}`,
+        decimo ? `IRRF do 13º, exclusivo na fonte: base ${brl(ir13.base)} → ${brl(ir13.valor)} — art. 26 da Lei 7.713/88` : null,
+        `LÍQUIDO = ${brl(bruto)} − ${brl(inssTotal)} (INSS) − ${brl(irTotal)} (IRRF)${outros ? ` − ${brl(outros)}` : ''} = ${brl(liquido)}`,
+        temMulta ? `Além do líquido, há ${brl(centavos(baseMulta + multa))} de FGTS a sacar na Caixa (depósitos + rescisório + multa de 40%).` : null,
       )
+      while (memoria.includes(null)) memoria.splice(memoria.indexOf(null), 1)
 
       return {
         headline: { label: 'Líquido a receber', value: brl(liquido) },
         linhas, memoria,
-        criterios: [`Motivo: ${{sem_justa:'Sem justa causa',pedido:'Pedido de demissão',justa:'Justa causa',indireta:'Rescisão indireta'}[motivo]}`, `Tempo: ${anosCompletos} ano(s) completos`, `13º: ${meses13}/12 avos (ano civil) · Férias: ${mesesFerias}/12 avos (período aquisitivo)`, 'INSS e IRRF incidem só sobre saldo de salário e 13º. Férias indenizadas, 1/3, aviso indenizado, FGTS e multa de 40% são isentos.', 'Não inclui horas extras nem adicionais — use a Reclamatória trabalhista para somar tudo.', 'Não projeta o aviso-prévio indenizado sobre 13º e férias (art. 487, §1º, CLT) — some se o caso exigir.'],
+        criterios: [
+          `Motivo: ${{sem_justa:'Sem justa causa',pedido:'Pedido de demissão',justa:'Justa causa',indireta:'Rescisão indireta'}[motivo]}`,
+          `Tempo de serviço: ${anosCompletos} ano(s) completos`,
+          projetar
+            ? `Aviso-prévio indenizado PROJETADO até ${fmtPrazo(fimProjetado)} (art. 487, §1º, CLT; Súmula 371 do TST).`
+            : 'Sem projeção do aviso-prévio.',
+          `13º: ${avos13}/12 avos (ano civil) · Férias: ${mesesFerias}/12 avos (período aquisitivo)`,
+          'INSS e IRRF incidem só sobre saldo de salário e 13º, cada um em base própria. Férias indenizadas, 1/3, aviso indenizado, FGTS e multa de 40% são isentos.',
+          'O FGTS (depósitos + multa) é sacado na Caixa e NÃO entra no líquido pago pelo empregador.',
+          'Não inclui horas extras nem adicionais — use a Reclamatória trabalhista para somar tudo.',
+        ],
       }
     },
   },
@@ -797,7 +964,34 @@ export const CALCULADORAS = [
     descricao: '8% da remuneração; multa de 40% sobre o total depositado.', casos: 'Depósito mensal e rescisão sem justa causa.',
     baseLegal: 'Lei 8.036/90; art. 18, §1º.',
     campos: [{ name: 'remuneracao', label: 'Remuneração mensal', type: 'currency', required: true }, { name: 'meses', label: 'Meses de vínculo', type: 'number', default: '12' }, { name: 'saldoFgts', label: 'Saldo total do FGTS (p/ multa)', type: 'currency' }],
-    compute: (v) => { const dep = num(v.remuneracao)*0.08; const acum = dep*num(v.meses); const multa = num(v.saldoFgts)*0.40; return { headline: { label: 'FGTS + multa 40%', value: brl(acum+multa) }, linhas: [{label:`Depósito mensal (8%)`, value: brl(dep)}, {label:`Acumulado (${num(v.meses)}m)`, value: brl(acum)}, ...(multa?[{label:'Multa 40%', value: brl(multa)}]:[])], memoria: [`Depósito = ${brl(num(v.remuneracao))} × 8% = ${brl(dep)}`, `Acumulado = ${brl(dep)} × ${num(v.meses)} = ${brl(acum)}`, ...(multa?[`Multa = ${brl(num(v.saldoFgts))} × 40% = ${brl(multa)}`]:[])], criterios: [] } },
+    // Antes a multa saía ZERO quando o saldo não era informado, e quando era,
+    // o total somava o saldo REAL com o acumulado ESTIMADO — dois números da
+    // mesma coisa somados um sobre o outro.
+    compute: (v) => {
+      const dep = centavos(num(v.remuneracao) * 0.08)
+      const acum = centavos(dep * num(v.meses))
+      const informado = num(v.saldoFgts)
+      const saldo = informado > 0 ? informado : acum
+      const multa = centavos(saldo * 0.40)
+      return {
+        headline: { label: 'FGTS + multa 40%', value: brl(centavos(saldo + multa)) },
+        linhas: [
+          { label: 'Depósito mensal (8%)', value: brl(dep) },
+          { label: `Saldo ${informado > 0 ? 'informado' : `estimado (${num(v.meses)} meses)`}`, value: brl(saldo) },
+          { label: 'Multa 40%', value: brl(multa) },
+          { label: 'Total a sacar', value: brl(centavos(saldo + multa)) },
+        ],
+        memoria: [
+          `Depósito = ${brl(num(v.remuneracao))} × 8% = ${brl(dep)}`,
+          informado > 0
+            ? `Saldo informado = ${brl(saldo)}`
+            : `⚠️ Saldo ESTIMADO = ${brl(dep)} × ${num(v.meses)} meses = ${brl(saldo)}. Informe o extrato da Caixa para o valor exato — a estimativa ignora reajustes e juros da conta.`,
+          `Multa = ${brl(saldo)} × 40% = ${brl(multa)} (art. 18, §1º, da Lei 8.036/90)`,
+          `Total a sacar = ${brl(centavos(saldo + multa))}`,
+        ],
+        criterios: ['O FGTS é sacado na Caixa — não entra no líquido pago pelo empregador na rescisão.'],
+      }
+    },
   },
   {
     id: 'horas-extras', ramo: 'trabalhista', titulo: 'Horas extras',
@@ -1528,45 +1722,64 @@ export const CALCULADORAS = [
     baseLegal: 'INSS: Portaria Interministerial MPS/MF nº 13/2026 (tabela progressiva). IRRF: tabela da Receita Federal, cadastrada em Parâmetros. Não incidem INSS/IRRF sobre férias indenizadas, 1/3 indenizado, aviso-prévio indenizado, FGTS e multa de 40% (Súm. 688 STF; art. 28, §9º, Lei 8.212/91).',
     campos: [
       { name: 'salario', label: 'Salário mensal (base do INSS)', type: 'currency', required: true },
-      { name: 'verbasTributaveis', label: 'Verbas com incidência (saldo, 13º…)', type: 'currency', required: true, help: 'Saldo de salário, 13º proporcional, horas extras, adicionais.' },
+      { name: 'verbasTributaveis', label: 'Verbas mensais com incidência (sem o 13º)', type: 'currency', required: true, help: 'Saldo de salário, horas extras, adicionais. NÃO inclua o 13º — ele tem campo próprio porque é tributado em separado.' },
+      { name: 'decimoTerceiro', label: '13º salário (base separada)', type: 'currency', help: 'O 13º tem INSS em base isolada (art. 214, §6º, Dec. 3.048/99) e IRRF exclusivo na fonte (art. 26 da Lei 7.713/88). Somá-lo às demais verbas cobra imposto a mais.' },
       { name: 'verbasIsentas', label: 'Verbas sem incidência', type: 'currency', help: 'Férias indenizadas + 1/3, aviso indenizado, FGTS, multa de 40%.' },
       { name: 'dependentes', label: 'Nº de dependentes (IRRF)', type: 'number', default: '0' },
       { name: 'outrosDescontos', label: 'Outros descontos (R$)', type: 'currency', help: 'Adiantamentos, vale, pensão, contribuições.' },
     ],
+    // Antes o INSS era calculado sobre o SALÁRIO digitado, e não sobre as
+    // verbas efetivamente pagas; e o 13º era somado às demais verbas numa
+    // base só, o que empurra o trabalhador para uma faixa de IRRF que ele
+    // não deve. São duas bases distintas, por lei.
     compute: (v) => {
-      const trib = num(v.verbasTributaveis), isentas = num(v.verbasIsentas)
-      const bruto = trib + isentas
-      const inss = descontoINSS(v.salario)
-      const ir = descontoIRRF(trib - inss.valor, num(v.dependentes))
+      const trib = num(v.verbasTributaveis), decimo = num(v.decimoTerceiro), isentas = num(v.verbasIsentas)
+      const bruto = centavos(trib + decimo + isentas)
+      const dep = num(v.dependentes)
+
+      // Base mensal: as verbas com incidência, limitadas ao teto do INSS.
+      const inssMensal = descontoINSS(trib)
+      const inss13     = decimo ? descontoINSS(decimo) : { valor: 0, base: 0, detalhe: [], tetoAtingido: false }
+      const inssTotal  = centavos(inssMensal.valor + inss13.valor)
+
+      const ir   = descontoIRRF(trib - inssMensal.valor, dep)
+      const ir13 = decimo ? descontoIRRF(decimo - inss13.valor, dep) : { aplicavel: true, valor: 0, base: 0, faixa: {} }
+      const irTotal = centavos((ir.valor || 0) + (ir13.valor || 0))
+
       const outros = num(v.outrosDescontos)
-      const liquido = bruto - inss.valor - ir.valor - outros
+      const liquido = centavos(bruto - inssTotal - irTotal - outros)
 
       const linhas = [
-        { label: 'Verbas com incidência', value: brl(trib) },
+        { label: 'Verbas mensais com incidência', value: brl(trib) },
+        ...(decimo ? [{ label: '13º salário (base separada)', value: brl(decimo) }] : []),
         ...(isentas ? [{ label: 'Verbas sem incidência', value: brl(isentas) }] : []),
         { label: 'Total bruto', value: brl(bruto) },
-        { label: `(−) INSS${inss.tetoAtingido ? ' (no teto)' : ''}`, value: '- ' + brl(inss.valor) },
-        ...(ir.aplicavel ? [{ label: '(−) IRRF', value: '- ' + brl(ir.valor) }] : []),
+        { label: `(−) INSS${inssMensal.tetoAtingido ? ' (no teto)' : ''}`, value: '- ' + brl(inssTotal) },
+        ...(ir.aplicavel ? [{ label: '(−) IRRF', value: '- ' + brl(irTotal) }] : []),
         ...(outros ? [{ label: '(−) Outros descontos', value: '- ' + brl(outros) }] : []),
+        { label: '── LÍQUIDO A RECEBER', value: brl(liquido) },
       ]
 
       const memoria = [
-        `Bruto = ${brl(trib)} + ${brl(isentas)} = ${brl(bruto)}`,
-        'INSS, faixa a faixa (cada alíquota só sobre a parcela dentro dela):',
-        ...inss.detalhe.map(d => `   ${brl(d.de)} a ${brl(d.ate)} × ${(d.aliquota * 100).toFixed(1)}% = ${brl(d.valor)}`),
-        `   INSS total = ${brl(inss.valor)}`,
+        `Bruto = ${brl(trib)}${decimo ? ` + ${brl(decimo)} (13º)` : ''} + ${brl(isentas)} = ${brl(bruto)}`,
+        'INSS das verbas mensais, faixa a faixa (cada alíquota só sobre a parcela dentro dela):',
+        ...inssMensal.detalhe.map(d => `   ${brl(d.de)} a ${brl(d.ate)} × ${(d.aliquota * 100).toFixed(1)}% = ${brl(d.valor)}`),
+        `   INSS mensal = ${brl(inssMensal.valor)}`,
+        decimo ? `INSS do 13º, em base isolada (${brl(inss13.base)}) = ${brl(inss13.valor)} — art. 214, §6º, do Decreto 3.048/99` : null,
         ir.aplicavel
-          ? `IRRF: base ${brl(ir.base)} × ${((ir.faixa.aliquota ?? 0) * 100).toFixed(1)}% − ${brl(ir.faixa.deduzir ?? 0)} = ${brl(ir.valor)}`
+          ? `IRRF mensal: base ${brl(ir.base)} × ${((ir.faixa.aliquota ?? 0) * 100).toFixed(1)}% − ${brl(ir.faixa.deduzir ?? 0)} = ${brl(ir.valor)}`
           : '⚠️ IRRF NÃO foi aplicado: a tabela do imposto de renda ainda não está cadastrada em Configurações → Parâmetros. O líquido abaixo está MAIOR que o real.',
-        `LÍQUIDO = ${brl(liquido)}`,
-      ]
+        decimo ? `IRRF do 13º, exclusivo na fonte: base ${brl(ir13.base)} → ${brl(ir13.valor)} — art. 26 da Lei 7.713/88` : null,
+        `LÍQUIDO = ${brl(bruto)} − ${brl(inssTotal)} (INSS) − ${brl(irTotal)} (IRRF)${outros ? ` − ${brl(outros)}` : ''} = ${brl(liquido)}`,
+      ].filter(Boolean)
 
       return {
         headline: { label: ir.aplicavel ? 'Líquido a receber' : 'Líquido (sem IRRF)', value: brl(liquido) },
         linhas, memoria,
         criterios: [
-          `INSS sobre ${brl(inss.base)}${inss.tetoAtingido ? ' (teto de contribuição)' : ''}.`,
-          ir.aplicavel ? `${num(v.dependentes)} dependente(s) deduzido(s).` : 'Cadastre a tabela do IRRF em Parâmetros para o líquido ficar completo.',
+          `INSS das verbas mensais sobre ${brl(inssMensal.base)}${inssMensal.tetoAtingido ? ' (teto de contribuição)' : ''}.`,
+          decimo ? 'O 13º tem base própria de INSS e IRRF exclusivo na fonte — por isso é somado ao líquido, mas tributado em separado.' : 'Se houver 13º, lance no campo próprio: ele é tributado em separado.',
+          ir.aplicavel ? `${dep} dependente(s) deduzido(s).` : 'Cadastre a tabela do IRRF em Parâmetros para o líquido ficar completo.',
           'Férias indenizadas, 1/3, aviso indenizado, FGTS e multa de 40% não sofrem INSS nem IRRF.',
         ],
       }
@@ -1593,15 +1806,22 @@ export const CALCULADORAS = [
       if (v.saida) {
         const limite = calcularPrazo(v.saida, 10, { uteis: false, recesso: false, inicioNoDiaUtil: false })
         prazoStr = fmtPrazo(limite.vencimento)
-        const atrasou = !v.pagamento || emUTCPrazo(v.pagamento) > emUTCPrazo(limite.vencimento)
-        if (atrasou) {
+        // Sem data de pagamento informada, só há atraso se o prazo JÁ venceu.
+        // Antes a multa era aplicada sempre que o campo estava em branco —
+        // inclusive dentro dos 10 dias, quando atraso nenhum existe ainda.
+        const hoje = new Date().toISOString().slice(0, 10)
+        const prazoVencido = emUTCPrazo(hoje) > emUTCPrazo(limite.vencimento)
+        const pagouAtrasado = v.pagamento && emUTCPrazo(v.pagamento) > emUTCPrazo(limite.vencimento)
+        if (pagouAtrasado || (!v.pagamento && prazoVencido)) {
           multa477 = sal
           linhas.push({ label: 'Multa do art. 477, §8º (1 salário)', value: brl(multa477) })
           memoria.push(`Saída em ${fmtPrazo(v.saida)}; o acerto vencia em ${prazoStr} (10 dias, art. 477 §6º).`)
-          memoria.push(v.pagamento ? `Pago em ${fmtPrazo(v.pagamento)} — fora do prazo.` : 'Ainda não pago.')
+          memoria.push(v.pagamento ? `Pago em ${fmtPrazo(v.pagamento)} — fora do prazo.` : 'Nenhum pagamento informado e o prazo já passou.')
           memoria.push(`Multa = 1 salário = ${brl(sal)}`)
-        } else {
+        } else if (v.pagamento) {
           memoria.push(`Acerto pago em ${fmtPrazo(v.pagamento)}, dentro do prazo que vencia em ${prazoStr}. Sem multa do art. 477.`)
+        } else {
+          memoria.push(`O prazo do acerto vence em ${prazoStr} e ainda não passou — não há multa do art. 477 por enquanto. Informe a data do pagamento depois para conferir.`)
         }
         criterios.push(`Prazo do acerto: ${prazoStr}`)
       }
