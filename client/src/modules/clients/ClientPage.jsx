@@ -885,6 +885,88 @@ const DEFAULT_FOLDERS = [
 ]
 
 // ── Atendimentos do cliente (fila + presencial/online/WhatsApp) ────
+// ─────────────────────────────────────────────────────────────────────────
+//  Cálculos feitos para este cliente.
+//
+//  A calculadora grava todo cálculo no banco com o autor e, quando houver,
+//  o cliente vinculado. Aqui a ficha mostra o que já foi calculado para
+//  essa pessoa, por quem e quando — sem precisar procurar no histórico.
+// ─────────────────────────────────────────────────────────────────────────
+function CalculosCard({ clientId, clientName }) {
+  const navigate = useNavigate()
+  const [lista, setLista] = useState([])
+  const [carregando, setCarregando] = useState(true)
+  const [erro, setErro] = useState('')
+  const [aberto, setAberto] = useState(null)
+
+  useEffect(() => {
+    let vivo = true
+    setCarregando(true); setErro('')
+    api.calculations.list({ clientId })
+      .then(r => { if (vivo) setLista(Array.isArray(r) ? r : []) })
+      .catch(e => { if (vivo) setErro(e?.message || 'Não foi possível ler os cálculos.') })
+      .finally(() => { if (vivo) setCarregando(false) })
+    return () => { vivo = false }
+  }, [clientId])
+
+  return (
+    <Card className="p-5 space-y-3">
+      <div className="flex items-center justify-between">
+        <h3 className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wide">🧮 Cálculos</h3>
+        <Button variant="secondary" size="sm" onClick={() => navigate('/app/calculator')}>Nova conta</Button>
+      </div>
+
+      {carregando && <p className="text-[11px] text-[var(--text-muted)]">Carregando…</p>}
+      {erro && <p className="text-[11px] text-red-400">⚠️ {erro}</p>}
+
+      {!carregando && !erro && lista.length === 0 && (
+        <p className="text-[11px] text-[var(--text-muted)]">
+          Nenhum cálculo vinculado a {clientName || 'este cliente'} ainda. Na calculadora, escolha o cliente
+          antes de calcular e a conta aparece aqui.
+        </p>
+      )}
+
+      <div className="space-y-1.5 max-h-72 overflow-y-auto">
+        {lista.map(c => (
+          <div key={c.id} className="text-xs rounded-lg bg-[var(--bg-hover)]">
+            <button onClick={() => setAberto(aberto === c.id ? null : c.id)}
+              className="w-full flex items-center gap-2 p-2 text-left">
+              <div className="flex-1 min-w-0">
+                <p className="text-[var(--text-secondary)] truncate">{c.titulo}</p>
+                <p className="text-[10px] text-[var(--text-muted)]">
+                  {new Date(c.createdAt).toLocaleString('pt-BR')} · por {c.autor || '—'}
+                </p>
+              </div>
+              <span className="font-mono font-semibold text-[var(--text-primary)] flex-shrink-0">
+                {c.headline?.value}
+              </span>
+              <span className="text-[var(--text-muted)] flex-shrink-0">{aberto === c.id ? '▾' : '▸'}</span>
+            </button>
+            {aberto === c.id && (
+              <div className="px-3 pb-3 space-y-2 border-t border-[var(--border)] pt-2">
+                {(c.resultado?.linhas ?? []).map((l, i) => (
+                  <div key={i} className="flex justify-between gap-3 text-[11px]">
+                    <span className="text-[var(--text-muted)]">{l.label}</span>
+                    <span className="font-mono text-[var(--text-secondary)]">{l.value}</span>
+                  </div>
+                ))}
+                {(c.resultado?.memoria ?? []).length > 0 && (
+                  <details className="text-[10px] text-[var(--text-muted)]">
+                    <summary className="cursor-pointer">Memória de cálculo</summary>
+                    <ol className="list-decimal list-inside space-y-0.5 mt-1 font-mono leading-relaxed">
+                      {c.resultado.memoria.map((m, i) => <li key={i}>{m}</li>)}
+                    </ol>
+                  </details>
+                )}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </Card>
+  )
+}
+
 function AtendimentosCard({ clientId, clientName }) {
   const { showToast } = useUiStore()
   const [lista, setLista] = useState(() => getAtendimentosCliente(clientId))
@@ -2036,6 +2118,7 @@ export default function ClientPage() {
                     do cadastro, que é onde ela está olhando ao atender. */}
                 {!isNew && <TasksSection clientId={id} clientName={data.name} onTasksChange={refreshOpenTasks} />}
                 {!isNew && <AtendimentosCard clientId={id} clientName={data.name} />}
+                {!isNew && <CalculosCard clientId={id} clientName={data.name} />}
 
                 <div className="flex justify-end gap-3 pt-2">
                   <Button variant="secondary" onClick={() => navigate(-1)}>Cancelar</Button>

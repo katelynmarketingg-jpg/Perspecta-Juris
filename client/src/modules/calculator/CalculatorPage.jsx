@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, useCallback } from 'react'
 import { CALCULADORAS, RAMOS, getCalc, DISCLAIMER, brl, paramsInfo, parametrosDesatualizados } from '../../lib/legalCalc'
 import { Button, Card, Input, Spinner } from '../../components/ui'
 import { useUiStore } from '../../stores/uiStore'
@@ -6,6 +6,7 @@ import { useAuthStore } from '../../stores/authStore'
 import PrevidenciarioPlanner from './PrevidenciarioPlanner'
 import ParametrosModal from './ParametrosModal'
 import { registrar } from '../../lib/auditLog'
+import api from '../../lib/api'
 import { tkey } from '../../lib/tenant'
 
 const lsGet = (k, fb) => { try { return JSON.parse(localStorage.getItem(k) ?? 'null') ?? fb } catch { return fb } }
@@ -183,7 +184,7 @@ ${crit ? `<h2>Critérios utilizados</h2><ul>${crit}</ul>` : ''}
       <div className="flex flex-wrap gap-2">
         <Button variant="primary" size="sm" onClick={printPDF}>🖨️ Exportar PDF</Button>
         <Button variant="secondary" size="sm" onClick={exportCSV}>📊 Exportar Excel/CSV</Button>
-        <Button variant="secondary" size="sm" onClick={onSave}>💾 Salvar no histórico</Button>
+        <Button variant="secondary" size="sm" onClick={onSave}>💾 Regravar no histórico</Button>
       </div>
 
       {/* Disclaimer */}
@@ -195,7 +196,7 @@ ${crit ? `<h2>Critérios utilizados</h2><ul>${crit}</ul>` : ''}
 }
 
 // ── Calculation runner (form + result) ──────────────────────────────────────
-function CalcRunner({ calc, onBack }) {
+function CalcRunner({ calc, onBack, clienteInicial = '', aoSalvar }) {
   const { showToast } = useUiStore()
   const initial = useMemo(() => {
     const o = {}
@@ -206,23 +207,72 @@ function CalcRunner({ calc, onBack }) {
   const [result, setResult] = useState(null)
   const [error, setError] = useState('')
 
+  // ── Histórico do escritório ────────────────────────────────────────────
+  //  Antes o cálculo só ia parar no histórico se a pessoa clicasse em
+  //  "Salvar", e mesmo assim ficava no localStorage DAQUELE navegador.
+  //  Quem calculava na recepção não via nada na sala, e não havia como
+  //  saber quem tinha feito a conta. Agora todo cálculo é gravado no
+  //  banco assim que sai o resultado, com autor e vínculo ao cliente.
+  const [clientes, setClientes] = useState([])
+  const [clientId, setClientId] = useState(clienteInicial)
+  const [salvoId, setSalvoId] = useState(null)
+  const [gravando, setGravando] = useState(false)
+  const [erroAoSalvar, setErroAoSalvar] = useState('')
+
+  useEffect(() => {
+    let vivo = true
+    api.clients.list({ limit: 500 })
+      .then(r => { if (vivo) setClientes(Array.isArray(r) ? r : (r?.data ?? [])) })
+      .catch(() => { /* sem lista, o cálculo continua funcionando sem vínculo */ })
+    return () => { vivo = false }
+  }, [])
+
   const set = (name) => (v) => setInputs(d => ({ ...d, [name]: v }))
+
+  // Recalcular atualiza a MESMA linha: senão mexer num campo e clicar
+  // "Calcular" três vezes encheria o histórico de entradas quase iguais.
+  const gravar = async (res, idCliente) => {
+    const corpo = {
+      clientId: idCliente || null,
+      calcId: calc.id, titulo: calc.titulo, ramo: calc.ramo,
+      headline: res.headline ?? {}, inputs,
+      resultado: { linhas: res.linhas ?? [], memoria: res.memoria ?? [], criterios: res.criterios ?? [] },
+    }
+    setGravando(true); setErroAoSalvar('')
+    try {
+      if (salvoId) { await api.calculations.update(salvoId, corpo) }
+      else {
+        const linha = await api.calculations.create(corpo)
+        setSalvoId(linha?.id ?? null)
+        registrar('calculo', `calculou "${calc.titulo}"${res.headline?.value ? ` — ${res.headline.value}` : ''}`)
+      }
+      aoSalvar?.()
+    } catch (e) {
+      // Escrita que falha nunca pode passar por salva.
+      setErroAoSalvar(e?.message || 'Não foi possível gravar o cálculo no histórico.')
+    } finally { setGravando(false) }
+  }
 
   const run = () => {
     const missing = calc.campos.filter(f => f.required && !inputs[f.name])
     if (missing.length) { setError(`Preencha: ${missing.map(m => m.label).join(', ')}`); return }
     setError('')
-    try { setResult(calc.compute(inputs)) }
+    try {
+      const res = calc.compute(inputs)
+      setResult(res)
+      gravar(res, clientId)
+    }
     catch (e) { setError('Erro no cálculo: ' + e.message) }
+  }
+
+  const trocarCliente = (id) => {
+    setClientId(id)
+    if (result) gravar(result, id)
   }
 
   const saveHistory = () => {
     if (!result) return
-    const hist = lsGet(tkey('pj_calc_history'), [])
-    hist.unshift({ id: uid(), calcId: calc.id, titulo: calc.titulo, ramo: calc.ramo, headline: result.headline, inputs, createdAt: new Date().toISOString() })
-    lsSet(tkey('pj_calc_history'), hist.slice(0, 100))
-    registrar('calculo', `salvou o cálculo "${calc.titulo}"${result.headline ? ` — ${result.headline}` : ''}`)
-    showToast('Cálculo salvo no histórico.', 'success')
+    gravar(result, clientId).then(() => showToast('Cálculo gravado no histórico do escritório.', 'success'))
   }
 
   const rc = ramoOf(calc.ramo)
@@ -248,8 +298,33 @@ function CalcRunner({ calc, onBack }) {
             {calc.campos.map(f => (
               <Field key={f.name} field={f} value={inputs[f.name]} onChange={set(f.name)} />
             ))}
+
+            {/* Vínculo com o cliente: o cálculo passa a aparecer no cadastro dele. */}
+            <label className="block pt-1 border-t border-[var(--border)]">
+              <span className="text-xs font-medium text-[var(--text-secondary)] mb-1 block">Cliente (opcional)</span>
+              <select
+                className="w-full px-3 py-2 rounded-lg bg-[var(--bg-input)] border border-[var(--border)] text-sm text-[var(--text-primary)] focus:border-brand-500 focus:outline-none"
+                value={clientId} onChange={e => trocarCliente(e.target.value)}>
+                <option value="">— sem vínculo —</option>
+                {clientes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+              <span className="text-[10px] text-[var(--text-muted)] mt-1 block">
+                Vinculando, o cálculo aparece na ficha do cliente.
+              </span>
+            </label>
+
             {error && <p className="text-xs text-red-400">{error}</p>}
             <Button variant="primary" className="w-full" onClick={run}>Calcular</Button>
+
+            {gravando && <p className="text-xs text-[var(--text-muted)]">Gravando no histórico…</p>}
+            {erroAoSalvar && (
+              <p className="text-xs text-red-400">
+                ⚠️ O cálculo apareceu na tela, mas NÃO foi gravado no histórico: {erroAoSalvar}
+              </p>
+            )}
+            {!gravando && !erroAoSalvar && salvoId && (
+              <p className="text-xs text-emerald-400">✓ Gravado no histórico do escritório.</p>
+            )}
           </Card>
         </div>
 
@@ -273,13 +348,47 @@ export default function CalculatorPage() {
   const [activeCalc, setActiveCalc] = useState(null)
   const [q, setQ] = useState('')
   const [ramo, setRamo] = useState('')
-  const [history, setHistory] = useState(() => lsGet(tkey('pj_calc_history'), []))
+  const [history, setHistory] = useState([])
+  const [carregandoHist, setCarregandoHist] = useState(false)
+  const [erroHist, setErroHist] = useState('')
+  const [fAutor, setFAutor] = useState('')
+  const [fCliente, setFCliente] = useState('')
+  const [fDe, setFDe] = useState('')
+  const [fAte, setFAte] = useState('')
+  // Cálculos que ficaram presos no localStorage antes do histórico do
+  // escritório existir. Só de leitura: importar daria autor errado a eles.
+  const [antigos] = useState(() => lsGet(tkey('pj_calc_history'), []))
   const [params, setParams] = useState(false)
   const [pInfo, setPInfo] = useState(() => paramsInfo())
   const isAdmin = useAuthStore(s => s.user?.role) === 'master'
   const desatualizado = isAdmin && parametrosDesatualizados()   // aviso só p/ administradora
 
-  useEffect(() => { if (view === 'history') setHistory(lsGet(tkey('pj_calc_history'), [])) }, [view])
+  const carregarHistorico = useCallback(async () => {
+    setCarregandoHist(true); setErroHist('')
+    try { setHistory(await api.calculations.list({})) }
+    catch (e) { setErroHist(e?.message || 'Não foi possível ler o histórico.'); setHistory([]) }
+    finally { setCarregandoHist(false) }
+  }, [])
+
+  useEffect(() => { if (view === 'history') carregarHistorico() }, [view, carregarHistorico])
+
+  // Filtros: por quem calculou, por cliente e por período.
+  const autores = useMemo(() => [...new Set(history.map(h => h.autor).filter(Boolean))].sort(), [history])
+  const clientesDoHist = useMemo(
+    () => [...new Map(history.filter(h => h.clientId).map(h => [h.clientId, h.clientName])).entries()]
+      .sort((a, b) => String(a[1]).localeCompare(String(b[1]))), [history])
+  const histFiltrado = useMemo(() => history.filter(h =>
+    (!fAutor   || h.autor === fAutor) &&
+    (!fCliente || h.clientId === fCliente) &&
+    (!fDe      || (h.createdAt ?? '') >= fDe) &&
+    (!fAte     || (h.createdAt ?? '') <= fAte + 'T23:59:59')
+  ), [history, fAutor, fCliente, fDe, fAte])
+
+  const apagarCalculo = async (id) => {
+    if (!window.confirm('Apagar este cálculo do histórico do escritório?')) return
+    try { await api.calculations.remove(id); setHistory(h => h.filter(x => x.id !== id)) }
+    catch (e) { setErroHist(e?.message || 'Não foi possível apagar.') }
+  }
 
   const filtered = useMemo(() => {
     const term = q.trim().toLowerCase()
@@ -316,19 +425,91 @@ export default function CalculatorPage() {
         {params && <ParametrosModal onClose={() => setParams(false)} onSaved={() => setPInfo(paramsInfo())} />}
 
         {view === 'history' ? (
-          <div className="space-y-2">
-            {history.length === 0 ? (
-              <div className="text-center py-16 text-sm text-[var(--text-muted)]">Nenhum cálculo salvo ainda.</div>
-            ) : history.map(h => (
-              <Card key={h.id} className="p-4 flex items-center justify-between hover:border-brand-500/40 cursor-pointer"
-                onClick={() => { const c = getCalc(h.calcId); if (c) { setActiveCalc(c); setView('calc') } }}>
-                <div>
-                  <p className="text-sm font-medium text-[var(--text-primary)]">{h.titulo}</p>
-                  <p className="text-xs text-[var(--text-muted)]">{ramoOf(h.ramo)?.label} · {new Date(h.createdAt).toLocaleString('pt-BR')}</p>
+          <div className="space-y-3">
+            {/* Filtros */}
+            <Card className="p-3 flex flex-wrap items-end gap-3">
+              <label className="text-xs">
+                <span className="block text-[var(--text-muted)] mb-1">Quem calculou</span>
+                <select value={fAutor} onChange={e => setFAutor(e.target.value)}
+                  className="px-2 py-1.5 rounded-lg bg-[var(--bg-input)] border border-[var(--border)] text-sm text-[var(--text-primary)]">
+                  <option value="">Todos</option>
+                  {autores.map(a => <option key={a} value={a}>{a}</option>)}
+                </select>
+              </label>
+              <label className="text-xs">
+                <span className="block text-[var(--text-muted)] mb-1">Cliente</span>
+                <select value={fCliente} onChange={e => setFCliente(e.target.value)}
+                  className="px-2 py-1.5 rounded-lg bg-[var(--bg-input)] border border-[var(--border)] text-sm text-[var(--text-primary)]">
+                  <option value="">Todos</option>
+                  {clientesDoHist.map(([id, nome]) => <option key={id} value={id}>{nome}</option>)}
+                </select>
+              </label>
+              <label className="text-xs">
+                <span className="block text-[var(--text-muted)] mb-1">De</span>
+                <input type="date" value={fDe} onChange={e => setFDe(e.target.value)}
+                  className="px-2 py-1.5 rounded-lg bg-[var(--bg-input)] border border-[var(--border)] text-sm text-[var(--text-primary)]" />
+              </label>
+              <label className="text-xs">
+                <span className="block text-[var(--text-muted)] mb-1">Até</span>
+                <input type="date" value={fAte} onChange={e => setFAte(e.target.value)}
+                  className="px-2 py-1.5 rounded-lg bg-[var(--bg-input)] border border-[var(--border)] text-sm text-[var(--text-primary)]" />
+              </label>
+              {(fAutor || fCliente || fDe || fAte) && (
+                <button onClick={() => { setFAutor(''); setFCliente(''); setFDe(''); setFAte('') }}
+                  className="text-xs text-brand-500 hover:underline pb-1.5">Limpar filtros</button>
+              )}
+              <span className="text-xs text-[var(--text-muted)] ml-auto pb-1.5">
+                {histFiltrado.length} de {history.length}
+              </span>
+            </Card>
+
+            {erroHist && <p className="text-xs text-red-400">⚠️ {erroHist}</p>}
+            {carregandoHist && <div className="text-center py-10"><Spinner /></div>}
+
+            {!carregandoHist && histFiltrado.length === 0 ? (
+              <div className="text-center py-16 text-sm text-[var(--text-muted)]">
+                {history.length ? 'Nenhum cálculo com esses filtros.' : 'Nenhum cálculo gravado ainda. Faça um cálculo: ele entra aqui sozinho.'}
+              </div>
+            ) : histFiltrado.map(h => (
+              <Card key={h.id} className="p-4 flex items-center justify-between gap-3 hover:border-brand-500/40">
+                <div className="cursor-pointer min-w-0"
+                  onClick={() => { const c = getCalc(h.calcId); if (c) { setActiveCalc(c); setView('calc') } }}>
+                  <p className="text-sm font-medium text-[var(--text-primary)] truncate">{h.titulo}</p>
+                  <p className="text-xs text-[var(--text-muted)]">
+                    {ramoOf(h.ramo)?.label} · {new Date(h.createdAt).toLocaleString('pt-BR')} · por <b>{h.autor || '—'}</b>
+                    {h.clientName ? <> · cliente: <b>{h.clientName}</b></> : null}
+                  </p>
                 </div>
-                <p className="text-sm font-bold text-brand-400 font-mono">{h.headline?.value}</p>
+                <div className="flex items-center gap-3 flex-shrink-0">
+                  <p className="text-sm font-bold text-brand-400 font-mono">{h.headline?.value}</p>
+                  <button onClick={() => apagarCalculo(h.id)}
+                    className="text-[var(--text-muted)] hover:text-red-400 text-xs" title="Apagar do histórico">✕</button>
+                </div>
               </Card>
             ))}
+
+            {/* Cálculos presos no navegador antes de o histórico ir para o banco. */}
+            {antigos.length > 0 && (
+              <Card className="p-4 mt-4 border-dashed">
+                <p className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wide mb-2">
+                  Cálculos antigos deste navegador ({antigos.length})
+                </p>
+                <p className="text-[11px] text-[var(--text-muted)] mb-3">
+                  Foram salvos antes de o histórico passar a ser do escritório, por isso ficaram só neste
+                  computador e não têm o nome de quem calculou. Ficam aqui só para consulta.
+                </p>
+                <div className="space-y-1">
+                  {antigos.slice(0, 20).map(h => (
+                    <div key={h.id} className="flex justify-between text-xs py-1 border-b border-[var(--border)] last:border-0">
+                      <span className="text-[var(--text-secondary)]">
+                        {h.titulo} · {new Date(h.createdAt).toLocaleString('pt-BR')}
+                      </span>
+                      <span className="font-mono text-[var(--text-primary)]">{h.headline?.value}</span>
+                    </div>
+                  ))}
+                </div>
+              </Card>
+            )}
           </div>
         ) : (
           <>

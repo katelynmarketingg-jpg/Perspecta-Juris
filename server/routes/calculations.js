@@ -74,7 +74,8 @@ export default async function calculationRoutes(app) {
         createdAt: calculations.createdAt,
         updatedAt: calculations.updatedAt,
         clientName: clients.name,
-        processNumber: processes.number,
+        processTitle: processes.title,
+        processNumber: processes.judicialNumber,
         // O nome atual do acesso, quando ele ainda existe; se foi apagado,
         // sobra o nome gravado na hora do cálculo.
         autorAtual: users.name,

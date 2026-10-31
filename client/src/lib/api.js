@@ -290,6 +290,13 @@ const api = {
     remove: (id)    => api.delete(`/api/theses/${id}`),
   },
 
+  calculations: {
+    list:   (p)     => api.get('/api/calculations?' + new URLSearchParams(p ?? {})),
+    create: (d)     => api.post('/api/calculations', d),
+    update: (id, d) => api.put(`/api/calculations/${id}`, d),
+    remove: (id)    => api.delete(`/api/calculations/${id}`),
+  },
+
   documents: {
     list:   (p)  => api.get('/api/documents?' + new URLSearchParams(p ?? {})),
     upload: (fd) => api.upload('/api/documents/upload', fd),
