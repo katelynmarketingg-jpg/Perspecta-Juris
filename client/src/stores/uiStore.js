@@ -2,8 +2,8 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
 // A ordem aqui é a ordem do botão de girar tema, e também a dos rótulos.
-export const TEMAS = ['dark', 'medium', 'light']
-export const ROTULO_DO_TEMA = { dark: 'Escuro', medium: 'Médio', light: 'Claro' }
+export const TEMAS = ['dark', 'medium', 'light', 'bege']
+export const ROTULO_DO_TEMA = { dark: 'Escuro', medium: 'Médio', light: 'Claro', bege: 'Bege' }
 
 export const useUiStore = create(
   persist(

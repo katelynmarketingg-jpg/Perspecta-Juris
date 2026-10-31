@@ -21,7 +21,8 @@
    Antes o sistema usava #c2410c (um laranja do Tailwind, parecido mas não o
    da marca) e #fb923c como realce. Agora são as cores do manual.
 
-   Três temas: escuro (ESTRUTURA), médio (INTELIGÊNCIA) e claro (RESPIRO).
+   Quatro temas: escuro (ESTRUTURA), médio (INTELIGÊNCIA), claro (RESPIRO
+   com cartões brancos) e bege (RESPIRO com cartões creme, mais quente).
    ───────────────────────────────────────────────────────────────────────── */
 :root {
   /* As cores da marca, pelos nomes do manual */
@@ -168,8 +169,40 @@
   --shadow-card:   0 1px 3px rgba(0,0,0,0.08);
   --shadow-modal:  0 24px 70px rgba(0,0,0,0.18);
 }
-/* No claro, o realce tem de escurecer: #FEB161 sobre branco não se lê. */
-.light {
+/* ── Tema BEGE — RESPIRO de base, ESTABILIDADE nas divisões ─────
+   O claro usa branco nos cartões e fica neutro. Este fica quente: a base é
+   o bege do manual, os cartões são um creme um tom acima (para subirem sem
+   virar branco) e o laranja aparece mais. É o mesmo par de cores que o
+   manual usa no material impresso. */
+.bege {
+  --bg-app:        #EDE9DE;
+  --bg-sidebar:    #E0D8C6;
+  --bg-card:       #F8F5EE;
+  --bg-input:      #E7E1D3;
+  --bg-hover:      #DED6C3;
+  --bg-active:     #F4DCC4;
+
+  --text-primary:   #2B2218;
+  --text-secondary: #5C5243;
+  --text-muted:     #8E8777;
+  --text-sidebar:   #2B2218;
+  --text-sidebar-muted: #8E8777;
+
+  --border:        #C9C2B2;
+  --border-strong: #B0A68F;
+  --border-focus:  #BD520F;
+
+  --brand:         #BD520F;
+  --brand-dark:    #8c3d0b;
+  --brand-light:   #FEB161;
+
+  --shadow-card:   0 1px 3px rgba(80,60,35,0.10);
+  --shadow-modal:  0 24px 70px rgba(80,60,35,0.22);
+}
+
+/* Nos dois temas de fundo claro o realce tem de escurecer: o #FEB161 do
+   manual é feito para brilhar sobre preto — sobre bege ou branco, some. */
+.light, .bege {
   --c-accent-300: 166 72 13;
   --c-accent-400: 189 82 15;
   --c-accent-500: 140 61 11;
