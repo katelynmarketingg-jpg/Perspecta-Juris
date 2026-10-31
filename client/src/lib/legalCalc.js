@@ -1041,11 +1041,72 @@ export const CALCULADORAS = [
     descricao: 'Soma períodos e retorna o total em anos, meses e dias.',
     casos: 'Aposentadoria, revisão e planejamento.', baseLegal: 'Contagem: ano=365, mês=30 dias.',
     campos: [{ name: 'periodos', label: 'Períodos (um por linha: início a fim)', type: 'periodos' }],
+    // Antes o aviso "não desconta períodos concomitantes" era uma nota solta
+    // no rodapé. Quem lança dois vínculos que se sobrepõem — comum em CNIS —
+    // recebia um tempo INFLADO, com cara de exato, e podia requerer a
+    // aposentadoria numa data em que ainda não tem direito. Agora a sobreposição
+    // é detectada, apontada com as datas, e o tempo sem concomitância aparece
+    // ao lado do tempo somado.
     compute: (v) => {
-      const ps = Array.isArray(v.periodos) ? v.periodos : []
+      const ps = (Array.isArray(v.periodos) ? v.periodos : []).filter(p => p.inicio && p.fim)
       let dias = 0; const mem = []
-      ps.forEach((p, i) => { const d = diasDoPeriodo(p.inicio, p.fim); dias += d; if (p.inicio && p.fim) mem.push(`Período ${i+1}: ${fmtData(p.inicio)} a ${fmtData(p.fim)} = ${d} dias`) })
-      return { headline: { label: 'Tempo total', value: tempoStr(dias) }, linhas: [{label:'Total em dias', value: `${dias} dias`}, {label:'Em anos (decimal)', value: tempoDecimal(dias).toFixed(2)}], memoria: [...mem, `Soma = ${dias} dias = ${tempoStr(dias)}`], criterios: ['Cada período conta o primeiro e o último dia.', 'Não desconta períodos concomitantes automaticamente.'] }
+      ps.forEach((p, i) => {
+        const d = diasDoPeriodo(p.inicio, p.fim); dias += d
+        mem.push(`Período ${i + 1}: ${fmtData(p.inicio)} a ${fmtData(p.fim)} = ${d} dias`)
+      })
+
+      // Sobreposições: compara cada par de períodos.
+      const sobrepostos = []
+      for (let i = 0; i < ps.length; i++) {
+        for (let k = i + 1; k < ps.length; k++) {
+          const a = ps[i], b = ps[k]
+          const ini = a.inicio > b.inicio ? a.inicio : b.inicio
+          const fim = a.fim < b.fim ? a.fim : b.fim
+          if (ini <= fim) sobrepostos.push({ i: i + 1, k: k + 1, ini, fim, dias: diasDoPeriodo(ini, fim) })
+        }
+      }
+
+      // Tempo sem concomitância: une os intervalos antes de somar.
+      const ordenados = [...ps].sort((a, b) => a.inicio.localeCompare(b.inicio))
+      const unidos = []
+      for (const p of ordenados) {
+        const ultimo = unidos[unidos.length - 1]
+        if (ultimo && p.inicio <= somarDiasISO(ultimo.fim, 1)) {
+          if (p.fim > ultimo.fim) ultimo.fim = p.fim
+        } else unidos.push({ inicio: p.inicio, fim: p.fim })
+      }
+      const diasUnicos = unidos.reduce((t, p) => t + diasDoPeriodo(p.inicio, p.fim), 0)
+      const temConcomitancia = sobrepostos.length > 0
+
+      return {
+        headline: { label: temConcomitancia ? 'Tempo sem concomitância' : 'Tempo total',
+                    value: tempoStr(temConcomitancia ? diasUnicos : dias) },
+        linhas: [
+          { label: 'Soma dos períodos', value: `${dias} dias · ${tempoStr(dias)}` },
+          ...(temConcomitancia
+            ? [{ label: 'Tempo sem concomitância', value: `${diasUnicos} dias · ${tempoStr(diasUnicos)}` },
+               { label: 'Diferença (dias contados em dobro)', value: `${dias - diasUnicos} dias` }]
+            : []),
+          { label: 'Em anos (decimal)', value: tempoDecimal(temConcomitancia ? diasUnicos : dias).toFixed(2) },
+        ],
+        memoria: [
+          ...mem,
+          `Soma simples = ${dias} dias = ${tempoStr(dias)}`,
+          ...(temConcomitancia
+            ? ['⚠️ HÁ PERÍODOS CONCOMITANTES — a soma simples conta os mesmos dias duas vezes:',
+               ...sobrepostos.map(o => `   períodos ${o.i} e ${o.k} se sobrepõem de ${fmtData(o.ini)} a ${fmtData(o.fim)} (${o.dias} dias)`),
+               `Tempo sem concomitância = ${diasUnicos} dias = ${tempoStr(diasUnicos)}`,
+               'Para o INSS, o mesmo dia só conta uma vez, por mais vínculos que a pessoa tenha. Use o tempo sem concomitância.']
+            : ['Nenhum período se sobrepõe a outro.']),
+        ],
+        criterios: [
+          'Cada período conta o primeiro e o último dia.',
+          temConcomitancia
+            ? '⚠️ Há vínculos simultâneos: o resultado em destaque já descontou os dias repetidos.'
+            : 'Nenhuma concomitância encontrada entre os períodos informados.',
+          'Não aplica conversão de tempo especial — use a calculadora própria antes de lançar aqui.',
+        ],
+      }
     },
   },
   {
@@ -1059,7 +1120,11 @@ export const CALCULADORAS = [
       { name: 'ano', label: 'Ano de análise', type: 'number', default: String(new Date().getFullYear()) },
     ],
     compute: (v) => {
-      const ano = num(v.ano), fem = v.sexo === 'F'
+      // A tabela começa em 2019. Sem travar o piso, um ano anterior BAIXAVA a
+      // exigência (2015 dava 82 pontos para a mulher) e a calculadora dizia
+      // que a pessoa já tinha direito quando não tinha.
+      const ano = Math.max(2019, num(v.ano))
+      const fem = v.sexo === 'F'
       const exigido = fem ? Math.min(100, 86 + (ano - 2019)) : Math.min(105, 96 + (ano - 2019))
       const tempoMin = fem ? 30 : 35
       const pontos = num(v.idade) + num(v.tempoAnos)
@@ -1123,7 +1188,18 @@ export const CALCULADORAS = [
     baseLegal: 'Fator: 1,40 (homem) / 1,20 (mulher) p/ 25 anos. Só até a Reforma.',
     campos: [
       { name: 'anosEspecial', label: 'Anos de atividade especial', type: 'number', required: true },
-      { name: 'fator', label: 'Fator de conversão', type: 'select', default: '1.4', options: [{value:'1.4',label:'1,40 (homem)'},{value:'1.2',label:'1,20 (mulher)'},{value:'2.33',label:'2,33 (15→comum H)'},{value:'2.0',label:'2,00 (15→comum M)'}] },
+      // O fator é o tempo comum exigido dividido pelo especial: 35/25 = 1,40;
+      // 30/25 = 1,20; 35/20 = 1,75; 30/20 = 1,50; 35/15 = 2,33; 30/15 = 2,00.
+      // Faltavam as duas modalidades de 20 anos, que não tinham como ser
+      // calculadas aqui.
+      { name: 'fator', label: 'Fator de conversão', type: 'select', default: '1.4', options: [
+        { value: '1.4',  label: '1,40 — especial de 25 anos → comum (homem)' },
+        { value: '1.2',  label: '1,20 — especial de 25 anos → comum (mulher)' },
+        { value: '1.75', label: '1,75 — especial de 20 anos → comum (homem)' },
+        { value: '1.5',  label: '1,50 — especial de 20 anos → comum (mulher)' },
+        { value: '2.33', label: '2,33 — especial de 15 anos → comum (homem)' },
+        { value: '2.0',  label: '2,00 — especial de 15 anos → comum (mulher)' },
+      ]},
     ],
     compute: (v) => { const conv = num(v.anosEspecial)*num(v.fator); const ganho = conv - num(v.anosEspecial); return { headline: { label: 'Tempo convertido', value: `${conv.toFixed(2)} anos` }, linhas: [{label:'Tempo especial', value: `${num(v.anosEspecial)} anos`}, {label:`Fator ${v.fator}`, value: `× ${v.fator}`}, {label:'Tempo comum equivalente', value: `${conv.toFixed(2)} anos`}, {label:'Ganho', value: `${ganho.toFixed(2)} anos`}], memoria: [`Convertido = ${num(v.anosEspecial)} × ${v.fator} = ${conv.toFixed(2)} anos`, `Ganho de ${ganho.toFixed(2)} anos.`], criterios: ['Conversão vedada para períodos após 13/11/2019.'] } },
   },
@@ -1136,10 +1212,14 @@ export const CALCULADORAS = [
       { name: 'media', label: 'Média dos salários de contribuição (100% desde 07/1994)', type: 'currency', required: true },
       { name: 'sexo', label: 'Sexo', type: 'select', default: 'M', options: [{value:'M',label:'Masculino'},{value:'F',label:'Feminino'}] },
       { name: 'anos', label: 'Anos de contribuição', type: 'number', required: true },
+      // Antes havia uma opção "Aposentadoria especial" que usava 15 anos de
+      // base para os dois sexos, sem dizer. Isso só vale para a modalidade de
+      // 15 anos de exposição (art. 26, §5º). Agora a base aparece escrita em
+      // cada opção, para o advogado ver a premissa antes de usar o número.
       { name: 'regra', label: 'Regra de cálculo', type: 'select', default: 'geral', options: [
-        { value: 'geral',     label: 'Regra geral (60% + 2%/ano)' },
-        { value: 'especial',  label: 'Aposentadoria especial (60% + 2% acima de 15)' },
-        { value: 'cem',       label: '100% da média (pedágio 100% / acidente)' },
+        { value: 'geral',      label: 'Regra geral — 60% + 2% acima de 20 anos (homem) / 15 (mulher)' },
+        { value: 'especial15', label: 'Exposição de 15 anos — 60% + 2% acima de 15 anos (ambos os sexos)' },
+        { value: 'cem',        label: '100% da média — pedágio de 100% / acidentária' },
       ]},
     ],
     compute: (v) => {
@@ -1149,10 +1229,13 @@ export const CALCULADORAS = [
       if (v.regra === 'cem') {
         coef = 1; memoriaCoef = 'Coeficiente = 100% da média (EC 103, art. 26, §3)'
       } else {
-        const base = v.regra === 'especial' ? 15 : (fem ? 15 : 20)
+        // 'especial' é o nome antigo da opção de 15 anos — cálculos já salvos
+        // continuam lendo a mesma base.
+        const quinze = v.regra === 'especial15' || v.regra === 'especial'
+        const base = quinze ? 15 : (fem ? 15 : 20)
         const excedente = Math.max(0, anos - base)
         coef = Math.min(1, 0.60 + 0.02 * excedente)
-        memoriaCoef = `Coeficiente = 60% + 2% × ${excedente} anos acima de ${base} = ${(coef*100).toFixed(0)}%`
+        memoriaCoef = `Coeficiente = 60% + 2% × ${excedente} ano(s) acima de ${base} = ${(coef*100).toFixed(0)}% (EC 103/2019, art. 26, §${quinze ? '5º' : '2º'})`
       }
       const rmi = num(v.media) * coef
       const teto = PARAMS.tetoINSS, piso = PARAMS.salarioMinimo
@@ -1214,14 +1297,83 @@ export const CALCULADORAS = [
       { name: 'selic', label: 'SELIC acumulada no período (%)', type: 'percent', required: true },
       { name: 'multa', label: 'Multa de mora (%)', type: 'percent', default: '20' },
     ],
-    compute: (v) => { const p = num(v.valor); const corr = p*pct(v.selic); const base = p+corr; const multa = base*pct(v.multa); const total = base+multa; return { headline: { label: 'Débito atualizado', value: brl(total) }, linhas: [{label:'Tributo', value: brl(p)}, {label:`SELIC (${(pct(v.selic)*100).toFixed(2)}%)`, value: brl(corr)}, {label:`Multa (${(pct(v.multa)*100).toFixed(2)}%)`, value: brl(multa)}], memoria: [`Correção SELIC = ${brl(p)} × ${(pct(v.selic)*100).toFixed(2)}% = ${brl(corr)}`, `Multa = ${brl(base)} × ${(pct(v.multa)*100).toFixed(2)}% = ${brl(multa)}`, `Total = ${brl(total)}`], criterios: ['SELIC engloba juros e correção.'] } },
+    // A multa de mora incide sobre o VALOR DO DÉBITO, não sobre o débito já
+    // acrescido dos juros (art. 61 da Lei 9.430/96). Antes a multa era
+    // calculada sobre tributo + SELIC, o que cobrava multa sobre juros e
+    // inflava o débito — contra o contribuinte, num número que parecia exato.
+    compute: (v) => {
+      const p = num(v.valor)
+      const corr = centavos(p * pct(v.selic))
+      const multa = centavos(p * pct(v.multa))
+      const total = centavos(p + corr + multa)
+      return {
+        headline: { label: 'Débito atualizado', value: brl(total) },
+        linhas: [
+          { label: 'Tributo', value: brl(p) },
+          { label: `SELIC (${(pct(v.selic)*100).toFixed(2)}%)`, value: brl(corr) },
+          { label: `Multa de mora (${(pct(v.multa)*100).toFixed(2)}%)`, value: brl(multa) },
+          { label: '── TOTAL', value: brl(total) },
+        ],
+        memoria: [
+          `Juros SELIC = ${brl(p)} × ${(pct(v.selic)*100).toFixed(2)}% = ${brl(corr)}`,
+          `Multa de mora = ${brl(p)} × ${(pct(v.multa)*100).toFixed(2)}% = ${brl(multa)} — incide sobre o tributo, não sobre o tributo já com juros (art. 61 da Lei 9.430/96)`,
+          `Total = ${brl(p)} + ${brl(corr)} + ${brl(multa)} = ${brl(total)}`,
+        ],
+        criterios: ['A SELIC já engloba juros e correção monetária — não some outro índice por cima.',
+                    'Multa e juros têm a mesma base: o valor do tributo.'],
+      }
+    },
   },
   {
     id: 'multa-mora-trib', ramo: 'tributario', titulo: 'Multa de mora tributária',
     descricao: 'Tributo × percentual da multa (frequentemente 0,33%/dia até 20%).', casos: 'Atraso no recolhimento.',
     baseLegal: 'Ex.: art. 61 Lei 9.430/96 (0,33% ao dia, limite 20%).',
-    campos: [{ name: 'valor', label: 'Valor do tributo', type: 'currency', required: true }, { name: 'multa', label: 'Multa (%)', type: 'percent', default: '20', required: true }],
-    compute: (v) => { const r = num(v.valor)*pct(v.multa); return { headline: { label: 'Multa de mora', value: brl(r) }, linhas: [{label:'Multa', value: brl(r)}], memoria: [`${brl(num(v.valor))} × ${(pct(v.multa)*100).toFixed(2)}% = ${brl(r)}`], criterios: [] } },
+    campos: [
+      { name: 'valor', label: 'Valor do tributo', type: 'currency', required: true },
+      { name: 'vencimento', label: 'Vencimento do tributo', type: 'date', help: 'Informando as duas datas, a multa sai de 0,33% ao dia, limitada a 20%.' },
+      { name: 'pagamento', label: 'Data do pagamento', type: 'date', help: 'Vazio = hoje.' },
+      { name: 'multa', label: 'Ou informe a multa direto (%)', type: 'percent', help: 'Use só se a norma aplicável tiver outro percentual. Vazio = calculada pelos dias.' },
+    ],
+    // O campo de multa vinha com 20% de padrão — o TETO. Quem só digitava o
+    // valor levava a multa máxima sem perceber, ainda que o atraso fosse de
+    // poucos dias. Agora, com as datas, a multa sai de 0,33% ao dia até o
+    // limite de 20% (art. 61 da Lei 9.430/96), e o percentual manual
+    // continua disponível para quem precisa de outra norma.
+    compute: (v) => {
+      const valor = num(v.valor)
+      const manual = String(v.multa ?? '').trim() !== ''
+      let percentual, memoria = []
+
+      if (manual) {
+        percentual = pct(v.multa)
+        memoria.push(`Multa informada à mão: ${(percentual * 100).toFixed(2)}%`)
+      } else if (v.vencimento) {
+        const fim = v.pagamento || new Date().toISOString().slice(0, 10)
+        const dias = Math.max(0, diasEntre(v.vencimento, fim))
+        const bruta = dias * 0.0033
+        percentual = Math.min(0.20, bruta)
+        memoria.push(
+          `Atraso = de ${fmtPrazo(v.vencimento)} a ${fmtPrazo(fim)} = ${dias} dia(s)`,
+          `Multa = ${dias} × 0,33% = ${(bruta * 100).toFixed(2)}%`,
+          bruta > 0.20
+            ? `Limitada a 20% (art. 61, §2º, da Lei 9.430/96) → ${(percentual * 100).toFixed(2)}%`
+            : `Abaixo do teto de 20% → ${(percentual * 100).toFixed(2)}%`,
+        )
+      } else {
+        percentual = 0
+        memoria.push('⚠️ Sem o vencimento e sem percentual informado não dá para calcular a multa. Informe uma das duas coisas — o resultado abaixo é zero por falta de dado, não porque não há multa.')
+      }
+
+      const r = centavos(valor * percentual)
+      memoria.push(`Multa = ${brl(valor)} × ${(percentual * 100).toFixed(2)}% = ${brl(r)}`)
+      return {
+        headline: { label: 'Multa de mora', value: brl(r) },
+        linhas: [{ label: 'Tributo', value: brl(valor) }, { label: `Multa (${(percentual * 100).toFixed(2)}%)`, value: brl(r) }],
+        memoria,
+        criterios: ['0,33% por dia de atraso, limitada a 20% — art. 61 da Lei 9.430/96 (tributos federais).',
+                    'Estados e municípios têm percentuais próprios: confira a norma do ente antes de usar.'],
+      }
+    },
   },
   {
     id: 'parcelamento-trib', ramo: 'tributario', titulo: 'Parcelamento tributário',
@@ -1252,14 +1404,37 @@ export const CALCULADORAS = [
       { name: 'filhos', label: 'Nº de filhos (rateio)', type: 'number', default: '1' },
     ],
     compute: (v) => {
-      let total = 0, mem = []
-      if (v.modo === 'perc') { total = num(v.renda)*pct(v.perc); mem.push(`${brl(num(v.renda))} × ${(pct(v.perc)*100).toFixed(0)}% = ${brl(total)}`) }
-      else if (v.modo === 'fixo') { total = num(v.valorFixo); mem.push(`Valor fixo = ${brl(total)}`) }
-      else { total = num(v.qtdeSM)*PARAMS.salarioMinimo; mem.push(`${num(v.qtdeSM)} × ${brl(PARAMS.salarioMinimo)} (SM) = ${brl(total)}`) }
+      // A base escolhida tem um campo próprio. Se a pessoa escolhe "% da renda"
+      // e não preenche a renda, o resultado era R$ 0,00 — sem nada na tela
+      // dizendo que faltou dado. Zero de pensão e zero por falta de
+      // preenchimento são coisas muito diferentes.
+      let total = 0, mem = [], faltou = null
+      if (v.modo === 'perc') {
+        if (!num(v.renda)) faltou = 'a renda líquida do alimentante'
+        total = num(v.renda) * pct(v.perc)
+        mem.push(`${brl(num(v.renda))} × ${(pct(v.perc)*100).toFixed(0)}% = ${brl(total)}`)
+      } else if (v.modo === 'fixo') {
+        if (!num(v.valorFixo)) faltou = 'o valor fixo'
+        total = num(v.valorFixo); mem.push(`Valor fixo = ${brl(total)}`)
+      } else {
+        if (!num(v.qtdeSM)) faltou = 'a quantidade de salários mínimos'
+        total = num(v.qtdeSM) * PARAMS.salarioMinimo
+        mem.push(`${num(v.qtdeSM)} × ${brl(PARAMS.salarioMinimo)} (salário mínimo) = ${brl(total)}`)
+      }
+      if (faltou) mem.unshift(`⚠️ Faltou preencher ${faltou} — o valor abaixo é zero por falta de dado, não porque não há pensão devida.`)
       const filhos = Math.max(1, num(v.filhos))
       const porFilho = total / filhos
       if (filhos > 1) mem.push(`Rateio entre ${filhos} filhos = ${brl(porFilho)} cada`)
-      return { headline: { label: 'Pensão mensal', value: brl(total) }, linhas: [{label:'Total mensal', value: brl(total)}, ...(filhos>1?[{label:`Por filho (${filhos})`, value: brl(porFilho)}]:[])], memoria: mem, criterios: [`Base: ${{perc:'% da renda',fixo:'valor fixo',sm:'salários mínimos'}[v.modo]}`] }
+      return {
+        headline: { label: faltou ? 'Pensão mensal (dado faltando)' : 'Pensão mensal', value: brl(total) },
+        linhas: [{ label: 'Total mensal', value: brl(total) }, ...(filhos > 1 ? [{ label: `Por filho (${filhos})`, value: brl(porFilho) }] : [])],
+        memoria: mem,
+        criterios: [
+          `Base: ${{ perc: '% da renda líquida', fixo: 'valor fixo', sm: 'salários mínimos' }[v.modo]}`,
+          ...(faltou ? [`⚠️ Resultado incompleto: falta ${faltou}.`] : []),
+          'Pensão em salários mínimos acompanha o reajuste do mínimo; em valor fixo, precisa de índice no acordo.',
+        ],
+      }
     },
   },
   {
@@ -1333,10 +1508,35 @@ export const CALCULADORAS = [
       { name: 'herdeiros', label: 'Nº de herdeiros', type: 'number', default: '1', required: true },
     ],
     compute: (v) => {
-      const monte = num(v.bens) - num(v.dividas) - num(v.meacao)
-      const herdeiros = Math.max(1, num(v.herdeiros))
-      const quinhao = monte/herdeiros
-      return { headline: { label: 'Quinhão por herdeiro', value: brl(Math.max(0,quinhao)) }, linhas: [{label:'Bens', value: brl(num(v.bens))}, {label:'(−) Dívidas', value: brl(num(v.dividas))}, {label:'(−) Meação', value: brl(num(v.meacao))}, {label:'Monte partilhável', value: brl(Math.max(0,monte))}, {label:`Quinhão (÷${herdeiros})`, value: brl(Math.max(0,quinhao))}], memoria: [`Monte = ${brl(num(v.bens))} − ${brl(num(v.dividas))} − ${brl(num(v.meacao))} = ${brl(monte)}`, `Quinhão = ${brl(monte)} ÷ ${herdeiros} = ${brl(quinhao)}`], criterios: ['Respeitar ordem de vocação hereditária (art. 1.829 CC).'] }
+      // Espólio insolvente: as linhas mostravam zero e a memória, um número
+      // negativo. Agora o caso é dito com todas as letras, em vez de a tela
+      // se contradizer.
+      const monteBruto = centavos(num(v.bens) - num(v.dividas) - num(v.meacao))
+      const insolvente = monteBruto < 0
+      const monte = Math.max(0, monteBruto)
+      const herdeiros = Math.max(1, Math.floor(num(v.herdeiros)))
+      const quinhao = centavos(monte / herdeiros)
+      return {
+        headline: { label: insolvente ? 'Nada a partilhar — dívidas superam os bens' : 'Quinhão por herdeiro', value: brl(quinhao) },
+        linhas: [
+          { label: 'Bens', value: brl(num(v.bens)) },
+          { label: '(−) Dívidas do espólio', value: brl(num(v.dividas)) },
+          { label: '(−) Meação do cônjuge', value: brl(num(v.meacao)) },
+          { label: 'Monte partilhável', value: brl(monte) },
+          { label: `Quinhão (÷ ${herdeiros})`, value: brl(quinhao) },
+        ],
+        memoria: [
+          `Monte = ${brl(num(v.bens))} − ${brl(num(v.dividas))} (dívidas) − ${brl(num(v.meacao))} (meação) = ${brl(monteBruto)}`,
+          ...(insolvente
+            ? [`⚠️ O resultado é negativo: as dívidas e a meação superam os bens em ${brl(Math.abs(monteBruto))}. Não há herança a partilhar, e os herdeiros não respondem além das forças da herança (art. 1.792 do Código Civil).`]
+            : [`Quinhão = ${brl(monte)} ÷ ${herdeiros} = ${brl(quinhao)}`]),
+        ],
+        criterios: [
+          'Respeitar a ordem de vocação hereditária (art. 1.829 do Código Civil).',
+          'A meação do cônjuge não é herança: sai antes da partilha.',
+          'Não reserva a legítima nem calcula ITCMD — use as calculadoras próprias.',
+        ],
+      }
     },
   },
   {
@@ -1379,8 +1579,11 @@ export const CALCULADORAS = [
       // A 2ª fase não sai da moldura legal: nem abaixo do mínimo (Súm. 231
       // STJ), nem acima do máximo. Só a 3ª fase pode ultrapassar.
       f2 = Math.min(max, Math.max(min, f2))
-      // 3ª fase
-      const f3 = f2 + f2 * fracao(v.aumento) - f2 * fracao(v.diminuicao)
+      // 3ª fase: as causas incidem SUCESSIVAMENTE — primeiro o aumento, e a
+      // diminuição sobre o resultado já aumentado. Antes as duas incidiam
+      // sobre a mesma f2, o que dá pena diferente quando há as duas no caso.
+      const comAumento = f2 + f2 * fracao(v.aumento)
+      const f3 = comAumento - comAumento * fracao(v.diminuicao)
       const { anos, meses, dias } = mesesEmPena(f3)
       const penaEscrita = [
         anos  ? `${anos} ano${anos > 1 ? 's' : ''}` : '',
@@ -1394,13 +1597,15 @@ export const CALCULADORAS = [
           `Intervalo = ${max} − ${min} = ${intervalo} meses`,
           `1ª fase: ${min} + ${intervalo} × (${neg}/8) = ${base.toFixed(1)} meses`,
           `2ª fase: ${base.toFixed(1)} + agrav. ${fracao(v.agravantes)} − aten. ${fracao(v.atenuantes)} = ${f2.toFixed(1)} meses (piso: mínimo legal)`,
-          `3ª fase: ${f2.toFixed(1)} + aum. ${fracao(v.aumento)} − dim. ${fracao(v.diminuicao)} = ${f3.toFixed(1)} meses`,
+          `3ª fase, aumento: ${f2.toFixed(1)} + ${fracao(v.aumento)} = ${comAumento.toFixed(1)} meses`,
+          `3ª fase, diminuição sobre o valor já aumentado: ${comAumento.toFixed(1)} − ${fracao(v.diminuicao)} = ${f3.toFixed(1)} meses`,
           `Definitiva = ${anos} ano(s) e ${meses} mês(es)`,
         ],
         criterios: [
           '1ª fase usa peso 1/8 por circunstância (critério doutrinário); ajuste conforme entendimento.',
           '2ª fase limitada à moldura legal: não desce do mínimo (Súm. 231 STJ) nem sobe do máximo.',
           'Mês de 30 dias; frações de dia desprezadas (art. 11 CP).',
+          '3ª fase: aumento e diminuição incidem em cascata, nesta ordem — a diminuição recai sobre a pena já aumentada.',
         ],
       }
     },
@@ -1425,10 +1630,22 @@ export const CALCULADORAS = [
     baseLegal: 'Art. 112 LEP (frações de 16% a 70% conforme o caso).',
     campos: [
       { name: 'penaMeses', label: 'Pena total (meses)', type: 'number', required: true },
-      { name: 'fracao', label: 'Fração exigida', type: 'select', default: '0.16', options: [{value:'0.16',label:'16% (primário, s/ violência)'},{value:'0.20',label:'20% (reincidente, s/ violência)'},{value:'0.25',label:'25% (primário, c/ violência)'},{value:'0.30',label:'30% (reincidente, c/ violência)'},{value:'0.40',label:'40% (hediondo primário)'},{value:'0.60',label:'60% (hediondo reincidente)'},{value:'0.70',label:'70% (hediondo c/ morte)'}] },
+      // Faltava o inciso VI (50%) do art. 112 da LEP, e os rótulos de 60% e
+      // 70% não diziam que são de REINCIDENTE — quem escolhesse "hediondo
+      // c/ morte" para um primário usava 70% no lugar dos 50% corretos.
+      { name: 'fracao', label: 'Fração exigida (art. 112 da LEP)', type: 'select', default: '0.16', options: [
+        { value: '0.16', label: '16% — I: primário, sem violência ou grave ameaça' },
+        { value: '0.20', label: '20% — II: reincidente, sem violência ou grave ameaça' },
+        { value: '0.25', label: '25% — III: primário, com violência ou grave ameaça' },
+        { value: '0.30', label: '30% — IV: reincidente, com violência ou grave ameaça' },
+        { value: '0.40', label: '40% — V: primário, crime hediondo ou equiparado' },
+        { value: '0.50', label: '50% — VI: primário em hediondo com resultado morte, comando de organização criminosa ou milícia' },
+        { value: '0.60', label: '60% — VII: reincidente em crime hediondo ou equiparado' },
+        { value: '0.70', label: '70% — VIII: reincidente em hediondo com resultado morte' },
+      ]},
       { name: 'cumpridoMeses', label: 'Tempo já cumprido (meses)', type: 'number', default: '0' },
     ],
-    compute: (v) => { const exig = num(v.penaMeses)*num(v.fracao); const falta = Math.max(0, exig-num(v.cumpridoMeses)); const ok = falta<=0; return { headline: { label: ok?'✅ Já pode progredir':'Faltam '+falta.toFixed(1)+' meses', value: `${exig.toFixed(1)} meses exigidos` }, linhas: [{label:'Fração', value: `${(num(v.fracao)*100).toFixed(0)}%`}, {label:'Tempo exigido', value: `${exig.toFixed(1)} meses`}, {label:'Já cumprido', value: `${num(v.cumpridoMeses)} meses`}, {label:'Falta', value: `${falta.toFixed(1)} meses`}], memoria: [`Exigido = ${num(v.penaMeses)} × ${(num(v.fracao)*100).toFixed(0)}% = ${exig.toFixed(1)} meses`, ok?'Requisito objetivo cumprido.':`Faltam ${falta.toFixed(1)} meses.`], criterios: ['Requisito subjetivo avaliado à parte.'] } },
+    compute: (v) => { const exig = num(v.penaMeses)*num(v.fracao); const falta = Math.max(0, exig-num(v.cumpridoMeses)); const ok = falta<=0; return { headline: { label: ok?'✅ Já pode progredir':'Faltam '+falta.toFixed(1)+' meses', value: `${exig.toFixed(1)} meses exigidos` }, linhas: [{label:'Fração', value: `${(num(v.fracao)*100).toFixed(0)}%`}, {label:'Tempo exigido', value: `${exig.toFixed(1)} meses`}, {label:'Já cumprido', value: `${num(v.cumpridoMeses)} meses`}, {label:'Falta', value: `${falta.toFixed(1)} meses`}], memoria: [`Exigido = ${num(v.penaMeses)} × ${(num(v.fracao)*100).toFixed(0)}% = ${exig.toFixed(1)} meses`, ok?'Requisito objetivo cumprido.':`Faltam ${falta.toFixed(1)} meses.`], criterios: ['Requisito subjetivo (boa conduta carcerária) avaliado à parte.', 'Nos incisos VI e VIII o livramento condicional é vedado.', 'Se houve detração, use o tempo já cumprido depois de abatida a prisão provisória.'] } },
   },
 
   // ─────────────────────── CONSUMIDOR ───────────────────────
@@ -1960,6 +2177,9 @@ export const CALCULADORAS = [
       ]},
       { name: 'periculosidade', label: 'Periculosidade (30% do salário-base)', type: 'select', default: 'nao',
         options: [{ value: 'nao', label: 'Não' }, { value: 'sim', label: 'Sim' }] },
+      { name: 'reflexos', label: 'Reflexos das extras em 13º e férias', type: 'select', default: 'sim',
+        options: [{ value: 'sim', label: 'Sim — extras habituais (Súmula 376, II, do TST)' }, { value: 'nao', label: 'Não' }],
+        help: 'Horas extras habituais integram a remuneração e repercutem em 13º, férias + 1/3 e FGTS.' },
       { name: 'verbasRescisorias', label: 'Verbas rescisórias já apuradas (R$)', type: 'currency',
         help: 'Traga o total bruto da calculadora de Verbas rescisórias.' },
       { name: 'incontroversas', label: 'Verbas incontroversas não pagas (R$)', type: 'currency', help: 'Multa do art. 467.' },
@@ -1993,25 +2213,54 @@ export const CALCULADORAS = [
       // Insalubridade: base é o salário mínimo (Súm. Vinc. 4 STF, enquanto não
       // houver norma coletiva ou decisão em contrário).
       const insal = v.insalubridade !== 'nao' ? PARAMS.salarioMinimo * pct(v.insalubridade) * n : 0
-      if (insal) {
-        linhas.push({ label: `Insalubridade ${v.insalubridade}% (${n} meses)`, value: brl(insal) })
-        memoria.push(`Insalubridade = ${brl(PARAMS.salarioMinimo)} (mínimo) × ${v.insalubridade}% × ${n} = ${brl(insal)}`)
-      }
       const peric = v.periculosidade === 'sim' ? sal * 0.30 * n : 0
+      const osDois = insal > 0 && peric > 0
+      if (insal) {
+        linhas.push({ label: `Insalubridade ${v.insalubridade}% (${n} meses)${osDois && insal < peric ? ' — alternativo, fora do total' : ''}`, value: brl(insal) })
+        memoria.push(`Insalubridade = ${brl(PARAMS.salarioMinimo)} (salário mínimo, Súmula Vinculante 4 do STF) × ${v.insalubridade}% × ${n} = ${brl(insal)}`)
+      }
       if (peric) {
-        linhas.push({ label: `Periculosidade 30% (${n} meses)`, value: brl(peric) })
+        linhas.push({ label: `Periculosidade 30% (${n} meses)${osDois && peric < insal ? ' — alternativo, fora do total' : ''}`, value: brl(peric) })
         memoria.push(`Periculosidade = ${brl(sal)} × 30% × ${n} = ${brl(peric)}`)
       }
-      if (insal && peric) memoria.push('⚠️ Insalubridade e periculosidade não se acumulam (art. 193, §2º CLT): escolha uma.')
+      // Os dois adicionais NÃO se acumulam (art. 193, §2º, da CLT). Antes a
+      // tela avisava disso na memória e mesmo assim somava os dois no total —
+      // o aviso dizia uma coisa e o número dizia outra. Agora entra só o mais
+      // vantajoso, e o outro fica registrado como alternativa.
+      let adicional = insal + peric, descartado = 0, nomeAdicional = ''
+      if (insal && peric) {
+        adicional = Math.max(insal, peric)
+        descartado = Math.min(insal, peric)
+        nomeAdicional = insal >= peric ? 'insalubridade' : 'periculosidade'
+        memoria.push(`⚠️ Insalubridade e periculosidade não se acumulam (art. 193, §2º, da CLT). Entrou no total só o mais vantajoso — ${nomeAdicional}, ${brl(adicional)}. O outro, ${brl(descartado)}, fica como pedido alternativo.`)
+      }
 
-      // FGTS de 8% sobre tudo que é salarial, mais a multa de 40%.
-      const baseFgts = extras + dsr + noturno + insal + peric
+      // Reflexos das extras habituais em 13º e férias + 1/3 (Súmula 376, II,
+      // do TST). Faltavam: a conta trazia o FGTS sobre as extras mas não as
+      // verbas que elas integram, subestimando o pedido.
+      const comReflexos = v.reflexos !== 'nao'
+      const baseReflexo = extras + dsr + noturno
+      const ref13 = comReflexos ? baseReflexo / 12 : 0
+      const refFerias = comReflexos ? (baseReflexo / 12) * (4 / 3) : 0
+      if (ref13) {
+        linhas.push({ label: 'Reflexo em 13º salário', value: brl(ref13) })
+        linhas.push({ label: 'Reflexo em férias + 1/3', value: brl(refFerias) })
+        memoria.push(
+          `Reflexo em 13º = ${brl(baseReflexo)} ÷ 12 = ${brl(ref13)}`,
+          `Reflexo em férias + 1/3 = ${brl(baseReflexo)} ÷ 12 × 4/3 = ${brl(refFerias)} (Súmula 376, II, do TST)`,
+        )
+      }
+
+      // FGTS de 8% sobre o que é salarial, mais a multa de 40%. As férias
+      // indenizadas e o terço ficam de fora da base (art. 28, §9º, da Lei
+      // 8.212/91); o 13º entra.
+      const baseFgts = baseReflexo + adicional + ref13
       const fgts = baseFgts * 0.08
       const multaFgts = fgts * 0.40
       if (fgts) {
-        linhas.push({ label: 'FGTS 8% sobre os reflexos', value: brl(fgts) })
+        linhas.push({ label: 'FGTS 8% sobre as verbas salariais', value: brl(fgts) })
         linhas.push({ label: 'Multa 40% sobre esse FGTS', value: brl(multaFgts) })
-        memoria.push(`FGTS = ${brl(baseFgts)} × 8% = ${brl(fgts)}; multa 40% = ${brl(multaFgts)}`)
+        memoria.push(`FGTS = ${brl(baseFgts)} × 8% = ${brl(fgts)}; multa de 40% = ${brl(multaFgts)}`)
       }
 
       const rescisorias = num(v.verbasRescisorias)
@@ -2022,7 +2271,7 @@ export const CALCULADORAS = [
       const m467 = num(v.incontroversas) * 0.50
       if (m467) { linhas.push({ label: 'Multa do art. 467 (50%)', value: brl(m467) }); memoria.push(`Art. 467 = ${brl(num(v.incontroversas))} × 50% = ${brl(m467)}`) }
 
-      const total = extras + dsr + noturno + insal + peric + fgts + multaFgts + rescisorias + m477 + m467
+      const total = extras + dsr + noturno + adicional + ref13 + refFerias + fgts + multaFgts + rescisorias + m477 + m467
       memoria.push(`TOTAL DO PEDIDO = ${brl(total)}`)
       return {
         headline: { label: 'Total do pedido (valor da causa)', value: brl(total) },
@@ -2030,7 +2279,12 @@ export const CALCULADORAS = [
         criterios: [
           `Período reclamado: ${n} meses`,
           'Valores nominais: some a correção e os juros na Atualização monetária de dívida.',
-          'Insalubridade e periculosidade não se acumulam (art. 193, §2º CLT).',
+          descartado
+            ? `Insalubridade e periculosidade não se acumulam: entrou só ${nomeAdicional}. O outro adicional (${brl(descartado)}) cabe como pedido alternativo.`
+            : 'Insalubridade e periculosidade não se acumulam (art. 193, §2º da CLT).',
+          comReflexos
+            ? 'Extras habituais repercutem em 13º, férias + 1/3 e FGTS (Súmula 376, II, do TST).'
+            : 'Reflexos em 13º e férias DESLIGADOS — o total está menor do que o devido se as extras eram habituais.',
           'Prescrição: 5 anos retroativos, até 2 anos após o fim do contrato (art. 7º, XXIX, CF).',
         ],
       }
@@ -2054,7 +2308,12 @@ export const CALCULADORAS = [
     ],
     compute: (v) => {
       const bens = num(v.bens)
-      const meacao = num(v.bensComuns) / 2
+      // Bens comuns maiores que o acervo é erro de digitação, e antes passava
+      // calado: a meação comia a herança inteira e o quinhão saía zero sem
+      // nenhuma explicação na tela.
+      const comuns = num(v.bensComuns)
+      const comunsExcedem = comuns > bens
+      const meacao = Math.min(comuns, bens) / 2
       const dividas = num(v.dividas)
       // A meação sai antes: é do cônjuge, nunca foi do falecido.
       const herancaBruta = Math.max(0, bens - meacao)
@@ -2079,7 +2338,8 @@ export const CALCULADORAS = [
           { label: `Quinhão (÷${herdeiros})`, value: brl(quinhao) },
         ],
         memoria: [
-          meacao ? `Meação = ${brl(num(v.bensComuns))} ÷ 2 = ${brl(meacao)} — sai antes, não é herança` : 'Sem bens comuns: não há meação.',
+          ...(comunsExcedem ? [`⚠️ Os bens comuns informados (${brl(comuns)}) são maiores que o acervo total (${brl(bens)}). Confira os dois campos — a meação foi limitada ao acervo para o cálculo não ficar sem sentido.`] : []),
+          meacao ? `Meação = ${brl(Math.min(comuns, bens))} ÷ 2 = ${brl(meacao)} — sai antes, não é herança` : 'Sem bens comuns: não há meação.',
           `Herança bruta = ${brl(bens)} − ${brl(meacao)} = ${brl(herancaBruta)}`,
           `ITCMD = ${brl(herancaBruta)} × ${(pct(v.itcmd) * 100).toFixed(1)}% = ${brl(itcmd)}`,
           custas ? `Custas = ${brl(custas)}` : '',
@@ -2088,7 +2348,8 @@ export const CALCULADORAS = [
         ].filter(Boolean),
         criterios: [
           'A meação do cônjuge NÃO integra a herança — sai antes da divisão.',
-          'Confira a alíquota do ITCMD do estado competente e a ordem de vocação hereditária (art. 1.829 CC).',
+          'Confira a alíquota do ITCMD do estado competente e a ordem de vocação hereditária (art. 1.829 do Código Civil).',
+          'O ITCMD aqui incide sobre a herança bruta, sem abater as dívidas do espólio — é o critério da maioria dos estados. Se a lei estadual do caso permitir o abatimento, o imposto sairá menor.',
           'Quinhão igual entre herdeiros da mesma classe; herdeiro necessário tem a legítima garantida.',
         ],
       }
@@ -2111,7 +2372,10 @@ export const CALCULADORAS = [
     ],
     compute: (v) => {
       const fem = v.sexo === 'F'
-      const idade = num(v.idade), tempo = num(v.tempoHoje), ano = num(v.ano) || new Date().getFullYear()
+      const idade = num(v.idade), tempo = num(v.tempoHoje)
+      // As tabelas da EC 103 começam em 2019. Um ano anterior BAIXAVA todas
+      // as exigências, e a tela dizia que a pessoa já podia se aposentar.
+      const ano = Math.max(2019, num(v.ano) || new Date().getFullYear())
       const tempoMin = fem ? 30 : 35
       const regras = []
 
@@ -2159,6 +2423,18 @@ export const CALCULADORAS = [
             cumpre: tempo >= alvo,
             falta: tempo < alvo ? `${(alvo - tempo).toFixed(2)} anos de contribuição` : '',
             detalhe: 'Sujeita ao fator previdenciário.',
+          })
+        }
+        // Quem já tinha o tempo mínimo em 13/11/2019 adquiriu o direito às
+        // regras anteriores à Reforma (EC 103, art. 3º) e não precisa de
+        // pedágio nenhum. Antes a tela empurrava essa pessoa para o pedágio
+        // de 100% como se fosse o caminho dela.
+        if (faltava === 0) {
+          regras.unshift({
+            nome: 'Direito adquirido às regras anteriores à Reforma (EC 103, art. 3º)',
+            exige: `${tempoMin} anos de contribuição já cumpridos em 13/11/2019`,
+            cumpre: true, falta: '',
+            detalhe: 'A pessoa pode se aposentar pelas regras antigas a qualquer tempo — compare o valor com as regras de transição antes de dar entrada.',
           })
         }
         const alvo100 = t2019 + faltava * 2

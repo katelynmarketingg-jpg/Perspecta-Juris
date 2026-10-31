@@ -255,7 +255,9 @@ console.log('\n── 11. Tempo de contribuição: o último dia conta ──')
     { inicio: '2020-01-01', fim: '2020-12-31' },
     { inicio: '2021-01-01', fim: '2021-12-31' },
   ]})
-  if (tc.linhas[0].value === '731 dias') ok('dois anos somam 731 dias (366 + 365), não 729')
+  // A linha agora traz os dias E o tempo escrito, porque a calculadora passou
+  // a mostrar também o tempo sem concomitância. O número conferido é o mesmo.
+  if (tc.linhas[0].value.startsWith('731 dias')) ok('dois anos somam 731 dias (366 + 365), não 729')
   else bad(`somou ${tc.linhas[0].value}`)
 }
 
