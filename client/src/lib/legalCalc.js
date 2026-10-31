@@ -1112,9 +1112,13 @@ export const CALCULADORAS = [
   {
     id: 'regra-pontos', ramo: 'previdenciario', titulo: 'Regra de pontos (transição)',
     descricao: 'Idade + tempo de contribuição vs. pontuação exigida no ano.',
-    casos: 'Transição EC 103/2019 (art. 15).', baseLegal: 'Mulher: 86 pts (2019) +1/ano até 100. Homem: 96 pts +1/ano até 105.',
+    casos: 'Transição EC 103/2019 (art. 15).',
+    baseLegal: 'EC 103/2019, art. 15: 86 pontos (mulher) e 96 (homem) em 2019, +1 por ano a partir de 01/01/2020, até 100 e 105; tempo mínimo de 30 e 35 anos. §3º — professor em efetivo magistério: 81 e 91 pontos, até 92 e 100, com 25 e 30 anos de contribuição.',
     campos: [
       { name: 'sexo', label: 'Sexo', type: 'select', default: 'M', options: [{value:'M',label:'Masculino'},{value:'F',label:'Feminino'}] },
+      { name: 'professor', label: 'Professor em efetivo magistério?', type: 'select', default: 'nao',
+        options: [{ value: 'nao', label: 'Não' }, { value: 'sim', label: 'Sim — educação infantil, fundamental ou médio' }],
+        help: 'Art. 15, §3º: exige tempo EXCLUSIVO de magistério e reduz a pontuação e o tempo mínimo.' },
       { name: 'idade', label: 'Idade atual (anos)', type: 'number', required: true },
       { name: 'tempoAnos', label: 'Tempo de contribuição (anos)', type: 'number', required: true },
       { name: 'ano', label: 'Ano de análise', type: 'number', default: String(new Date().getFullYear()) },
@@ -1125,22 +1129,46 @@ export const CALCULADORAS = [
       // que a pessoa já tinha direito quando não tinha.
       const ano = Math.max(2019, num(v.ano))
       const fem = v.sexo === 'F'
-      const exigido = fem ? Math.min(100, 86 + (ano - 2019)) : Math.min(105, 96 + (ano - 2019))
-      const tempoMin = fem ? 30 : 35
+      // A regra do professor (§3º) faltava por inteiro. Ela não é um detalhe:
+      // reduz 5 pontos e 5 anos de contribuição, e professor é categoria
+      // grande num escritório previdenciário.
+      const prof = v.professor === 'sim'
+      const inicial = prof ? (fem ? 81 : 91) : (fem ? 86 : 96)
+      const teto    = prof ? (fem ? 92 : 100) : (fem ? 100 : 105)
+      const exigido = Math.min(teto, inicial + (ano - 2019))
+      const tempoMin = prof ? (fem ? 25 : 30) : (fem ? 30 : 35)
       const pontos = num(v.idade) + num(v.tempoAnos)
+      const faltaTempo = Math.max(0, tempoMin - num(v.tempoAnos))
       const ok = pontos >= exigido && num(v.tempoAnos) >= tempoMin
       return {
         headline: { label: ok ? '✅ Requisito de pontos atingido' : '❌ Ainda não atinge', value: `${pontos} / ${exigido} pts` },
-        linhas: [{label:'Pontos (idade+tempo)', value: String(pontos)}, {label:`Exigido em ${ano}`, value: `${exigido} pts`}, {label:'Tempo mínimo', value: `${tempoMin} anos`}],
-        memoria: [`Pontos = ${num(v.idade)} + ${num(v.tempoAnos)} = ${pontos}`, `Exigência ${ano}: ${exigido} pts (mín. ${tempoMin} anos de contribuição)`, ok ? 'Requisitos cumpridos.' : `Faltam ${Math.max(0, exigido - pontos)} pontos e/ou tempo mínimo.`],
-        criterios: [`Sexo: ${fem ? 'Feminino' : 'Masculino'}`, `Ano: ${ano}`],
+        linhas: [
+          { label: 'Pontos (idade + tempo)', value: String(pontos) },
+          { label: `Exigido em ${ano}`, value: `${exigido} pts` },
+          { label: 'Tempo mínimo de contribuição', value: `${tempoMin} anos` },
+          { label: 'Falta de tempo', value: faltaTempo ? `${faltaTempo.toFixed(1)} anos` : 'cumprido' },
+        ],
+        memoria: [
+          `Pontos = ${num(v.idade)} (idade) + ${num(v.tempoAnos)} (contribuição) = ${pontos}`,
+          `Exigência em ${ano} = ${inicial} + ${ano - 2019} = ${exigido} pontos (teto de ${teto})`,
+          `Tempo mínimo = ${tempoMin} anos${prof ? ' de magistério' : ''}`,
+          ok ? 'Os dois requisitos estão cumpridos.'
+             : `Faltam ${Math.max(0, exigido - pontos).toFixed(1)} ponto(s)${faltaTempo ? ` e ${faltaTempo.toFixed(1)} ano(s) de contribuição` : ''}.`,
+          prof ? 'Art. 15, §3º: o tempo tem de ser EXCLUSIVAMENTE de magistério na educação infantil, fundamental ou médio.' : null,
+        ].filter(Boolean),
+        criterios: [
+          `Sexo: ${fem ? 'Feminino' : 'Masculino'}${prof ? ' · professor(a)' : ''}`,
+          `Ano de análise: ${ano}`,
+          'Os pontos somam idade e tempo apurados em DIAS (art. 15, §2º) — aqui a conta é em anos, então confira as frações perto da virada.',
+        ],
       }
     },
   },
   {
     id: 'pedagio-50', ramo: 'previdenciario', titulo: 'Pedágio de 50%',
-    descricao: 'Para quem faltava até 2 anos em 13/11/2019.', casos: 'Transição EC 103/2019 (art. 17).',
-    baseLegal: 'Tempo faltante em 13/11/2019 × 50% de pedágio. Aplica fator previdenciário.',
+    descricao: 'Para quem já tinha mais de 28 anos (mulher) ou 33 (homem) em 13/11/2019.',
+    casos: 'Transição EC 103/2019 (art. 17).',
+    baseLegal: 'EC 103/2019, art. 17: exige MAIS de 28 anos de contribuição se mulher e MAIS de 33 se homem na data da Reforma, e o cumprimento de período adicional de 50% do que faltava. Parágrafo único: o valor é a média multiplicada pelo fator previdenciário.',
     campos: [
       { name: 'sexo', label: 'Sexo', type: 'select', default: 'M', options: [{value:'M',label:'Masculino'},{value:'F',label:'Feminino'}] },
       { name: 'tempoNaData', label: 'Tempo de contribuição em 13/11/2019 (anos)', type: 'number', required: true },
@@ -1148,13 +1176,19 @@ export const CALCULADORAS = [
     compute: (v) => {
       const fem = v.sexo === 'F', tempoMin = fem ? 30 : 35
       const faltava = Math.max(0, tempoMin - num(v.tempoNaData))
-      const elegivel = faltava <= 2 && faltava > 0
+      // O art. 17 exige "MAIS de 28 anos, se mulher, e 33, se homem" na data
+      // da Reforma — ou seja, faltava MENOS de 2 anos, estritamente. O código
+      // aceitava `faltava <= 2`, e com isso dizia que quem tinha exatamente 28
+      // ou 33 anos era elegível a uma regra que não alcança essa pessoa.
+      const elegivel = faltava > 0 && faltava < 2
       const pedagio = faltava * 0.5
       const totalFaltante = faltava + pedagio
       return {
         headline: { label: elegivel ? '✅ Elegível ao pedágio 50%' : '❌ Não elegível', value: elegivel ? `Faltam ${totalFaltante.toFixed(2)} anos` : '—' },
         linhas: [{label:'Tempo mínimo', value: `${tempoMin} anos`}, {label:'Faltava em 13/11/2019', value: `${faltava.toFixed(2)} anos`}, {label:'Pedágio (50%)', value: `${pedagio.toFixed(2)} anos`}, {label:'Total a cumprir', value: `${totalFaltante.toFixed(2)} anos`}],
-        memoria: [`Faltava = ${tempoMin} − ${num(v.tempoNaData)} = ${faltava.toFixed(2)} anos`, elegivel ? `Pedágio = ${faltava.toFixed(2)} × 50% = ${pedagio.toFixed(2)} anos` : 'Só é elegível quem faltava ≤ 2 anos em 13/11/2019.', `Total = ${faltava.toFixed(2)} + ${pedagio.toFixed(2)} = ${totalFaltante.toFixed(2)} anos`],
+        memoria: [`Faltava = ${tempoMin} − ${num(v.tempoNaData)} = ${faltava.toFixed(2)} anos`, elegivel
+          ? `Pedágio = ${faltava.toFixed(2)} × 50% = ${pedagio.toFixed(2)} anos`
+          : `Não elegível: o art. 17 exige mais de ${tempoMin - 2} anos de contribuição em 13/11/2019 (faltar MENOS de 2 anos). Aqui faltavam ${faltava.toFixed(2)}.`, `Total = ${faltava.toFixed(2)} + ${pedagio.toFixed(2)} = ${totalFaltante.toFixed(2)} anos`],
         criterios: [`Sexo: ${fem ? 'Feminino' : 'Masculino'}`, 'Sujeito ao fator previdenciário.'],
       }
     },
@@ -1162,23 +1196,62 @@ export const CALCULADORAS = [
   {
     id: 'pedagio-100', ramo: 'previdenciario', titulo: 'Pedágio de 100%',
     descricao: 'Idade mínima + pedágio de 100% do tempo faltante em 13/11/2019.', casos: 'Transição EC 103/2019 (art. 20).',
-    baseLegal: 'Idade mín.: 57 (M-mulher)/60 (homem). Pedágio = 100% do que faltava.',
+    baseLegal: 'EC 103/2019, art. 20: 57 anos de idade (mulher) e 60 (homem), 30 e 35 anos de contribuição, mais período adicional igual a 100% do que faltava em 13/11/2019. §1º — professor em efetivo magistério: idade e tempo reduzidos em 5 anos. Art. 26, §3º, I: benefício de 100% da média, sem redutor.',
     campos: [
       { name: 'sexo', label: 'Sexo', type: 'select', default: 'M', options: [{value:'M',label:'Masculino'},{value:'F',label:'Feminino'}] },
+      { name: 'professor', label: 'Professor em efetivo magistério?', type: 'select', default: 'nao',
+        options: [{ value: 'nao', label: 'Não' }, { value: 'sim', label: 'Sim — reduz idade e tempo em 5 anos (§1º)' }] },
       { name: 'idade', label: 'Idade atual', type: 'number', required: true },
       { name: 'tempoNaData', label: 'Tempo de contribuição em 13/11/2019 (anos)', type: 'number', required: true },
+      { name: 'tempoHoje', label: 'Tempo de contribuição hoje (anos)', type: 'number',
+        help: 'Para dizer se o pedágio já foi cumprido. Vazio = só mostra o alvo.' },
     ],
     compute: (v) => {
-      const fem = v.sexo === 'F', tempoMin = fem ? 30 : 35, idadeMin = fem ? 57 : 60
+      const fem = v.sexo === 'F'
+      // A redução de 5 anos do professor (art. 20, §1º) vale para a idade E
+      // para o tempo, nos dois sexos. Faltava por inteiro.
+      const prof = v.professor === 'sim'
+      const corte = prof ? 5 : 0
+      const tempoMin = (fem ? 30 : 35) - corte
+      const idadeMin = (fem ? 57 : 60) - corte
       const faltava = Math.max(0, tempoMin - num(v.tempoNaData))
       const pedagio = faltava
       const totalFaltante = faltava + pedagio
       const idadeOk = num(v.idade) >= idadeMin
+      const alvoTempo = num(v.tempoNaData) + totalFaltante
+      const temHoje = String(v.tempoHoje ?? '').trim() !== ''
+      const tempoOk = temHoje && num(v.tempoHoje) >= alvoTempo
+      // Antes o título dizia só se a IDADE estava OK, mas o valor ao lado
+      // falava de tempo de contribuição — duas coisas diferentes no mesmo
+      // lugar. Agora o título responde a pergunta inteira.
+      const cumpriuTudo = idadeOk && tempoOk
+      const titulo = !temHoje
+        ? (idadeOk ? 'Idade mínima atingida — informe o tempo de hoje' : 'Idade mínima ainda não atingida')
+        : (cumpriuTudo ? '✅ Já pode se aposentar por esta regra'
+          : !idadeOk ? '❌ Falta idade' : '❌ Falta tempo de contribuição')
       return {
-        headline: { label: idadeOk ? '✔️ Idade mínima OK' : '❌ Idade insuficiente', value: `Faltam ${totalFaltante.toFixed(2)} anos de contrib.` },
-        linhas: [{label:'Idade mínima', value: `${idadeMin} anos`}, {label:'Faltava em 13/11/2019', value: `${faltava.toFixed(2)} anos`}, {label:'Pedágio (100%)', value: `${pedagio.toFixed(2)} anos`}, {label:'Total a cumprir', value: `${totalFaltante.toFixed(2)} anos`}],
-        memoria: [`Faltava = ${tempoMin} − ${num(v.tempoNaData)} = ${faltava.toFixed(2)} anos`, `Pedágio 100% = ${faltava.toFixed(2)} anos`, `Total = ${totalFaltante.toFixed(2)} anos`, `Idade mínima ${idadeMin}: ${idadeOk ? 'atingida' : 'não atingida'}`],
-        criterios: [`Sexo: ${fem ? 'Feminino' : 'Masculino'}`, 'Benefício: 100% da média (sem redutor).'],
+        headline: { label: titulo, value: `Alvo: ${alvoTempo.toFixed(2)} anos de contribuição` },
+        linhas: [
+          { label: 'Idade mínima exigida', value: `${idadeMin} anos${prof ? ' (professor)' : ''}` },
+          { label: 'Idade informada', value: `${num(v.idade)} anos — ${idadeOk ? 'cumprida' : `faltam ${(idadeMin - num(v.idade)).toFixed(1)}`}` },
+          { label: 'Faltava em 13/11/2019', value: `${faltava.toFixed(2)} anos` },
+          { label: 'Pedágio (100% do que faltava)', value: `${pedagio.toFixed(2)} anos` },
+          { label: 'Tempo total a atingir', value: `${alvoTempo.toFixed(2)} anos` },
+          ...(temHoje ? [{ label: 'Tempo hoje', value: `${num(v.tempoHoje).toFixed(2)} anos — ${tempoOk ? 'cumprido' : `faltam ${(alvoTempo - num(v.tempoHoje)).toFixed(2)}`}` }] : []),
+        ],
+        memoria: [
+          prof ? `Professor (art. 20, §1º): idade e tempo reduzidos em 5 anos → ${idadeMin} anos de idade e ${tempoMin} de contribuição.` : null,
+          `Faltava em 13/11/2019 = ${tempoMin} − ${num(v.tempoNaData)} = ${faltava.toFixed(2)} anos`,
+          `Pedágio de 100% = ${faltava.toFixed(2)} anos (art. 20, IV)`,
+          `Tempo total a atingir = ${num(v.tempoNaData)} + ${faltava.toFixed(2)} + ${pedagio.toFixed(2)} = ${alvoTempo.toFixed(2)} anos`,
+          `Idade mínima de ${idadeMin} anos: ${idadeOk ? 'atingida' : 'NÃO atingida'}`,
+          temHoje ? `Tempo hoje (${num(v.tempoHoje)} anos): ${tempoOk ? 'alvo atingido' : 'alvo ainda não atingido'}` : 'Informe o tempo de contribuição de hoje para saber se o pedágio já foi cumprido.',
+        ].filter(Boolean),
+        criterios: [
+          `Sexo: ${fem ? 'Feminino' : 'Masculino'}${prof ? ' · professor(a)' : ''}`,
+          'Benefício de 100% da média, sem redutor (art. 26, §3º, I, da EC 103/2019) — é o que torna esta regra vantajosa.',
+          'Não se aplica fator previdenciário nesta regra.',
+        ],
       }
     },
   },
@@ -1320,7 +1393,8 @@ export const CALCULADORAS = [
           `Total = ${brl(p)} + ${brl(corr)} + ${brl(multa)} = ${brl(total)}`,
         ],
         criterios: ['A SELIC já engloba juros e correção monetária — não some outro índice por cima.',
-                    'Multa e juros têm a mesma base: o valor do tributo.'],
+                    'Multa e juros têm a mesma base: o valor do tributo.',
+                    'Art. 61, §3º: a SELIC corre do 1º dia do mês seguinte ao vencimento até o mês ANTERIOR ao pagamento, mais 1% no mês do pagamento. Confira se o acumulado informado já inclui esse 1%.'],
       }
     },
   },
@@ -1644,8 +1718,46 @@ export const CALCULADORAS = [
         { value: '0.70', label: '70% — VIII: reincidente em hediondo com resultado morte' },
       ]},
       { name: 'cumpridoMeses', label: 'Tempo já cumprido (meses)', type: 'number', default: '0' },
+      { name: 'faltaGrave', label: 'Houve falta grave?', type: 'select', default: 'nao',
+        options: [{ value: 'nao', label: 'Não' }, { value: 'sim', label: 'Sim — interrompe o prazo (art. 112, §6º)' }],
+        help: 'A falta grave zera a contagem, e o reinício tem como base a PENA REMANESCENTE, não a pena original.' },
     ],
-    compute: (v) => { const exig = num(v.penaMeses)*num(v.fracao); const falta = Math.max(0, exig-num(v.cumpridoMeses)); const ok = falta<=0; return { headline: { label: ok?'✅ Já pode progredir':'Faltam '+falta.toFixed(1)+' meses', value: `${exig.toFixed(1)} meses exigidos` }, linhas: [{label:'Fração', value: `${(num(v.fracao)*100).toFixed(0)}%`}, {label:'Tempo exigido', value: `${exig.toFixed(1)} meses`}, {label:'Já cumprido', value: `${num(v.cumpridoMeses)} meses`}, {label:'Falta', value: `${falta.toFixed(1)} meses`}], memoria: [`Exigido = ${num(v.penaMeses)} × ${(num(v.fracao)*100).toFixed(0)}% = ${exig.toFixed(1)} meses`, ok?'Requisito objetivo cumprido.':`Faltam ${falta.toFixed(1)} meses.`], criterios: ['Requisito subjetivo (boa conduta carcerária) avaliado à parte.', 'Nos incisos VI e VIII o livramento condicional é vedado.', 'Se houve detração, use o tempo já cumprido depois de abatida a prisão provisória.'] } },
+    // O §6º do art. 112 faltava, e muda o número de forma relevante: depois
+    // de falta grave a fração incide sobre o que RESTA da pena, e o tempo já
+    // cumprido não conta mais para a progressão.
+    compute: (v) => {
+      const pena = num(v.penaMeses), fracao = num(v.fracao), cumprido = num(v.cumpridoMeses)
+      const grave = v.faltaGrave === 'sim'
+      const base = grave ? Math.max(0, pena - cumprido) : pena
+      const exig = base * fracao
+      const jaConta = grave ? 0 : cumprido
+      const falta = Math.max(0, exig - jaConta)
+      const ok = falta <= 0
+      return {
+        headline: { label: ok ? '✅ Requisito objetivo cumprido' : `Faltam ${falta.toFixed(1)} meses`, value: `${exig.toFixed(1)} meses exigidos` },
+        linhas: [
+          { label: 'Fração do art. 112', value: `${(fracao * 100).toFixed(0)}%` },
+          { label: grave ? 'Base após a falta grave (pena remanescente)' : 'Base (pena total)', value: `${base.toFixed(1)} meses` },
+          { label: 'Tempo exigido', value: `${exig.toFixed(1)} meses` },
+          { label: grave ? 'Conta a partir da falta grave' : 'Já cumprido', value: `${jaConta.toFixed(1)} meses` },
+          { label: 'Falta', value: `${falta.toFixed(1)} meses` },
+        ],
+        memoria: [
+          grave
+            ? `Falta grave: o prazo foi interrompido e a base passa a ser a pena remanescente = ${pena} − ${cumprido} = ${base.toFixed(1)} meses (art. 112, §6º, da LEP).`
+            : null,
+          `Exigido = ${base.toFixed(1)} × ${(fracao * 100).toFixed(0)}% = ${exig.toFixed(1)} meses`,
+          grave ? 'O tempo cumprido antes da falta grave não conta mais para esta progressão.' : `Já cumprido = ${cumprido} meses`,
+          ok ? 'Requisito objetivo cumprido.' : `Faltam ${falta.toFixed(1)} meses.`,
+        ].filter(Boolean),
+        criterios: [
+          'Requisito subjetivo (boa conduta carcerária comprovada pelo diretor) avaliado à parte — art. 112, §1º.',
+          'Nos incisos VI e VIII o livramento condicional é vedado.',
+          'O tráfico privilegiado (art. 33, §4º, da Lei 11.343/2006) NÃO é hediondo para a progressão — art. 112, §5º.',
+          'Se houve detração, lance o tempo já cumprido depois de abatida a prisão provisória.',
+        ],
+      }
+    },
   },
 
   // ─────────────────────── CONSUMIDOR ───────────────────────
@@ -2364,6 +2476,9 @@ export const CALCULADORAS = [
     campos: [
       { name: 'sexo', label: 'Sexo', type: 'select', default: 'F', options: [
         { value: 'F', label: 'Feminino' }, { value: 'M', label: 'Masculino' }]},
+      { name: 'professor', label: 'Professor em efetivo magistério?', type: 'select', default: 'nao',
+        options: [{ value: 'nao', label: 'Não' }, { value: 'sim', label: 'Sim — educação infantil, fundamental ou médio' }],
+        help: 'Reduz a pontuação (art. 15, §3º), a idade (art. 16, §2º e art. 20, §1º) e o tempo mínimo.' },
       { name: 'idade', label: 'Idade hoje (anos)', type: 'number', required: true },
       { name: 'tempoHoje', label: 'Tempo de contribuição hoje (anos)', type: 'number', required: true },
       { name: 'tempoEm2019', label: 'Tempo em 13/11/2019 (anos)', type: 'number',
@@ -2376,36 +2491,59 @@ export const CALCULADORAS = [
       // As tabelas da EC 103 começam em 2019. Um ano anterior BAIXAVA todas
       // as exigências, e a tela dizia que a pessoa já podia se aposentar.
       const ano = Math.max(2019, num(v.ano) || new Date().getFullYear())
-      const tempoMin = fem ? 30 : 35
+      const prof = v.professor === 'sim'
+      const tempoMin = prof ? (fem ? 25 : 30) : (fem ? 30 : 35)
       const regras = []
 
-      // Regra permanente (art. 19): 62 (mulher) / 65 (homem) + 15 anos.
+      // Transição por idade (art. 18): para quem JÁ era filiado. 60 (mulher,
+      // subindo 6 meses por ano até 62) / 65 (homem), com 15 anos de
+      // contribuição para os dois.
+      const idadeArt18 = fem ? Math.min(62, 60 + (ano - 2019) * 0.5) : 65
+      regras.push({
+        nome: 'Transição por idade (art. 18)',
+        exige: `${idadeArt18.toFixed(1)} anos de idade + 15 de contribuição`,
+        cumpre: idade >= idadeArt18 && tempo >= 15,
+        falta: idade < idadeArt18 ? `${(idadeArt18 - idade).toFixed(1)} anos de idade` : (tempo < 15 ? `${(15 - tempo).toFixed(1)} anos de contribuição` : ''),
+        detalhe: 'Vale para quem já era filiado em 13/11/2019.',
+      })
+
+      // Regra permanente (art. 19): 62 (mulher) / 65 (homem), com 15 anos de
+      // contribuição se MULHER e 20 se HOMEM.
+      //
+      // O código exigia 15 anos dos dois sexos. O art. 19 pede 20 do homem —
+      // cinco anos a mais. A tela dizia a um homem de 65 anos com 16 de
+      // contribuição que ele já podia se aposentar, e ele não podia.
       const idadePerm = fem ? 62 : 65
+      const tempoPerm = fem ? 15 : 20
       regras.push({
         nome: 'Regra permanente (art. 19)',
-        exige: `${idadePerm} anos de idade + 15 de contribuição`,
-        cumpre: idade >= idadePerm && tempo >= 15,
-        falta: idade < idadePerm ? `${(idadePerm - idade).toFixed(1)} anos de idade` : (tempo < 15 ? `${(15 - tempo).toFixed(1)} anos de contribuição` : ''),
+        exige: `${idadePerm} anos de idade + ${tempoPerm} de contribuição`,
+        cumpre: idade >= idadePerm && tempo >= tempoPerm,
+        falta: idade < idadePerm ? `${(idadePerm - idade).toFixed(1)} anos de idade` : (tempo < tempoPerm ? `${(tempoPerm - tempo).toFixed(1)} anos de contribuição` : ''),
+        detalhe: 'Vale para quem se filiou DEPOIS de 13/11/2019.',
       })
 
       // Pontos (art. 15): 86/96 em 2019, +1 por ano, teto 100/105.
-      const ptsExigidos = fem ? Math.min(100, 86 + (ano - 2019)) : Math.min(105, 96 + (ano - 2019))
+      // §3º — professor: 81/91, teto 92/100, com 25/30 anos de magistério.
+      const ptsBase = prof ? (fem ? 81 : 91) : (fem ? 86 : 96)
+      const ptsTeto = prof ? (fem ? 92 : 100) : (fem ? 100 : 105)
+      const ptsExigidos = Math.min(ptsTeto, ptsBase + (ano - 2019))
       const pontos = idade + tempo
       regras.push({
-        nome: 'Pontos (art. 15)',
+        nome: `Pontos (art. 15${prof ? ', §3º — professor' : ''})`,
         exige: `${ptsExigidos} pontos + ${tempoMin} anos de contribuição`,
         cumpre: pontos >= ptsExigidos && tempo >= tempoMin,
         falta: pontos < ptsExigidos ? `${(ptsExigidos - pontos).toFixed(1)} pontos` : (tempo < tempoMin ? `${(tempoMin - tempo).toFixed(1)} anos de contribuição` : ''),
         detalhe: `Você tem ${pontos.toFixed(1)} pontos (${idade} de idade + ${tempo} de contribuição)`,
       })
 
-      // Idade progressiva (art. 16): 56/61 em 2019, +6 meses por ano,
-      // travando em 62 (mulher) e 65 (homem).
-      const idadeExigida = fem
-        ? Math.min(62, 56 + (ano - 2019) * 0.5)
-        : Math.min(65, 61 + (ano - 2019) * 0.5)
+      // Idade progressiva (art. 16): 56/61 em 2019, +6 meses por ano, até
+      // 62/65. §2º — professor: tudo reduzido em 5 anos, até 57/60.
+      const idadeBase = prof ? (fem ? 51 : 56) : (fem ? 56 : 61)
+      const idadeTeto = prof ? (fem ? 57 : 60) : (fem ? 62 : 65)
+      const idadeExigida = Math.min(idadeTeto, idadeBase + (ano - 2019) * 0.5)
       regras.push({
-        nome: 'Idade progressiva (art. 16)',
+        nome: `Idade progressiva (art. 16${prof ? ', §2º — professor' : ''})`,
         exige: `${idadeExigida.toFixed(1)} anos de idade + ${tempoMin} de contribuição`,
         cumpre: idade >= idadeExigida && tempo >= tempoMin,
         falta: idade < idadeExigida ? `${(idadeExigida - idade).toFixed(1)} anos de idade` : (tempo < tempoMin ? `${(tempoMin - tempo).toFixed(1)} anos de contribuição` : ''),
@@ -2415,7 +2553,8 @@ export const CALCULADORAS = [
       const t2019 = num(v.tempoEm2019)
       if (t2019 > 0) {
         const faltava = Math.max(0, tempoMin - t2019)
-        if (faltava > 0 && faltava <= 2) {
+        // Art. 17: exige MAIS de 28/33 anos na data — faltar MENOS de 2 anos.
+        if (faltava > 0 && faltava < 2) {
           const alvo = t2019 + faltava + faltava * 0.5
           regras.push({
             nome: 'Pedágio de 50% (art. 17)',
@@ -2438,7 +2577,7 @@ export const CALCULADORAS = [
           })
         }
         const alvo100 = t2019 + faltava * 2
-        const idadeMin100 = fem ? 57 : 60
+        const idadeMin100 = (fem ? 57 : 60) - (prof ? 5 : 0)
         regras.push({
           nome: 'Pedágio de 100% (art. 20)',
           exige: `${idadeMin100} anos de idade + ${alvo100.toFixed(2)} de contribuição`,

@@ -214,6 +214,79 @@ console.log('\n── Reclamatória: os dois adicionais e os reflexos ───�
   else bad('faltou avisar que os reflexos estão desligados')
 }
 
+console.log('\n── EC 103 conferida contra o texto da emenda ──────────')
+{
+  // A dona mandou o texto da EC 103, da Lei 13.964/2019 (art. 112 da LEP),
+  // do art. 61 da Lei 9.430/96 e das Súmulas 371 e 376 do TST. Estes testes
+  // cobram o código contra a LETRA desses textos.
+
+  // Art. 17: exige MAIS de 28 anos (mulher) e 33 (homem) em 13/11/2019 —
+  // ou seja, faltar MENOS de 2 anos. Antes o código aceitava "faltava = 2".
+  const exato = rodar('pedagio-50', { sexo: 'M', tempoNaData: '33' })
+  eq(exato.headline.label, '❌ Não elegível', 'homem com exatos 33 anos em 2019 NÃO entra no pedágio de 50%')
+  const dentro = rodar('pedagio-50', { sexo: 'M', tempoNaData: '33.5' })
+  eq(dentro.headline.label, '✅ Elegível ao pedágio 50%', 'com 33,5 anos entra')
+  const femExato = rodar('pedagio-50', { sexo: 'F', tempoNaData: '28' })
+  eq(femExato.headline.label, '❌ Não elegível', 'mulher com exatos 28 anos também não entra')
+
+  // Art. 19: a regra permanente exige 15 anos da MULHER e 20 do HOMEM.
+  // Antes o código pedia 15 dos dois, e dizia a um homem de 65 anos com 16
+  // de contribuição que ele já podia se aposentar.
+  const homem = rodar('aposentadoria-regras', { sexo: 'M', professor: 'nao', idade: '65', tempoHoje: '16', tempoEm2019: '', ano: '2026' })
+  const perm = linha(homem, 'Regra permanente')
+  if (perm && perm.value.includes('faltam')) ok('homem com 65 anos e 16 de contribuição ainda NÃO cumpre o art. 19')
+  else bad(`art. 19 para homem: ${perm?.value}`)
+  const homem20 = rodar('aposentadoria-regras', { sexo: 'M', professor: 'nao', idade: '65', tempoHoje: '20', tempoEm2019: '', ano: '2026' })
+  if (linha(homem20, 'Regra permanente')?.value === 'cumprida') ok('com 20 anos de contribuição, cumpre')
+  else bad('art. 19 não reconheceu os 20 anos')
+  const mulher = rodar('aposentadoria-regras', { sexo: 'F', professor: 'nao', idade: '62', tempoHoje: '15', tempoEm2019: '', ano: '2026' })
+  if (linha(mulher, 'Regra permanente')?.value === 'cumprida') ok('mulher com 62 anos e 15 de contribuição cumpre o art. 19')
+  else bad('art. 19 para mulher')
+
+  // Art. 18 é regra distinta do art. 19 e faltava na tela.
+  if (linha(homem, 'Transição por idade (art. 18)')) ok('a transição por idade do art. 18 aparece em separado')
+  else bad('art. 18 não foi listado')
+
+  // Art. 15, §3º — professor: 81/91 pontos, teto 92/100, tempo 25/30.
+  const pBase = rodar('regra-pontos', { sexo: 'F', professor: 'sim', idade: '51', tempoAnos: '25', ano: '2019' })
+  if (linha(pBase, 'Exigido').value.startsWith('81')) ok('professora em 2019: 81 pontos')
+  else bad(`professora 2019: ${linha(pBase, 'Exigido').value}`)
+  const pTeto = rodar('regra-pontos', { sexo: 'F', professor: 'sim', idade: '60', tempoAnos: '30', ano: '2040' })
+  if (linha(pTeto, 'Exigido').value.startsWith('92')) ok('professora trava no teto de 92 pontos')
+  else bad(`teto professora: ${linha(pTeto, 'Exigido').value}`)
+  const pHomem = rodar('regra-pontos', { sexo: 'M', professor: 'sim', idade: '56', tempoAnos: '30', ano: '2019' })
+  if (linha(pHomem, 'Exigido').value.startsWith('91')) ok('professor em 2019: 91 pontos')
+  else bad(`professor 2019: ${linha(pHomem, 'Exigido').value}`)
+  if (linha(pHomem, 'Tempo mínimo').value.startsWith('30')) ok('e 30 anos de magistério, não 35')
+  else bad(`tempo mínimo professor: ${linha(pHomem, 'Tempo mínimo').value}`)
+  // Sem professor, a tabela antiga continua valendo.
+  const comum = rodar('regra-pontos', { sexo: 'F', professor: 'nao', idade: '56', tempoAnos: '30', ano: '2019' })
+  if (linha(comum, 'Exigido').value.startsWith('86')) ok('sem magistério, segue 86 pontos')
+  else bad(`regra comum: ${linha(comum, 'Exigido').value}`)
+
+  // Art. 20, §1º — professor: idade e tempo reduzidos em 5 anos.
+  const ped100 = rodar('pedagio-100', { sexo: 'M', professor: 'sim', idade: '55', tempoNaData: '30', tempoHoje: '' })
+  if (linha(ped100, 'Idade mínima exigida').value.startsWith('55')) ok('pedágio de 100% do professor: idade mínima de 55')
+  else bad(`idade professor: ${linha(ped100, 'Idade mínima exigida').value}`)
+  // 30 anos é o mínimo do professor homem, então não falta pedágio nenhum.
+  if (linha(ped100, 'Pedágio (100% do que faltava)').value.startsWith('0')) ok('e o tempo mínimo cai para 30 anos')
+  else bad(`pedágio professor: ${linha(ped100, 'Pedágio (100% do que faltava)').value}`)
+
+  // Art. 112, §6º da LEP: falta grave interrompe e a base vira a pena
+  // remanescente. 240 meses, 100 cumpridos, 16% → sobre 140, não sobre 240.
+  const semFalta = rodar('progressao', { penaMeses: '240', fracao: '0.16', cumpridoMeses: '100', faltaGrave: 'nao' })
+  const comFalta = rodar('progressao', { penaMeses: '240', fracao: '0.16', cumpridoMeses: '100', faltaGrave: 'sim' })
+  // Aqui o valor vem como "38.4 meses exigidos" — ponto decimal, não vírgula,
+  // então brlNum() não serve.
+  const meses = (r) => parseFloat(r.headline.value)
+  perto(meses(semFalta), 38.4, 'sem falta grave: 16% de 240 meses', 0.2)
+  perto(meses(comFalta), 22.4, 'com falta grave: 16% da pena remanescente (140)', 0.2)
+  if (memTem(comFalta, '§6º')) ok('a memória cita o fundamento da interrupção')
+  else bad('faltou o fundamento da falta grave')
+  if (comFalta.criterios.some(c => c.includes('33, §4º'))) ok('avisa que o tráfico privilegiado não é hediondo aqui')
+  else bad('faltou o aviso do §5º')
+}
+
 console.log('\n── Varredura estrutural das 61 calculadoras ───────────')
 {
   // Nenhuma pode explodir, devolver NaN ou entregar um resultado sem
