@@ -21,12 +21,25 @@ export function formatCpfCnpj(value) {
   return digits.length <= 11 ? formatCpf(digits) : formatCnpj(digits)
 }
 
+// Máscara de telefone.
+//
+// Antes o hífen saía mesmo sem nada depois dele: `(\d{0,4})` casa com vazio,
+// então seis dígitos viravam "(51) 9977-". Num campo controlado isso TRAVA o
+// apagar — a pessoa dá backspace no hífen, os dígitos não mudam, a máscara
+// repõe o hífen, e o valor volta exatamente igual. Não há tecla que resolva:
+// o campo fica preso ali para sempre.
+//
+// A regra, e vale para qualquer máscara: separador só entra quando há algo
+// depois dele.
 export function formatPhone(value) {
-  const digits = String(value ?? '').replace(/\D/g, '').slice(0, 11)
-  if (digits.length <= 10) {
-    return digits.replace(/(\d{2})(\d{4})(\d{0,4})/, '($1) $2-$3')
-  }
-  return digits.replace(/(\d{2})(\d{5})(\d{0,4})/, '($1) $2-$3')
+  const d = String(value ?? '').replace(/\D/g, '').slice(0, 11)
+  if (!d) return ''
+  if (d.length <= 2) return `(${d}`                 // ainda digitando o DDD
+
+  const tamanhoDoPrefixo = d.length > 10 ? 5 : 4    // celular (9 dígitos) ou fixo (8)
+  const prefixo = d.slice(2, 2 + tamanhoDoPrefixo)
+  const sufixo  = d.slice(2 + tamanhoDoPrefixo)
+  return `(${d.slice(0, 2)}) ${prefixo}` + (sufixo ? `-${sufixo}` : '')
 }
 
 export function formatCep(value) {
@@ -101,16 +114,42 @@ export function daysUntil(dueDate) {
   return Math.ceil(diff / 86400000)
 }
 
-// ── Process CNJ number ────────────────────────────────────────
+// ── Número do processo (padrão CNJ) ───────────────────────────
+//
+// NNNNNNN-DD.AAAA.J.TT.OOOO
+//
+// A versão anterior encadeava cinco `replace` sobre o texto JÁ formatado, e
+// cada regex casa a PRIMEIRA ocorrência em qualquer lugar da string — não a
+// posição pretendida. O resultado era o número embaralhado:
+//
+//   00012341220268260100  →  0.0.01.23.4-1220268260100
+//
+// E isso ia para o banco: o campo é gravado já formatado. Número de processo
+// torto não é cosmético — é por ele que a publicação do Diário encontra o
+// processo. Publicação que não casa é prazo que ninguém vê.
+//
+// Agora o corte é por POSIÇÃO, que é como o padrão CNJ é definido, e o
+// separador só entra quando há algo depois dele (senão o campo trava no
+// apagar, como travava o telefone).
+const PARTES_CNJ = [
+  [0,  7,  ''],   // número sequencial
+  [7,  9,  '-'],  // dígito verificador
+  [9,  13, '.'],  // ano
+  [13, 14, '.'],  // segmento do Judiciário
+  [14, 16, '.'],  // tribunal
+  [16, 20, '.'],  // unidade de origem
+]
+
 export function formatProcessNumber(value) {
-  const digits = String(value ?? '').replace(/\D/g, '').slice(0, 20)
-  // NNNNNNN-DD.AAAA.J.TT.OOOO
-  return digits
-    .replace(/(\d{7})(\d)/, '$1-$2')
-    .replace(/(\d{2})(\d)/, '$1.$2')
-    .replace(/(\d{4})(\d)/, '$1.$2')
-    .replace(/(\d{1})(\d)/, '$1.$2')
-    .replace(/(\d{2})(\d)/, '$1.$2')
+  const d = String(value ?? '').replace(/\D/g, '').slice(0, 20)
+  if (!d) return ''
+  let saida = ''
+  for (const [inicio, fim, separador] of PARTES_CNJ) {
+    const pedaco = d.slice(inicio, fim)
+    if (!pedaco) break
+    saida += (saida ? separador : '') + pedaco
+  }
+  return saida
 }
 
 // ── Misc ──────────────────────────────────────────────────────
