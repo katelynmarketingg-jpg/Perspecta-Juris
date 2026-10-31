@@ -26,6 +26,12 @@ function Field({ field, value, onChange }) {
           {field.options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
         {field.help && <span className="text-[10px] text-[var(--text-muted)] mt-1 block">{field.help}</span>}
+        {field.helpLink && (
+          <a href={field.helpLink.url} target="_blank" rel="noopener noreferrer"
+            className="text-[10px] text-brand-500 hover:underline mt-0.5 inline-block">
+            ↗ {field.helpLink.label}
+          </a>
+        )}
       </label>
     )
   }
@@ -91,6 +97,12 @@ function Field({ field, value, onChange }) {
         {suffix && <span className="absolute right-3 text-xs text-[var(--text-muted)]">{suffix}</span>}
       </div>
       {field.help && <span className="text-[10px] text-[var(--text-muted)] mt-1 block">{field.help}</span>}
+      {field.helpLink && (
+        <a href={field.helpLink.url} target="_blank" rel="noopener noreferrer"
+          className="text-[10px] text-brand-500 hover:underline mt-0.5 inline-block">
+          ↗ {field.helpLink.label}
+        </a>
+      )}
     </label>
   )
 }

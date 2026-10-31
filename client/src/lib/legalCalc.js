@@ -1367,7 +1367,10 @@ export const CALCULADORAS = [
     baseLegal: 'Débitos federais: SELIC acumulada (Lei 9.430/96). Multa de mora limitada (usualmente 20%).',
     campos: [
       { name: 'valor', label: 'Tributo original', type: 'currency', required: true },
-      { name: 'selic', label: 'SELIC acumulada no período (%)', type: 'percent', required: true },
+      { name: 'selic', label: 'SELIC acumulada no período (%)', type: 'percent', required: true,
+        help: 'A Receita publica todo mês a tabela de acréscimos legais: procure o mês do vencimento e leia o acumulado até o mês do pagamento. Para o cálculo oficial, use o Sicalc.',
+        helpLink: { url: 'https://www.gov.br/receitafederal/pt-br/assuntos/orientacao-tributaria/pagamentos-e-parcelamentos/taxa-de-juros-selic',
+                    label: 'Tabela de juros SELIC (Receita Federal)' } },
       { name: 'multa', label: 'Multa de mora (%)', type: 'percent', default: '20' },
     ],
     // A multa de mora incide sobre o VALOR DO DÉBITO, não sobre o débito já
@@ -1460,7 +1463,13 @@ export const CALCULADORAS = [
     id: 'restituicao-trib', ramo: 'tributario', titulo: 'Restituição / compensação',
     descricao: 'Valor pago indevidamente × (1 + índice acumulado).', casos: 'Pagamento indevido ou a maior.',
     baseLegal: 'Repetição corrigida pela SELIC desde o pagamento indevido (Súm. 162 STJ).',
-    campos: [{ name: 'valor', label: 'Valor pago indevidamente', type: 'currency', required: true }, { name: 'selic', label: 'SELIC acumulada (%)', type: 'percent', required: true }],
+    campos: [
+      { name: 'valor', label: 'Valor pago indevidamente', type: 'currency', required: true },
+      { name: 'selic', label: 'SELIC acumulada (%)', type: 'percent', required: true,
+        help: 'Acumulada do mês seguinte ao pagamento indevido, mais 1% no mês da restituição ou compensação (art. 74 da Lei 9.430/96).',
+        helpLink: { url: 'https://www.gov.br/receitafederal/pt-br/assuntos/orientacao-tributaria/pagamentos-e-parcelamentos/taxa-de-juros-selic',
+                    label: 'Tabela de juros SELIC (Receita Federal)' } },
+    ],
     compute: (v) => { const corr = num(v.valor)*pct(v.selic); const total = num(v.valor)+corr; return { headline: { label: 'Valor a restituir', value: brl(total) }, linhas: [{label:'Pago indevido', value: brl(num(v.valor))}, {label:`SELIC (${(pct(v.selic)*100).toFixed(2)}%)`, value: brl(corr)}], memoria: [`Correção = ${brl(num(v.valor))} × ${(pct(v.selic)*100).toFixed(2)}% = ${brl(corr)}`, `Total = ${brl(total)}`], criterios: [] } },
   },
 
@@ -2645,7 +2654,11 @@ export const camposCorrecao = [
   { name: 'corrDataFinal', label: 'Até', type: 'date' },
   { name: 'corrIndice', label: 'Índice', type: 'select', default: 'ipca-e', options: INDICES },
   { name: 'corrTaxa', label: 'Índice acumulado no período (%)', type: 'percent',
-    help: 'Consulte a tabela oficial do índice escolhido e informe o acumulado.' },
+    // O campo pede um número que ninguém tem de cabeça, e a ajuda só mandava
+    // "consulte a tabela oficial" sem dizer onde. Agora o endereço está aqui.
+    help: 'Informe o acumulado do índice no período. Na Calculadora do Cidadão você põe as duas datas e ela devolve esse percentual.',
+    helpLink: { url: 'https://www3.bcb.gov.br/CALCIDADAO/publico/exibirFormCorrecaoValores.do?method=exibirFormCorrecaoValores',
+                label: 'Abrir a Calculadora do Cidadão (Banco Central)' } },
   { name: 'corrJuros', label: 'Juros ao mês (%)', type: 'percent', default: '0' },
   { name: 'corrJurosTipo', label: 'Tipo de juros', type: 'select', default: 'simples', options: [
     { value: 'simples', label: 'Simples' }, { value: 'composto', label: 'Compostos' },
