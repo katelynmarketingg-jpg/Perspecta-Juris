@@ -2672,6 +2672,9 @@ export const camposCorrecao = [
  * Se o título não for dinheiro — uma pena, um prazo, uma pontuação — devolve o
  * resultado intocado: corrigir monetariamente uma data não significa nada.
  */
+const ONDE_BUSCAR_INDICE =
+  'Calculadora do Cidadão do Banco Central (www3.bcb.gov.br/CALCIDADAO) — informe as duas datas e ela devolve o acumulado em %.'
+
 export function aplicarCorrecao(res, v) {
   if (v?.corrigir !== 'sim') return res
   const base = valorBrl(res?.headline?.value)
@@ -2679,6 +2682,41 @@ export function aplicarCorrecao(res, v) {
 
   const meses = v.corrDataInicial && v.corrDataFinal
     ? mesesEntre(v.corrDataInicial, v.corrDataFinal) : 0
+
+  // ── O defeito mais perigoso desta tela ────────────────────────────────
+  //
+  //  Quem ligava a correção e não preenchia o índice recebia o valor
+  //  NOMINAL com o título "— atualizado". O número saía igualzinho, com
+  //  cara de corrigido, e ia para a peça assim. Num cálculo de 2015
+  //  trazido para hoje, isso é dezenas de por cento a menos.
+  //
+  //  O sistema não tem como buscar o índice sozinho enquanto o Banco
+  //  Central não estiver liberado na rede. Mas pode — e deve — recusar-se
+  //  a chamar de atualizado um valor que não foi atualizado.
+  const taxaEmBranco = String(v.corrTaxa ?? '').trim() === ''
+  if (taxaEmBranco) {
+    const nome = INDICES.find(x => x.value === v.corrIndice)?.label ?? v.corrIndice
+    return {
+      ...res,
+      headline: { label: `${res.headline.label} — ⚠️ CORREÇÃO NÃO APLICADA`, value: brl(base) },
+      linhas: [
+        ...res.linhas,
+        { label: '⚠️ Valor NOMINAL — o índice não foi informado', value: brl(base) },
+      ],
+      memoria: [
+        ...res.memoria,
+        '───── correção monetária ─────',
+        `⚠️ A correção foi LIGADA mas o índice acumulado ficou em branco, então NADA foi corrigido: o valor acima é o nominal, de ${v.corrDataInicial ? fmtPrazo(v.corrDataInicial) : 'a data de origem'}.`,
+        `Informe o acumulado do ${nome} no período para o valor sair atualizado.`,
+        `Onde buscar: ${ONDE_BUSCAR_INDICE}`,
+      ],
+      criterios: [
+        ...res.criterios,
+        '⚠️ ATENÇÃO: este valor NÃO está corrigido. Preencha o índice acumulado ou desligue a correção.',
+      ],
+    }
+  }
+
   const taxa = pct(v.corrTaxa)
   const correcao = base * taxa
   const corrigido = base + correcao
@@ -2689,6 +2727,9 @@ export function aplicarCorrecao(res, v) {
   const juros = v.corrIndice === 'selic' ? 0
     : (composto ? corrigido * (Math.pow(1 + i, meses) - 1) : corrigido * i * meses)
   const total = corrigido + juros
+  // Juros pedidos sem as datas também davam zero sem dizer nada: o número
+  // de meses vem das datas, e sem elas não há o que multiplicar.
+  const jurosSemDatas = i > 0 && v.corrIndice !== 'selic' && !meses
 
   const nomeIndice = INDICES.find(x => x.value === v.corrIndice)?.label ?? v.corrIndice
   return {
@@ -2709,12 +2750,20 @@ export function aplicarCorrecao(res, v) {
       v.corrIndice === 'selic'
         ? 'SELIC engloba juros: nenhum juro somado por cima.'
         : (juros ? `Juros = ${brl(corrigido)} × ${(i * 100).toFixed(2)}%${composto ? ` composto por ${meses}m` : ` × ${meses} meses`} = ${brl(juros)}` : 'Sem juros.'),
+      jurosSemDatas
+        ? `⚠️ Você pediu ${(i * 100).toFixed(2)}% de juros ao mês, mas NENHUM juro foi somado: sem as duas datas não dá para contar os meses. Preencha "Corrigir desde" e "Até".`
+        : null,
+      taxa === 0
+        ? '⚠️ O índice foi informado como 0%, então a correção não mudou o valor. Se não era essa a intenção, confira o acumulado do período.'
+        : null,
       `ATUALIZADO = ${brl(total)}`,
-    ],
+    ].filter(Boolean),
     criterios: [
       ...res.criterios,
       `Correção: ${nomeIndice}${meses ? `, ${meses} ${meses === 1 ? 'mês' : 'meses'} (${fmtPrazo(v.corrDataInicial)} a ${fmtPrazo(v.corrDataFinal)})` : ''}.`,
-      'O índice acumulado é informado por você — confira na tabela oficial.',
+      ...(jurosSemDatas ? ['⚠️ Juros NÃO aplicados: faltam as datas do período.'] : []),
+      ...(taxa === 0 ? ['⚠️ Índice de 0%: o valor atualizado é igual ao nominal.'] : []),
+      `O índice acumulado é informado por você — ${ONDE_BUSCAR_INDICE}`,
     ],
   }
 }

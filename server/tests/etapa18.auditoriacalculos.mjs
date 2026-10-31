@@ -287,6 +287,49 @@ console.log('\n── EC 103 conferida contra o texto da emenda ─────�
   else bad('faltou o aviso do §5º')
 }
 
+console.log('\n── Correção monetária: o vazio não vira 0% calado ─────')
+{
+  const { aplicarCorrecao } = await import('../../client/src/lib/legalCalc.js')
+  const nominal = { headline: { label: 'Total', value: 'R$ 10.000,00' }, linhas: [], memoria: [], criterios: [] }
+
+  // Era o defeito que a dona apontou: ligar a correção sem informar o índice
+  // devolvia o valor NOMINAL com o título "— atualizado".
+  const semIndice = aplicarCorrecao(nominal, { corrigir: 'sim', corrIndice: 'ipca-e',
+    corrDataInicial: '2015-01-01', corrDataFinal: '2026-01-01', corrTaxa: '', corrJuros: '0' })
+  if (semIndice.headline.label.includes('NÃO APLICADA')) ok('sem índice, o título diz que NÃO corrigiu')
+  else bad(`título saiu: ${semIndice.headline.label}`)
+  eq(brlNum(semIndice.headline.value), 10000, 'e devolve o nominal, sem fingir correção')
+  if (semIndice.memoria.some(m => m.includes('CORREÇÃO FOI LIGADA') || m.includes('correção foi LIGADA'))) ok('a memória explica o que faltou')
+  else bad('a memória não avisou')
+  if (semIndice.memoria.some(m => m.includes('CALCIDADAO'))) ok('e diz onde buscar o índice')
+  else bad('não disse onde buscar')
+  if (semIndice.criterios.some(c => c.includes('NÃO está corrigido'))) ok('o aviso aparece também nos critérios')
+  else bad('faltou o aviso nos critérios')
+
+  // Com o índice preenchido, corrige normalmente.
+  const comIndice = aplicarCorrecao(nominal, { corrigir: 'sim', corrIndice: 'ipca-e',
+    corrDataInicial: '2015-01-01', corrDataFinal: '2026-01-01', corrTaxa: '80', corrJuros: '0' })
+  eq(brlNum(comIndice.headline.value), 18000, '10.000 + 80% = 18.000')
+  if (comIndice.headline.label.includes('atualizado')) ok('e aí sim o título diz atualizado')
+  else bad(`título: ${comIndice.headline.label}`)
+
+  // Zero digitado de propósito é diferente de campo em branco.
+  const zero = aplicarCorrecao(nominal, { corrigir: 'sim', corrIndice: 'ipca-e',
+    corrDataInicial: '2015-01-01', corrDataFinal: '2026-01-01', corrTaxa: '0', corrJuros: '0' })
+  if (zero.criterios.some(c => c.includes('0%'))) ok('índice digitado como 0% avisa que o valor não mudou')
+  else bad('0% digitado passou calado')
+
+  // Juros pedidos sem as datas também saíam zero sem dizer nada.
+  const semDatas = aplicarCorrecao(nominal, { corrigir: 'sim', corrIndice: 'ipca-e',
+    corrDataInicial: '', corrDataFinal: '', corrTaxa: '10', corrJuros: '1' })
+  if (semDatas.criterios.some(c => c.includes('Juros NÃO aplicados'))) ok('juros sem datas avisam em vez de sumir')
+  else bad('juros sem datas passaram calados')
+
+  // Correção desligada continua devolvendo o resultado intacto.
+  const desligada = aplicarCorrecao(nominal, { corrigir: 'nao' })
+  eq(desligada.headline.label, 'Total', 'com a correção desligada, nada muda')
+}
+
 console.log('\n── Varredura estrutural das 61 calculadoras ───────────')
 {
   // Nenhuma pode explodir, devolver NaN ou entregar um resultado sem
