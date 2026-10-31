@@ -1922,9 +1922,10 @@ export default function ClientPage() {
             {/* ── CADASTRO ── */}
             {tab === 'cadastro' && (
               <div className="space-y-5">
+                {/* Dados Pessoais · Endereço · Contato — os três em cima, lado a lado.
+                    Antes as Observações ocupavam uma coluna alta à direita e o
+                    Contato ficava espremido embaixo dos Dados Pessoais. */}
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
-
-                  {/* Col 1 — Dados Pessoais */}
                   <div className="space-y-4">
                     <Card className="p-5 space-y-3">
                       <h3 className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wide">Dados Pessoais</h3>
@@ -1954,7 +1955,26 @@ export default function ClientPage() {
                         </div>
                       )}
                     </Card>
-
+                  </div>
+                  <div className="space-y-4">
+                    <Card className="p-5 space-y-3">
+                      <h3 className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wide">Endereço</h3>
+                      <div className="grid grid-cols-3 gap-3">
+                        <div className="col-span-1"><Input label="CEP" value={data.addressZip} onChange={set('addressZip')} placeholder="00000-000" /></div>
+                        <div className="col-span-2"><Input label="Logradouro" value={data.addressStreet} onChange={set('addressStreet')} placeholder="Rua, Avenida..." /></div>
+                      </div>
+                      <div className="grid grid-cols-3 gap-3">
+                        <Input label="Número" value={data.addressNumber} onChange={set('addressNumber')} />
+                        <div className="col-span-2"><Input label="Complemento" value={data.addressComplement} onChange={set('addressComplement')} placeholder="Apto, Sala..." /></div>
+                      </div>
+                      <Input label="Bairro" value={data.addressDistrict} onChange={set('addressDistrict')} />
+                      <div className="grid grid-cols-3 gap-3">
+                        <div className="col-span-2"><Input label="Cidade" value={data.addressCity} onChange={set('addressCity')} /></div>
+                        <Select label="UF" value={data.addressState} onChange={set('addressState')} options={STATES_BR.map(s=>({value:s,label:s}))} placeholder="UF" />
+                      </div>
+                    </Card>
+                  </div>
+                  <div className="space-y-4">
                     <Card className="p-5 space-y-3">
                       <h3 className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wide">Contato</h3>
                       <Input label="Telefone / WhatsApp *" value={data.phone} onChange={set('phone')} error={errors.phone} placeholder="(00) 00000-0000" />
@@ -1962,9 +1982,25 @@ export default function ClientPage() {
                       <Input label="E-mail" type="email" value={data.email} onChange={set('email')} />
                       <Select label="Como nos encontrou?" value={data.source} onChange={set('source')} options={LEAD_SOURCES} placeholder="Selecionar..." />
                     </Card>
+                  </div>
+                </div>
 
-                    {/* Acesso ao Portal do Cliente */}
-                    <Card className="p-5 space-y-3">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                  <Card className="p-5">
+                      <button onClick={() => setShowBank(!showBank)} className="w-full flex items-center justify-between">
+                        <h3 className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wide">Dados Bancários</h3>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={`transition-transform text-[var(--text-muted)] ${showBank?'rotate-180':''}`}><polyline points="6 9 12 15 18 9"/></svg>
+                      </button>
+                      {showBank && (
+                        <div className="mt-3 grid grid-cols-2 gap-3">
+                          <Input label="Banco" value={data.bankName} onChange={set('bankName')} placeholder="Itaú, Bradesco..." />
+                          <Input label="Agência" value={data.bankAgency} onChange={set('bankAgency')} placeholder="0000" />
+                          <Input label="Conta" value={data.bankAccount} onChange={set('bankAccount')} placeholder="00000-0" />
+                          <Input label="Chave PIX" value={data.bankPixKey} onChange={set('bankPixKey')} placeholder="CPF, e-mail..." />
+                        </div>
+                      )}
+                    </Card>
+                  <Card className="p-5 space-y-3">
                       <div className="flex items-center justify-between">
                         <h3 className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wide">🔐 Acesso ao Portal do Cliente</h3>
                         <label className="flex items-center gap-1.5 text-[11px] text-[var(--text-secondary)] cursor-pointer">
@@ -1987,53 +2023,19 @@ export default function ClientPage() {
                         <p className="text-[11px] text-[var(--text-muted)]">Desativado. Marque "Habilitar" para criar um login de acesso deste cliente ao portal.</p>
                       )}
                     </Card>
-
-                    {!isNew && <AtendimentosCard clientId={id} clientName={data.name} />}
-                  </div>
-
-                  {/* Col 2 — Endereço */}
-                  <div className="space-y-4">
-                    <Card className="p-5 space-y-3">
-                      <h3 className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wide">Endereço</h3>
-                      <div className="grid grid-cols-3 gap-3">
-                        <div className="col-span-1"><Input label="CEP" value={data.addressZip} onChange={set('addressZip')} placeholder="00000-000" /></div>
-                        <div className="col-span-2"><Input label="Logradouro" value={data.addressStreet} onChange={set('addressStreet')} placeholder="Rua, Avenida..." /></div>
-                      </div>
-                      <div className="grid grid-cols-3 gap-3">
-                        <Input label="Número" value={data.addressNumber} onChange={set('addressNumber')} />
-                        <div className="col-span-2"><Input label="Complemento" value={data.addressComplement} onChange={set('addressComplement')} placeholder="Apto, Sala..." /></div>
-                      </div>
-                      <Input label="Bairro" value={data.addressDistrict} onChange={set('addressDistrict')} />
-                      <div className="grid grid-cols-3 gap-3">
-                        <div className="col-span-2"><Input label="Cidade" value={data.addressCity} onChange={set('addressCity')} /></div>
-                        <Select label="UF" value={data.addressState} onChange={set('addressState')} options={STATES_BR.map(s=>({value:s,label:s}))} placeholder="UF" />
-                      </div>
-                    </Card>
-
-                    <Card className="p-5">
-                      <button onClick={() => setShowBank(!showBank)} className="w-full flex items-center justify-between">
-                        <h3 className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wide">Dados Bancários</h3>
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={`transition-transform text-[var(--text-muted)] ${showBank?'rotate-180':''}`}><polyline points="6 9 12 15 18 9"/></svg>
-                      </button>
-                      {showBank && (
-                        <div className="mt-3 grid grid-cols-2 gap-3">
-                          <Input label="Banco" value={data.bankName} onChange={set('bankName')} placeholder="Itaú, Bradesco..." />
-                          <Input label="Agência" value={data.bankAgency} onChange={set('bankAgency')} placeholder="0000" />
-                          <Input label="Conta" value={data.bankAccount} onChange={set('bankAccount')} placeholder="00000-0" />
-                          <Input label="Chave PIX" value={data.bankPixKey} onChange={set('bankPixKey')} placeholder="CPF, e-mail..." />
-                        </div>
-                      )}
-                    </Card>
-                  </div>
-
-                  {/* Col 3 — Observações */}
-                  <div className="space-y-4 md:col-span-2 xl:col-span-1">
-                    <Card className="p-5 space-y-3 h-full flex flex-col">
-                      <h3 className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wide">Observações</h3>
-                      <Textarea value={data.notes} onChange={set('notes')} rows={10} className="flex-1" placeholder="Anotações relevantes sobre o cliente, histórico de atendimento, particularidades do caso..." />
-                    </Card>
-                  </div>
                 </div>
+
+                {/* Observações: embaixo e em largura cheia */}
+                <Card className="p-5 space-y-3">
+                      <h3 className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wide">Observações</h3>
+                      <Textarea value={data.notes} onChange={set('notes')} rows={5} placeholder="Anotações relevantes sobre o cliente, histórico de atendimento, particularidades do caso..." />
+                    </Card>
+
+                {/* E abaixo delas as tarefas e os atendimentos deste cliente.
+                    As tarefas continuam tendo aba própria; aqui aparecem junto
+                    do cadastro, que é onde ela está olhando ao atender. */}
+                {!isNew && <TasksSection clientId={id} clientName={data.name} onTasksChange={refreshOpenTasks} />}
+                {!isNew && <AtendimentosCard clientId={id} clientName={data.name} />}
 
                 <div className="flex justify-end gap-3 pt-2">
                   <Button variant="secondary" onClick={() => navigate(-1)}>Cancelar</Button>
