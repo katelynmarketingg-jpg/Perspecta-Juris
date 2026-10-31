@@ -4,6 +4,7 @@ import AiAssistant from './AiAssistant'
 import api, { estaOffline, ouvirConexao } from '../../lib/api'
 import { useAuthStore } from '../../stores/authStore'
 import BrandLogo from '../BrandLogo'
+import SeletorDeTema from '../SeletorDeTema'
 import { useUiStore } from '../../stores/uiStore'
 
 import { sincronizarDiario } from '../../lib/diarioAuto'
@@ -17,7 +18,7 @@ import {
   IconClipboard, IconFolder, IconBarChart, IconSettings, IconLogOut,
   IconScale, IconMenu, IconX, IconExternalLink,
   IconAlertCircle, IconCheck, IconBuilding, IconBookOpen, IconZap,
-  IconSun, IconMoon, IconCalculator, IconFileText, IconActivity, IconSearch,
+  IconCalculator, IconFileText, IconActivity, IconSearch,
 } from '../ui'
 import { filaCount } from '../../lib/atendimentos'
 import TermosModal, { precisaAceitarTermos } from '../TermosModal'
@@ -61,7 +62,7 @@ export default function AppShell() {
   const [offline, setOffline] = useState(() => estaOffline())
   useEffect(() => ouvirConexao(setOffline), [])
 
-  const { theme, toggleTheme, applyTheme, showToast } = useUiStore()
+  const { applyTheme, showToast } = useUiStore()
   useEffect(() => { applyTheme() }, [])
 
   // Lembrete anual (SOMENTE administrador do sistema): parâmetros previdenciários desatualizados
@@ -198,22 +199,15 @@ export default function AppShell() {
       `}>
         {/* Logo */}
         <div className={`flex items-center gap-3 px-3 h-14 flex-shrink-0 border-b border-[var(--border)] ${collapsed ? 'justify-center' : ''}`}>
-          <div className="flex-shrink-0 w-8 h-8 rounded-lg bg-brand-500 flex items-center justify-center shadow-orange">
-            <BrandLogo size={15} className="text-white" />
+          <div className="flex-shrink-0 w-8 h-8 flex items-center justify-center">
+            <BrandLogo size={28} />
           </div>
           {!collapsed && (
             <div>
-              <div className="text-[13px] font-bold text-white tracking-tight leading-none">Perspecta</div>
-              <div className="text-[9px] text-brand-500 font-semibold tracking-[0.2em] uppercase mt-0.5">Juris</div>
+              <div className="text-[13px] font-bold text-[var(--text-sidebar)] tracking-tight leading-none">Perspecta</div>
+              <div className="text-[9px] text-accent-400 font-semibold tracking-[0.2em] uppercase mt-0.5">/Juris</div>
             </div>
           )}
-          <button
-            onClick={toggleTheme}
-            title={theme === 'dark' ? 'Modo claro' : 'Modo escuro'}
-            className="p-1.5 rounded-lg text-[var(--text-muted)] hover:text-[var(--text-sidebar)] hover:bg-white/[0.06] transition-colors ml-auto"
-          >
-            {theme === 'dark' ? <IconSun size={15} /> : <IconMoon size={15} />}
-          </button>
         </div>
 
         {/* Tenant */}
@@ -352,7 +346,7 @@ export default function AppShell() {
             <>
               {/* Logo + Fila + nav horizontal (barra em cima) */}
               <div className="hidden lg:flex items-center gap-2 flex-shrink-0">
-                <div className="w-7 h-7 rounded-lg bg-brand-500 flex items-center justify-center shadow-orange"><BrandLogo size={13} className="text-white" /></div>
+                <div className="w-7 h-7 flex items-center justify-center"><BrandLogo size={26} /></div>
                 <span className="text-[13px] font-bold text-[var(--text-primary)]">Perspecta<span className="text-brand-500 text-[9px] font-semibold tracking-widest uppercase ml-1">Juris</span></span>
               </div>
               {filaEl}
@@ -373,7 +367,7 @@ export default function AppShell() {
               </nav>
               <div className="flex items-center gap-1 flex-shrink-0 ml-auto">
                 {taskDotsEl}
-                <button onClick={toggleTheme} title={theme === 'dark' ? 'Modo claro' : 'Modo escuro'} className="p-1.5 rounded-lg text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]">{theme === 'dark' ? <IconSun size={16} /> : <IconMoon size={16} />}</button>
+                <SeletorDeTema compacto />
                 <NavLink to="/app/settings" className="p-1.5 rounded-lg text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"><IconSettings size={16} /></NavLink>
                 <button onClick={handleLogout} className="p-1.5 rounded-lg text-[var(--text-muted)] hover:text-red-400 hover:bg-red-500/10"><IconLogOut size={16} /></button>
               </div>
@@ -387,7 +381,12 @@ export default function AppShell() {
                 <IconMenu size={17} />
               </button>
               {filaEl}
-              <div className="ml-auto">{taskDotsEl}</div>
+              {/* O seletor de tema fica aqui, na barra de cima, ao lado do
+                  nome da tela — e não escondido num ícone do canto. */}
+              <div className="ml-auto flex items-center gap-2">
+                <SeletorDeTema compacto />
+                {taskDotsEl}
+              </div>
             </>
           )}
         </header>

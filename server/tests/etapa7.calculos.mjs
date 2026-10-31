@@ -87,6 +87,14 @@ console.log('\n── 4. Avos de férias: valem do aniversário da admissão ─
 console.log('\n── 5. A rescisão inteira, com os números corrigidos ──')
 {
   // Admitida 10/06/2026, dispensada 20/09/2026, R$ 3.000, sem justa causa.
+  //
+  // Os valores esperados aqui MUDARAM: o aviso-prévio indenizado de 30 dias
+  // projeta o fim do contrato para 20/10/2026 (art. 487, §1º, da CLT e
+  // Súmula 371 do TST), e é essa data que conta os avos. Antes o sistema
+  // pagava o aviso em dinheiro mas contava os avos pela data da saída —
+  // um avo a menos em cada verba, sempre contra o trabalhador.
+  //   13º: junho(21d) a outubro(20d) = 5 avos → 3.000 ÷ 12 × 5 = 1.250
+  //   Férias: 10/06 a 20/10 = 4 avos → 1.000 + 1/3 = 1.333,33
   const r = rodar('verbas-rescisorias', {
     salario: '3000', admissao: '2026-06-10', saida: '2026-09-20',
     motivo: 'sem_justa', diasTrabMes: '20', feriasVencidas: 'nao', fgtsDepositado: '0',
@@ -94,10 +102,19 @@ console.log('\n── 5. A rescisão inteira, com os números corrigidos ──'
   const d13 = brlNum(linha(r, '13º')?.value)
   const fer = brlNum(linha(r, 'Férias proporcionais')?.value)
 
-  if (Math.abs(d13 - 1000) < 0.01) ok(`13º = R$ 1.000,00 (antes dava R$ 2.250,00)`)
-  else bad(`13º deu ${d13}, esperado 1000`)
-  if (Math.abs(fer - 1000) < 0.01) ok(`Férias + 1/3 = R$ 1.000,00 (antes dava R$ 3.000,00)`)
-  else bad(`Férias deu ${fer}, esperado 1000`)
+  if (Math.abs(d13 - 1250) < 0.01) ok(`13º = R$ 1.250,00 (5 avos, com a projeção do aviso)`)
+  else bad(`13º deu ${d13}, esperado 1250`)
+  if (Math.abs(fer - 1333.33) < 0.01) ok(`Férias + 1/3 = R$ 1.333,33 (4 avos, com a projeção)`)
+  else bad(`Férias deu ${fer}, esperado 1333.33`)
+
+  // E sem a projeção os avos voltam a ser os antigos — o usuário pode
+  // desligar quando a decisão do caso mandar.
+  const semProj = rodar('verbas-rescisorias', {
+    salario: '3000', admissao: '2026-06-10', saida: '2026-09-20', projetarAviso: 'nao',
+    motivo: 'sem_justa', diasTrabMes: '20', feriasVencidas: 'nao', fgtsDepositado: '0',
+  })
+  if (Math.abs(brlNum(linha(semProj, '13º')?.value) - 1000) < 0.01) ok('sem projeção, o 13º volta a 4 avos')
+  else bad(`sem projeção o 13º deu ${brlNum(linha(semProj, '13º')?.value)}`)
 
   if (linha(r, 'Aviso-prévio')?.value.includes('3.000')) ok('aviso-prévio de 30 dias = 1 salário')
   else bad(`aviso: ${linha(r, 'Aviso-prévio')?.value}`)
@@ -107,8 +124,13 @@ console.log('\n── 5. A rescisão inteira, com os números corrigidos ──'
     salario: '3000', admissao: '2020-01-01', saida: '2026-09-20',
     motivo: 'justa', diasTrabMes: '20', feriasVencidas: 'nao', fgtsDepositado: '10000',
   })
-  if (!linha(jc, '13º') && !linha(jc, 'Férias proporcionais') && !linha(jc, 'Aviso') && !linha(jc, 'Multa'))
-    ok('justa causa: só saldo de salário')
+  // Justa causa derruba aviso, 13º, férias proporcionais e a multa de 40%.
+  // A multa do art. 477, §8º NÃO: o prazo de 10 dias do §6º vale para a
+  // extinção do contrato em qualquer modalidade, e nessa simulação a saída
+  // já passou sem pagamento informado. Antes a calculadora a excluía da
+  // justa causa, deixando de cobrar uma multa devida.
+  if (!linha(jc, '13º') && !linha(jc, 'Férias proporcionais') && !linha(jc, 'Aviso') && !linha(jc, 'Multa 40%'))
+    ok('justa causa: sem aviso, 13º, férias proporcionais nem multa de 40%')
   else bad(`justa causa pagou a mais: ${jc.linhas.map(l => l.label).join(' | ')}`)
 
   // Pedido de demissão: sem aviso e sem multa, mas com 13º e férias.
@@ -233,7 +255,9 @@ console.log('\n── 11. Tempo de contribuição: o último dia conta ──')
     { inicio: '2020-01-01', fim: '2020-12-31' },
     { inicio: '2021-01-01', fim: '2021-12-31' },
   ]})
-  if (tc.linhas[0].value === '731 dias') ok('dois anos somam 731 dias (366 + 365), não 729')
+  // A linha agora traz os dias E o tempo escrito, porque a calculadora passou
+  // a mostrar também o tempo sem concomitância. O número conferido é o mesmo.
+  if (tc.linhas[0].value.startsWith('731 dias')) ok('dois anos somam 731 dias (366 + 365), não 729')
   else bad(`somou ${tc.linhas[0].value}`)
 }
 
@@ -474,9 +498,15 @@ console.log('\n── 21. Rescisão completa: do bruto ao líquido numa conta s�
   else bad('faltou algum desconto')
 
   // Só saldo e 13º sofrem incidência; férias indenizadas e multa de 40%, não.
+  //
+  // O número esperado MUDOU: antes o INSS era calculado sobre o SALÁRIO
+  // digitado (R$ 4.000), que não é o que a pessoa recebe na rescisão. Agora
+  // incide sobre as verbas efetivamente pagas, e o 13º tem base ISOLADA
+  // (art. 214, §6º, do Decreto 3.048/99):
+  //   saldo 2.666,67 → 215,68   ·   13º 3.333,33 → 288,60   ·   total 504,28
   const inss = brlNum(linha(r, 'INSS').value)
-  if (Math.abs(inss - 368.60) < 0.01) ok('INSS calculado sobre o salário, não sobre o total bruto')
-  else bad(`INSS deu ${inss}`)
+  if (Math.abs(inss - 504.28) < 0.02) ok('INSS sobre as verbas pagas, com o 13º em base separada')
+  else bad(`INSS deu ${inss}, esperado 504,28`)
 
   // Sem data de pagamento = ainda não pagou = multa do art. 477.
   if (linha(r, 'art. 477')) ok('sem pagamento informado, a multa do art. 477 entra sozinha')
@@ -485,10 +515,14 @@ console.log('\n── 21. Rescisão completa: do bruto ao líquido numa conta s�
   if (!linha(noPrazo, 'art. 477')) ok('pago dentro dos 10 dias: sem multa')
   else bad('cobrou multa de quem pagou no prazo')
 
-  // Justa causa não gera multa do art. 477 nem 40%.
+  // Justa causa não gera multa de 40% do FGTS. A do art. 477, §8º continua
+  // cabendo: o prazo de 10 dias do §6º é da extinção do contrato, qualquer
+  // que seja o motivo, e aqui a saída já passou sem pagamento informado.
   const jc = rodar('verbas-rescisorias', { ...base, motivo: 'justa' })
-  if (!linha(jc, 'art. 477') && !linha(jc, 'Multa 40%')) ok('justa causa: nenhuma das duas multas')
-  else bad('justa causa gerou multa')
+  if (!linha(jc, 'Multa 40%')) ok('justa causa: sem multa de 40% do FGTS')
+  else bad('justa causa gerou multa de 40%')
+  if (linha(jc, 'art. 477')) ok('justa causa com acerto atrasado: multa do art. 477 continua devida')
+  else bad('justa causa: deixou de cobrar a multa do art. 477')
 }
 
 console.log('\n── 22. Reclamatória trabalhista completa ──')

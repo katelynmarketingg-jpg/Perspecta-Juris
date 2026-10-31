@@ -47,12 +47,15 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-[var(--bg-app)] p-4">
       <div className="w-full max-w-[360px]">
-        {/* Logo */}
+        {/* Marca. A caixa laranja por trás saiu: a marca já é laranja, e o
+            manual mostra o símbolo solto, sem recipiente. */}
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-brand-500 shadow-orange mb-5">
-            <BrandLogo size={26} className="text-white" />
+          <div className="inline-flex items-center justify-center mb-5">
+            <BrandLogo size={64} />
           </div>
-          <h1 className="text-2xl font-bold text-white tracking-tight">Perspecta Juris</h1>
+          <h1 className="text-2xl font-bold text-[var(--text-primary)] tracking-tight">
+            Perspecta <span className="text-accent-400 font-normal">/JURIS</span>
+          </h1>
           <p className="text-sm text-[var(--text-muted)] mt-1">Sistema de Gestão Jurídica</p>
         </div>
 

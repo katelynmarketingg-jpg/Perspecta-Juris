@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
+import { comprimirImagem, tamanhoDoDataUrl, emMB } from '../../lib/imagem'
 import { useParams } from 'react-router-dom'
 import { getRequest, saveSignature } from '../../lib/signatures'
 import { hashDocumentos, coletarEvidencias, TERMO_LGPD } from '../../lib/signatureProof'
@@ -84,12 +85,27 @@ export default function SignPage() {
     }).finally(() => setLoading(false))
   }, [id])
 
-  const onPhoto = (e) => {
+  // A foto ia inteira, do tamanho que saiu da câmera. Em base64 ela cresce
+  // ~1,37×, e o servidor recusava com "Request body is too large" — a
+  // assinatura simplesmente não acontecia. Encolher resolve o limite, sobe
+  // rápido em conexão ruim e não entope o banco (a foto fica guardada lá
+  // dentro, como texto).
+  const [preparandoFoto, setPreparandoFoto] = useState(false)
+  const onPhoto = async (e) => {
     const file = e.target.files?.[0]
+    e.target.value = ''
     if (!file) return
-    const reader = new FileReader()
-    reader.onload = () => setPhotoImg(reader.result)
-    reader.readAsDataURL(file)
+    setPreparandoFoto(true); setError('')
+    try {
+      const menor = await comprimirImagem(file)
+      if (tamanhoDoDataUrl(menor) > 6 * 1024 * 1024) {
+        setError(`Esta foto ficou com ${emMB(tamanhoDoDataUrl(menor))} mesmo depois de reduzida. Tire outra com menos resolução.`)
+        return
+      }
+      setPhotoImg(menor)
+    } catch {
+      setError('Não foi possível ler esta foto. Tente outra.')
+    } finally { setPreparandoFoto(false) }
   }
 
   const submit = async () => {
@@ -185,7 +201,7 @@ export default function SignPage() {
           <div>
             <h2 className="text-sm font-semibold text-gray-700 mb-2">3. Foto de comprovação</h2>
             <label className="flex items-center justify-center gap-2 w-full py-3 rounded-lg border-2 border-dashed border-gray-300 text-sm text-gray-500 cursor-pointer hover:border-orange-500">
-              {photoImg ? '✅ Foto anexada — trocar' : '📷 Tirar / enviar foto'}
+              {preparandoFoto ? '⏳ Preparando a foto…' : photoImg ? '✅ Foto anexada — trocar' : '📷 Tirar / enviar foto'}
               <input type="file" accept="image/*" capture="environment" className="hidden" onChange={onPhoto} />
             </label>
             {photoImg && <img src={photoImg} alt="comprovação" className="mt-2 rounded-lg max-h-40 mx-auto" />}

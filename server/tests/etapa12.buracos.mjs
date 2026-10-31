@@ -120,6 +120,27 @@ console.log('\n── 3. O arquivo enviado existe de verdade ──')
   eq(baixado.status, 200, 'baixar')
   eq(await baixado.text(), conteudo, 'o conteúdo volta igualzinho')
 
+  // Documento do PROCESSO: a aba Documentos do processo era um estado vazio
+  // fixo — dizia "Sem documentos" sempre, e o botão "Enviar Documento" não
+  // tinha onClick nenhum. Agora envia e lista pelo processId.
+  {
+    const dono = await j(await fetch(`${BASE}/api/clients`, { method: 'POST', headers: HA,
+      body: JSON.stringify({ name: 'Cliente do Processo', type: 'individual', cpfCnpj: '52998224725' }) }))
+    const proc = await j(await fetch(`${BASE}/api/processes`, { method: 'POST', headers: HA,
+      body: JSON.stringify({ title: 'Ação com documento', clientId: dono.id, area: 'civel', status: 'active' }) }))
+    const fd2 = new FormData()
+    fd2.append('file', new Blob(['peticao inicial'], { type: 'text/plain' }), 'peticao.txt')
+    fd2.append('processId', proc.id)
+    const up2 = await fetch(`${BASE}/api/documents/upload`, { method: 'POST', headers: SO_TOKEN_A, body: fd2 })
+    eq(up2.status, 201, 'enviar documento do processo')
+    eq((await j(up2))[0].processId, proc.id, 'fica ligado ao processo')
+
+    const doProcesso = await j(await fetch(`${BASE}/api/documents?processId=${proc.id}`, { headers: SO_TOKEN_A }))
+    eq(doProcesso.length, 1, 'e a aba do processo encontra ele')
+    const deOutro = await j(await fetch(`${BASE}/api/documents?processId=nao-existe`, { headers: SO_TOKEN_A }))
+    eq(deOutro.length, 0, 'sem misturar com os de outro processo')
+  }
+
   // Mover de pasta: antes a pasta era enfeite do navegador.
   const mv = await fetch(`${BASE}/api/documents/${doc.id}`, { method: 'PATCH', headers: HA, body: JSON.stringify({ folder: 'assinados' }) })
   eq(mv.status, 200, 'mover de pasta')
@@ -223,6 +244,23 @@ console.log('\n── 5. Assinatura à distância: o circuito inteiro ──')
   eq(assinado.status, 200, 'assina')
   eq((await j(assinado)).status, 'assinado', 'e fica marcado como assinado')
 
+  // Foto grande: o limite do Fastify era 1 MiB e a foto vai DENTRO do JSON,
+  // em base64. Uma foto de celular estourava e a pessoa via "Request body is
+  // too large" — sem assinar, sem entender. O cliente encolhe antes de
+  // enviar; esta folga no servidor é a rede de segurança.
+  const pedidoGrande = await j(await fetch(`${BASE}/api/signatures`, { method: 'POST', headers: HA,
+    body: JSON.stringify({ clientId: cli.id, clientName: 'Cliente Foto', clientPhone: '51999990000',
+      documentos: [{ titulo: 'Procuração', corpo: 'Outorgo poderes…' }], modo: 'remoto' }) }))
+  const fotoDe3MB = 'data:image/jpeg;base64,' + 'A'.repeat(3 * 1024 * 1024)
+  const comFotoGrande = await fetch(`${BASE}/api/signatures/public/${pedidoGrande.id}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      signer: { nome: 'Cliente Foto', cpf: '529.982.247-25' },
+      signatureImg: 'data:image/png;base64,iVBORw0KGgo=',
+      photoImg: fotoDe3MB, consent: true,
+    }) })
+  eq(comFotoGrande.status, 200, 'foto de 3 MB passa (antes: 413 "body too large")')
+
   // Duas assinaturas no mesmo pedido, não.
   const denovo = await fetch(`${BASE}/api/signatures/public/${pedido.id}`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -303,6 +341,13 @@ console.log('\n── 7. Nenhuma tela volta a engolir falha de gravação ──
   else bad('linhas antigas continuam parecendo arquivo de verdade')
   if (/api\.theses\.list\(\)/.test(cli)) ok('e a lista de teses do cliente vem do servidor')
   else bad('a lista de teses continua lendo uma chave que ninguém escreve')
+
+  // O botão "Enviar Documento" do processo não tinha ação nenhuma.
+  const proc = ler('modules/processes/ProcessDetail.jsx')
+  if (/api\.documents\.upload\(fd\)/.test(proc)) ok('o botão Enviar Documento do processo envia de verdade')
+  else bad('o botão Enviar Documento continua sem ação')
+  if (/api\.documents\.list\(\{ processId \}\)/.test(proc)) ok('e a aba lista os documentos do processo')
+  else bad('a aba continua com o "Sem documentos" fixo')
 
   const cfg = ler('lib/tenantData.js')
   if (/avisarFalha/.test(cfg) && !/saveConfig\(payload\)\.catch\(\(\) => \{\}\)/.test(cfg))

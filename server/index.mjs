@@ -44,9 +44,15 @@ if (IS_PROD) {
   }
 }
 
+// bodyLimit: o padrão do Fastify é 1 MiB, e a assinatura à distância manda a
+// foto de comprovação dentro do JSON, em base64 (que infla ~1,37×). Uma foto
+// de celular estourava o limite e a pessoa via "Request body is too large" —
+// sem assinar. O cliente agora encolhe a foto antes de enviar; esta folga é a
+// rede de segurança para o caso de ele não conseguir (HEIC, navegador antigo).
 const app = Fastify({
   logger: process.env.NODE_ENV !== 'production',
   trustProxy: true,
+  bodyLimit: 12 * 1024 * 1024,
 })
 
 // ── Plugins ──────────────────────────────────────────────────
@@ -111,6 +117,7 @@ const { default: tribunalRoutes }  = await import('./routes/tribunal.js')
 const { default: signatureRoutes } = await import('./routes/signatures.js')
 const { default: diarioRoutes }    = await import('./routes/diario.js')
 const { default: thesesRoutes }    = await import('./routes/theses.js')
+const { default: calculationRoutes } = await import('./routes/calculations.js')
 const { default: masterRoutes }    = await import('./routes/master.js')
 const { default: auditRoutes }     = await import('./routes/audit.js')
 const { default: reportRoutes }    = await import('./routes/reports.js')
@@ -130,6 +137,7 @@ await app.register(tribunalRoutes,  { prefix: '/api/tribunal' })
 await app.register(signatureRoutes, { prefix: '/api/signatures' })
 await app.register(diarioRoutes,    { prefix: '/api/diario' })
 await app.register(thesesRoutes,    { prefix: '/api/theses' })
+await app.register(calculationRoutes, { prefix: '/api/calculations' })
 await app.register(masterRoutes,    { prefix: '/api/master' })
 await app.register(auditRoutes,     { prefix: '/api/audit' })
 await app.register(reportRoutes,    { prefix: '/api/reports' })

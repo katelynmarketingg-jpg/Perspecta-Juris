@@ -13,6 +13,108 @@ import {
 import AssinaturasTab from './AssinaturasTab'
 import DiarioModal from './DiarioModal'
 
+// ── Documentos do processo ───────────────────────────────────────────────
+//
+// Esta aba era um estado vazio FIXO: dizia "Sem documentos" sempre, mesmo
+// havendo documentos do processo no servidor, e o botão "Enviar Documento"
+// não tinha ação nenhuma — nem onClick. Era desenho.
+//
+// Agora lista, envia, abre, baixa e exclui de verdade, pela mesma rota que a
+// tela Documentos já usava.
+function DocumentosDoProcesso({ processId, clientId }) {
+  const { showToast } = useUiStore()
+  const [docs, setDocs] = useState([])
+  const [carregando, setCarregando] = useState(true)
+  const [subindo, setSubindo] = useState(false)
+  const entrada = useRef(null)
+
+  const carregar = () => api.documents.list({ processId })
+    .then(r => setDocs(Array.isArray(r) ? r : (r?.data ?? [])))
+    .catch(() => setDocs([]))
+    .finally(() => setCarregando(false))
+  useEffect(() => { carregar() }, [processId])
+
+  const enviar = async (e) => {
+    const arquivos = [...(e.target.files ?? [])]
+    e.target.value = ''
+    if (!arquivos.length) return
+    setSubindo(true)
+    try {
+      const fd = new FormData()
+      for (const f of arquivos) fd.append('file', f, f.name)
+      fd.append('processId', processId)
+      if (clientId) fd.append('clientId', clientId)
+      await api.documents.upload(fd)
+      await carregar()
+      showToast(`${arquivos.length} documento(s) enviado(s).`, 'success')
+    } catch (err) {
+      showToast(`Não foi possível enviar: ${err?.message ?? 'falha de conexão'}. O arquivo NÃO foi guardado.`, 'error')
+    } finally { setSubindo(false) }
+  }
+
+  const baixar = async (d) => {
+    try { await api.documents.download(d.id, d.name) }
+    catch (err) { showToast(`Não foi possível baixar: ${err?.message ?? 'falha de conexão'}.`, 'error') }
+  }
+  const abrir = async (d) => {
+    try { await api.documents.view(d.id) }
+    catch (err) { showToast(`Não foi possível abrir: ${err?.message ?? 'falha de conexão'}.`, 'error') }
+  }
+  const excluir = async (d) => {
+    if (!window.confirm(`Excluir "${d.name}"?`)) return
+    try { await api.documents.remove(d.id); setDocs(l => l.filter(x => x.id !== d.id)) }
+    catch (err) { showToast(`Não foi possível excluir: ${err?.message ?? 'falha de conexão'}.`, 'error') }
+  }
+
+  const tamanho = (b) => b >= 1e6 ? `${(b / 1e6).toFixed(1)} MB` : `${Math.max(1, Math.round(b / 1000))} KB`
+  const icone = (t) => t?.includes('pdf') ? '📄' : t?.includes('image') ? '🖼️' : t?.includes('word') ? '📝' : '📎'
+
+  const botaoEnviar = (
+    <>
+      <Button variant="secondary" loading={subindo} onClick={() => entrada.current?.click()}>
+        <IconPlus size={14} /> Enviar Documento
+      </Button>
+      <input ref={entrada} type="file" multiple className="hidden" onChange={enviar} />
+    </>
+  )
+
+  if (carregando) return <div className="flex items-center justify-center py-16"><Spinner size={24} className="text-brand-500" /></div>
+
+  if (!docs.length) {
+    return <EmptyState icon={<IconFolder size={36} />} title="Sem documentos"
+      description="Nenhum documento cadastrado para este processo." action={botaoEnviar} />
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-2">
+        {botaoEnviar}
+        <span className="text-xs text-[var(--text-muted)]">{docs.length} documento(s)</span>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        {docs.map(d => (
+          <div key={d.id} className="rounded-lg border border-[var(--border)] p-3">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <span className="text-xl flex-shrink-0">{icone(d.mimeType)}</span>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-medium text-[var(--text-primary)] truncate">{d.name}</p>
+                <p className="text-[10px] text-[var(--text-muted)]">
+                  {tamanho(d.fileSize)} · {formatDate(d.createdAt)}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-1.5 mt-2 pt-2 border-t border-[var(--border)]">
+              <button onClick={() => abrir(d)} className="text-[10px] px-2 py-1 rounded-md bg-[var(--bg-hover)] text-[var(--text-secondary)] hover:bg-[var(--bg-input)]">👁️ Abrir</button>
+              <button onClick={() => baixar(d)} className="text-[10px] px-2 py-1 rounded-md bg-brand-500/15 text-accent-400 hover:bg-brand-500/25">⬇️ Baixar</button>
+              <button onClick={() => excluir(d)} className="text-[10px] px-2 py-1 rounded-md text-[var(--text-muted)] hover:text-red-400 ml-auto">Excluir</button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 const STATUS_COLORS = { active: 'blue', won: 'green', lost: 'red', settled: 'purple', archived: 'gray' }
 const STATUS_LABELS = { active: 'Ativo', won: 'Ganho', lost: 'Perdido', settled: 'Acordo', archived: 'Arquivado' }
 const PRIORITY_COLORS = { urgent: 'red', high: 'yellow', normal: 'blue', low: 'gray' }
@@ -321,7 +423,7 @@ export default function ProcessDetail() {
 
           {/* Documents */}
           {tab === 'documents' && (
-            <EmptyState icon={<IconFolder size={36} />} title="Sem documentos" description="Nenhum documento cadastrado para este processo." action={<Button variant="secondary"><IconPlus size={14} /> Enviar Documento</Button>} />
+            <DocumentosDoProcesso processId={process.id} clientId={process.clientId} />
           )}
 
           {/* Info */}
