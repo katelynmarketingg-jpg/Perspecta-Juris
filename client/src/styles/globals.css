@@ -4,45 +4,73 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ── PERSPECTA JURIS — Preto + Laranja Escuro (fixo, independente da empresa) ── */
+/* ─────────────────────────────────────────────────────────────────────────
+   PERSPECTA /JURIS — paleta oficial (MIV, Manual de Identidade Visual)
+
+   As seis cores da marca, com o papel que o manual dá a cada uma. Os nomes
+   são os do manual de propósito: quando alguém for mexer aqui, é por eles que
+   vai procurar.
+
+     ESTRUTURA     #000000   o fundo que sustenta
+     AUTORIDADE    #BD520F   a cor da marca — botões, foco, o que decide
+     INTELIGÊNCIA  #333333   superfícies de trabalho
+     RESPIRO       #EDE9DE   o claro, para a tela não sufocar
+     ESTABILIDADE  #C9C2B2   divisões e contornos no claro
+     IMPULSO       #FEB161   o laranja que chama, sobre fundo escuro
+
+   Antes o sistema usava #c2410c (um laranja do Tailwind, parecido mas não o
+   da marca) e #fb923c como realce. Agora são as cores do manual.
+
+   Três temas: escuro (ESTRUTURA), médio (INTELIGÊNCIA) e claro (RESPIRO).
+   ───────────────────────────────────────────────────────────────────────── */
 :root {
-  --bg-app:        #0a0a0a;
+  /* As cores da marca, pelos nomes do manual */
+  --marca-estrutura:    #000000;
+  --marca-autoridade:   #BD520F;
+  --marca-inteligencia: #333333;
+  --marca-respiro:      #EDE9DE;
+  --marca-estabilidade: #C9C2B2;
+  --marca-impulso:      #FEB161;
+
+  --bg-app:        #000000;
   --bg-sidebar:    #060606;
   --bg-card:       #111111;
   --bg-input:      #1a1a1a;
   --bg-hover:      #1a1a1a;
-  --bg-active:     #1f0c04;
+  --bg-active:     #2a1206;
 
-  --text-primary:   #f0f0f0;
+  --text-primary:   #EDE9DE;
   --text-secondary: #9a9a9a;
-  --text-muted:     #4a4a4a;
-  --text-sidebar:   #d0d0d0;
-  --text-sidebar-muted: #4a4a4a;
+  --text-muted:     #5a5a5a;
+  --text-sidebar:   #d8d4ca;
+  --text-sidebar-muted: #5a5a5a;
 
   --border:        #1f1f1f;
-  --border-strong: #2a2a2a;
-  --border-focus:  #c2410c;
+  --border-strong: #333333;
+  --border-focus:  #BD520F;
 
-  --brand:         #c2410c;
-  --brand-dark:    #9a3412;
-  --brand-light:   #fb923c;
+  --brand:         #BD520F;
+  --brand-dark:    #8c3d0b;
+  --brand-light:   #FEB161;
 
-  /* Paleta da marca em canais RGB (permite trocar a cor do sistema em tempo real).
-     Valores padrão = laranja original. O painel Master pode sobrescrever. */
-  --c-brand-50:  255 244 237;
-  --c-brand-100: 255 230 213;
-  --c-brand-200: 255 201 168;
-  --c-brand-300: 255 160 112;
-  --c-brand-400: 253 108 55;
-  --c-brand-500: 194 65 12;
-  --c-brand-600: 154 52 18;
-  --c-brand-700: 124 45 18;
-  --c-brand-800: 74 26 9;
-  --c-brand-900: 44 15 5;
-  --c-brand-950: 24 8 0;
-  --c-accent-300: 253 186 116;
-  --c-accent-400: 251 146 60;
-  --c-accent-500: 249 115 22;
+  /* Escala da marca em canais RGB — o painel Master pode sobrescrever em
+     tempo real. Os valores abaixo são AUTORIDADE clareada/escurecida, e o
+     realce é o IMPULSO do manual (não um tom derivado): sobre preto, o
+     #BD520F puro fica escuro demais para texto. */
+  --c-brand-50:  250 241 236;
+  --c-brand-100: 244 227 217;
+  --c-brand-200: 234 200 178;
+  --c-brand-300: 221 165 130;
+  --c-brand-400: 204 120 68;
+  --c-brand-500: 189 82 15;
+  --c-brand-600: 166 72 13;
+  --c-brand-700: 140 61 11;
+  --c-brand-800: 104 45 8;
+  --c-brand-900: 72 31 6;
+  --c-brand-950: 45 20 4;
+  --c-accent-300: 254 200 150;
+  --c-accent-400: 254 177 97;
+  --c-accent-500: 189 82 15;
 
   --danger:        #ef4444;
   --warning:       #f59e0b;
@@ -57,59 +85,96 @@
   --radius-xl:     1.25rem;
 }
 
-/* Tema escuro (padrão) */
+/* ── Tema ESCURO (padrão) — ESTRUTURA ──────────────────────── */
 .dark {
-  --bg-app:        #0a0a0a;
+  --bg-app:        #000000;
   --bg-sidebar:    #060606;
   --bg-card:       #111111;
   --bg-input:      #1a1a1a;
   --bg-hover:      #1a1a1a;
-  --bg-active:     #1f0c04;
+  --bg-active:     #2a1206;
 
-  --text-primary:   #f0f0f0;
+  --text-primary:   #EDE9DE;
   --text-secondary: #9a9a9a;
-  --text-muted:     #4a4a4a;
-  --text-sidebar:   #d0d0d0;
-  --text-sidebar-muted: #4a4a4a;
+  --text-muted:     #5a5a5a;
+  --text-sidebar:   #d8d4ca;
+  --text-sidebar-muted: #5a5a5a;
 
   --border:        #1f1f1f;
-  --border-strong: #2a2a2a;
-  --border-focus:  #c2410c;
+  --border-strong: #333333;
+  --border-focus:  #BD520F;
 
-  --brand:         #c2410c;
-  --brand-dark:    #9a3412;
-  --brand-light:   #fb923c;
+  --brand:         #BD520F;
+  --brand-dark:    #8c3d0b;
+  --brand-light:   #FEB161;
 
   --shadow-card:   0 1px 4px rgba(0,0,0,0.6);
   --shadow-modal:  0 25px 80px rgba(0,0,0,0.85);
 }
 
-/* Tema claro (visão clara) */
+/* ── Tema MÉDIO — INTELIGÊNCIA ─────────────────────────────────
+   Nem o preto nem o claro: o cinza de trabalho do manual. Para quem
+   acha o preto pesado e o branco estourado — é o caso de quem passa o
+   dia na tela. */
+.medium {
+  --bg-app:        #262626;
+  --bg-sidebar:    #1c1c1c;
+  --bg-card:       #333333;
+  --bg-input:      #3d3d3d;
+  --bg-hover:      #3d3d3d;
+  --bg-active:     #4a2611;
+
+  --text-primary:   #EDE9DE;
+  --text-secondary: #bdb9b0;
+  --text-muted:     #8a8681;
+  --text-sidebar:   #e2ded4;
+  --text-sidebar-muted: #8a8681;
+
+  --border:        #444444;
+  --border-strong: #565656;
+  --border-focus:  #FEB161;
+
+  --brand:         #BD520F;
+  --brand-dark:    #8c3d0b;
+  --brand-light:   #FEB161;
+
+  --shadow-card:   0 1px 4px rgba(0,0,0,0.35);
+  --shadow-modal:  0 25px 80px rgba(0,0,0,0.5);
+}
+
+/* ── Tema CLARO — RESPIRO + ESTABILIDADE ───────────────────── */
 .light {
-  --bg-app:        #f6f6f7;
+  --bg-app:        #EDE9DE;
   --bg-sidebar:    #ffffff;
   --bg-card:       #ffffff;
-  --bg-input:      #f1f1f4;
-  --bg-hover:      #eeeef1;
-  --bg-active:     #fdece1;
+  --bg-input:      #f5f3ec;
+  --bg-hover:      #e4dfd2;
+  --bg-active:     #f7e3d4;
 
-  --text-primary:   #18181b;
-  --text-secondary: #52525b;
-  --text-muted:     #9ca3af;
-  --text-sidebar:   #3f3f46;
-  --text-sidebar-muted: #9ca3af;
+  --text-primary:   #1a1a1a;
+  --text-secondary: #55514a;
+  --text-muted:     #8d887e;
+  --text-sidebar:   #333333;
+  --text-sidebar-muted: #8d887e;
 
-  --border:        #e4e4e7;
-  --border-strong: #d4d4d8;
-  --border-focus:  #c2410c;
+  --border:        #C9C2B2;
+  --border-strong: #b3ab98;
+  --border-focus:  #BD520F;
 
-  --brand:         #c2410c;
-  --brand-dark:    #9a3412;
-  --brand-light:   #fb923c;
+  --brand:         #BD520F;
+  --brand-dark:    #8c3d0b;
+  --brand-light:   #FEB161;
 
   --shadow-card:   0 1px 3px rgba(0,0,0,0.08);
   --shadow-modal:  0 24px 70px rgba(0,0,0,0.18);
 }
+/* No claro, o realce tem de escurecer: #FEB161 sobre branco não se lê. */
+.light {
+  --c-accent-300: 166 72 13;
+  --c-accent-400: 189 82 15;
+  --c-accent-500: 140 61 11;
+}
+
 /* No tema claro, textos forçados a branco ficariam invisíveis → mapeia p/ escuro
    (mantém branco apenas sobre botões/badges coloridos, que têm fundo próprio). */
 .light .text-white:not([class*="bg-"]):not(.btn-primary) { color: var(--text-primary); }

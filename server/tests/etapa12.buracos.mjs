@@ -223,6 +223,23 @@ console.log('\n── 5. Assinatura à distância: o circuito inteiro ──')
   eq(assinado.status, 200, 'assina')
   eq((await j(assinado)).status, 'assinado', 'e fica marcado como assinado')
 
+  // Foto grande: o limite do Fastify era 1 MiB e a foto vai DENTRO do JSON,
+  // em base64. Uma foto de celular estourava e a pessoa via "Request body is
+  // too large" — sem assinar, sem entender. O cliente encolhe antes de
+  // enviar; esta folga no servidor é a rede de segurança.
+  const pedidoGrande = await j(await fetch(`${BASE}/api/signatures`, { method: 'POST', headers: HA,
+    body: JSON.stringify({ clientId: cli.id, clientName: 'Cliente Foto', clientPhone: '51999990000',
+      documentos: [{ titulo: 'Procuração', corpo: 'Outorgo poderes…' }], modo: 'remoto' }) }))
+  const fotoDe3MB = 'data:image/jpeg;base64,' + 'A'.repeat(3 * 1024 * 1024)
+  const comFotoGrande = await fetch(`${BASE}/api/signatures/public/${pedidoGrande.id}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      signer: { nome: 'Cliente Foto', cpf: '529.982.247-25' },
+      signatureImg: 'data:image/png;base64,iVBORw0KGgo=',
+      photoImg: fotoDe3MB, consent: true,
+    }) })
+  eq(comFotoGrande.status, 200, 'foto de 3 MB passa (antes: 413 "body too large")')
+
   // Duas assinaturas no mesmo pedido, não.
   const denovo = await fetch(`${BASE}/api/signatures/public/${pedido.id}`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },

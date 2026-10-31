@@ -1,22 +1,31 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
+// A ordem aqui é a ordem do botão de girar tema, e também a dos rótulos.
+export const TEMAS = ['dark', 'medium', 'light']
+export const ROTULO_DO_TEMA = { dark: 'Escuro', medium: 'Médio', light: 'Claro' }
+
 export const useUiStore = create(
   persist(
     (set, get) => ({
-      theme: 'dark',        // 'light' | 'dark'
+      // Três temas, com os nomes dos papéis do manual da marca:
+      // 'dark' = ESTRUTURA (preto) · 'medium' = INTELIGÊNCIA (cinza) ·
+      // 'light' = RESPIRO (claro).
+      theme: 'dark',
       sidebarCollapsed: false,
       notifications: [],
       toast: null,
 
       _applyThemeClasses: (theme) => {
         const el = document.documentElement
-        el.classList.toggle('dark',  theme === 'dark')
-        el.classList.toggle('light', theme === 'light')
+        const valido = TEMAS.includes(theme) ? theme : 'dark'
+        for (const t of TEMAS) el.classList.toggle(t, t === valido)
       },
 
+      // Gira entre os três, na ordem escuro → médio → claro → escuro.
       toggleTheme: () => {
-        const next = get().theme === 'light' ? 'dark' : 'light'
+        const atual = TEMAS.indexOf(get().theme)
+        const next = TEMAS[(atual + 1) % TEMAS.length] ?? 'dark'
         get()._applyThemeClasses(next)
         set({ theme: next })
       },

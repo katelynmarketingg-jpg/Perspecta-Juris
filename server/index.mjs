@@ -44,9 +44,15 @@ if (IS_PROD) {
   }
 }
 
+// bodyLimit: o padrão do Fastify é 1 MiB, e a assinatura à distância manda a
+// foto de comprovação dentro do JSON, em base64 (que infla ~1,37×). Uma foto
+// de celular estourava o limite e a pessoa via "Request body is too large" —
+// sem assinar. O cliente agora encolhe a foto antes de enviar; esta folga é a
+// rede de segurança para o caso de ele não conseguir (HEIC, navegador antigo).
 const app = Fastify({
   logger: process.env.NODE_ENV !== 'production',
   trustProxy: true,
+  bodyLimit: 12 * 1024 * 1024,
 })
 
 // ── Plugins ──────────────────────────────────────────────────
