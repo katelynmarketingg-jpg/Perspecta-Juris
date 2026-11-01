@@ -2,36 +2,63 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '../../lib/api'
 import { useUiStore } from '../../stores/uiStore'
-import { useAuthStore } from '../../stores/authStore'
 import { getFila, addToFila, atender, removerAtendimento, esperaMin, TIPOS_ATEND, tipoAtend } from '../../lib/atendimentos'
 import { registrar } from '../../lib/auditLog'
 
 export default function FilaAtendimentoPage() {
   const navigate = useNavigate()
   const { showToast } = useUiStore()
-  const meuNome = useAuthStore(s => s.user?.name) ?? 'Colaborador'
   const [fila, setFila] = useState([])
   const [clients, setClients] = useState([])
   const [users, setUsers] = useState([])
   const [showAdd, setShowAdd] = useState(false)
   const [, tick] = useState(0)
 
-  const reload = () => setFila(getFila())
+  const [carregando, setCarregando] = useState(true)
+  const [erro, setErro] = useState('')
+
+  const reload = async () => {
+    try { setFila(await getFila()); setErro('') }
+    catch (e) { setErro(e?.message || 'Não foi possível ler a fila.') }
+    finally { setCarregando(false) }
+  }
+
   useEffect(() => {
     reload()
     api.clients.list?.({ limit: 500 }).then(r => setClients(Array.isArray(r) ? r : (r?.data ?? []))).catch(() => {})
     api.settings.users().then(r => setUsers(Array.isArray(r) ? r : (r?.data ?? []))).catch(() => {})
-    const t = setInterval(() => tick(n => n + 1), 30000) // atualiza tempo de espera
+    // A fila agora é do escritório: outra pessoa pode cadastrar ou atender
+    // de outro computador. Recarregar de tempos em tempos mantém a tela
+    // próxima da realidade, além de atualizar o tempo de espera.
+    const t = setInterval(() => { tick(n => n + 1); reload() }, 30000)
     return () => clearInterval(t)
   }, [])
 
-  const chamar = (a) => {
-    atender(a.id, meuNome)
-    registrar('atendimento', `atendeu ${a.clientName || 'cliente'} (${tipoAtend(a.tipo).label}, espera ${esperaMin(a)} min)`, { cliente: a.clientName })
-    showToast('Atendimento registrado.', 'success')
-    reload()
+  // "Atender" abre o cadastro do cliente já com a observação que ele
+  // deixou na recepção — era o pedido: quem atende precisa chegar na
+  // ficha sabendo o que a pessoa veio fazer, sem ter de perguntar de novo.
+  const chamar = async (a) => {
+    try {
+      await atender(a.id)
+      registrar('atendimento', `atendeu ${a.clientName || 'cliente'} (${tipoAtend(a.tipo).label}, espera ${esperaMin(a)} min)`, { cliente: a.clientName })
+      await reload()
+      if (a.clientId) {
+        navigate(`/app/clients/${a.clientId}`, { state: { atendimento: { ...a, espera: esperaMin(a) } } })
+      } else {
+        showToast(`Atendimento de ${a.clientName} registrado. (Sem cadastro — não há ficha para abrir.)`, 'success')
+      }
+    } catch (e) {
+      // Dois recepcionistas podem chamar a mesma pessoa ao mesmo tempo.
+      showToast(e?.message || 'Não foi possível registrar o atendimento.', 'error')
+      reload()
+    }
   }
-  const remover = (a) => { removerAtendimento(a.id); reload() }
+
+  const remover = async (a) => {
+    if (!window.confirm(`Tirar ${a.clientName} da fila?`)) return
+    try { await removerAtendimento(a.id); await reload() }
+    catch (e) { showToast(e?.message || 'Não foi possível remover.', 'error') }
+  }
 
   return (
     <div className="p-6 max-w-4xl mx-auto space-y-5">
@@ -43,10 +70,19 @@ export default function FilaAtendimentoPage() {
         <button onClick={() => setShowAdd(true)} className="btn-primary flex items-center gap-2">+ Adicionar à fila</button>
       </div>
 
-      {fila.length === 0 ? (
+      {erro && (
+        <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+          ⚠️ {erro}
+        </div>
+      )}
+
+      {carregando ? (
+        <div className="text-center py-16 text-sm text-[var(--text-muted)]">Carregando a fila…</div>
+      ) : fila.length === 0 ? (
         <div className="text-center py-16 border border-dashed border-[var(--border)] rounded-xl">
           <p className="text-3xl mb-2">🪑</p>
           <p className="text-sm text-[var(--text-muted)]">Ninguém na fila. Adicione um cliente para atendimento.</p>
+          <p className="text-[11px] text-[var(--text-muted)] mt-2">Esta fila é do escritório inteiro — todos veem a mesma, de qualquer computador.</p>
         </div>
       ) : (
         <div className="space-y-2">
@@ -64,11 +100,13 @@ export default function FilaAtendimentoPage() {
                     <span className="ml-2 text-[11px] text-[var(--text-muted)]">{tipoAtend(a.tipo).icone} {tipoAtend(a.tipo).label}</span>
                   </p>
                   <p className="text-[11px] text-[var(--text-muted)]">
-                    {a.colaborador ? <>Para <b className="text-[var(--text-secondary)]">{a.colaborador}</b> · </> : ''}
+                    {a.assignedToName ? <>Para <b className="text-[var(--text-secondary)]">{a.assignedToName}</b> · </> : ''}
                     espera <b className={cor}>{espera} min</b>{a.obs ? ` · ${a.obs}` : ''}
                   </p>
                 </div>
-                <button onClick={() => chamar(a)} className="text-xs px-3 py-1.5 rounded-lg bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 flex-shrink-0">✓ Atender</button>
+                <button onClick={() => chamar(a)}
+                  title={a.clientId ? 'Registra o atendimento e abre a ficha do cliente' : 'Registra o atendimento (cliente sem cadastro)'}
+                  className="text-xs px-3 py-1.5 rounded-lg bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 flex-shrink-0">✓ Atender</button>
                 <button onClick={() => remover(a)} className="text-[var(--text-muted)] hover:text-red-400 text-sm flex-shrink-0" title="Remover">✕</button>
               </div>
             )
@@ -92,14 +130,25 @@ function AddFilaModal({ clients, users, onClose, onAdded }) {
 
   const filtrados = clients.filter(c => !busca || (c.name || '').toLowerCase().includes(busca.toLowerCase())).slice(0, 8)
 
-  const salvar = () => {
+  const [salvando, setSalvando] = useState(false)
+
+  // O "atender com" guardava um NOME solto. Agora guarda o id do acesso,
+  // que é o que permite a pessoa ver na tela dela que tem alguém esperando.
+  const salvar = async () => {
     const cli = clients.find(c => c.id === clientId)
     const nome = cli?.name || avulso.trim()
     if (!nome) { showToast('Escolha um cliente ou digite um nome.', 'error'); return }
-    addToFila({ clientId: cli?.id ?? null, clientName: nome, colaborador, tipo, obs })
-    registrar('atendimento', `colocou ${nome} na fila de atendimento${colaborador ? ` (para ${colaborador})` : ''}`, { cliente: nome })
-    showToast('Adicionado à fila.', 'success')
-    onAdded()
+    setSalvando(true)
+    try {
+      await addToFila({ clientId: cli?.id ?? null, clientName: nome, assignedToId: colaborador || null, tipo, obs })
+      const quem = users.find(u => u.id === colaborador)?.name
+      registrar('atendimento', `colocou ${nome} na fila de atendimento${quem ? ` (para ${quem})` : ''}`, { cliente: nome })
+      showToast('Adicionado à fila.', 'success')
+      onAdded()
+    } catch (e) {
+      // Escrita que falha nunca pode passar por salva.
+      showToast(e?.message || 'NÃO foi possível adicionar à fila.', 'error')
+    } finally { setSalvando(false) }
   }
   const inputCls = 'w-full px-3 py-2 rounded-lg bg-[var(--bg-input)] border border-[var(--border)] text-sm text-[var(--text-primary)] focus:border-brand-500 focus:outline-none'
   const lbl = 'text-xs font-medium text-[var(--text-secondary)] mb-1 block'
@@ -135,7 +184,7 @@ function AddFilaModal({ clients, users, onClose, onAdded }) {
               <label className={lbl}>Atender com</label>
               <select value={colaborador} onChange={e => setColaborador(e.target.value)} className={inputCls}>
                 <option value="">Qualquer um</option>
-                {users.map(u => <option key={u.id} value={u.name}>{u.name}</option>)}
+                {users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
               </select>
             </div>
             <div>
@@ -152,7 +201,9 @@ function AddFilaModal({ clients, users, onClose, onAdded }) {
         </div>
         <div className="px-5 py-3 border-t border-[var(--border)] flex justify-end gap-2">
           <button onClick={onClose} className="px-3 py-2 rounded-lg text-sm text-[var(--text-muted)] hover:text-[var(--text-primary)]">Cancelar</button>
-          <button onClick={salvar} className="btn-primary text-sm">Adicionar</button>
+          <button onClick={salvar} disabled={salvando} className="btn-primary text-sm disabled:opacity-50">
+            {salvando ? 'Adicionando…' : 'Adicionar'}
+          </button>
         </div>
       </div>
     </div>

@@ -56,6 +56,18 @@ const app = Fastify({
 })
 
 // ── Plugins ──────────────────────────────────────────────────
+// Uma ação que não precisa de dados — "atender este chamado", "concluir
+// esta tarefa" — era recusada com 400 quando o cliente mandava
+// Content-Type: application/json e corpo vazio, que é o que acontece num
+// retry, atrás de um proxy, ou em qualquer chamada feita sem corpo. O
+// padrão do Fastify trata corpo vazio como erro de sintaxe; aqui ele vira
+// um objeto vazio, que é o que a rota espera.
+app.addContentTypeParser('application/json', { parseAs: 'string' }, (req, corpo, done) => {
+  if (corpo === '' || corpo == null) return done(null, {})
+  try { done(null, JSON.parse(corpo)) }
+  catch (err) { err.statusCode = 400; done(err, undefined) }
+})
+
 await app.register(fastifyCors, {
   origin: process.env.NODE_ENV === 'production'
     ? (process.env.CLIENT_ORIGIN ?? true)
@@ -118,6 +130,8 @@ const { default: signatureRoutes } = await import('./routes/signatures.js')
 const { default: diarioRoutes }    = await import('./routes/diario.js')
 const { default: thesesRoutes }    = await import('./routes/theses.js')
 const { default: calculationRoutes } = await import('./routes/calculations.js')
+const { default: atendimentoRoutes } = await import('./routes/atendimentos.js')
+const { default: clientNoteRoutes } = await import('./routes/clientNotes.js')
 const { default: masterRoutes }    = await import('./routes/master.js')
 const { default: auditRoutes }     = await import('./routes/audit.js')
 const { default: reportRoutes }    = await import('./routes/reports.js')
@@ -138,6 +152,8 @@ await app.register(signatureRoutes, { prefix: '/api/signatures' })
 await app.register(diarioRoutes,    { prefix: '/api/diario' })
 await app.register(thesesRoutes,    { prefix: '/api/theses' })
 await app.register(calculationRoutes, { prefix: '/api/calculations' })
+await app.register(atendimentoRoutes, { prefix: '/api/atendimentos' })
+await app.register(clientNoteRoutes, { prefix: '/api/client-notes' })
 await app.register(masterRoutes,    { prefix: '/api/master' })
 await app.register(auditRoutes,     { prefix: '/api/audit' })
 await app.register(reportRoutes,    { prefix: '/api/reports' })

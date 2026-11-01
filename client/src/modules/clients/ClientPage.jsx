@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useState, useEffect, useRef, useMemo } from 'react'
+import { useNavigate, useParams, useLocation } from 'react-router-dom'
 import api from '../../lib/api'
 import { formatCpf, formatCnpj, formatPhone, formatCep, formatCurrency, formatDate } from '../../lib/format'
 import { MARITAL_STATUS, STATES_BR, LEAD_SOURCES, LEGAL_AREAS } from '../../lib/constants'
@@ -967,34 +967,96 @@ function CalculosCard({ clientId, clientName }) {
   )
 }
 
-function AtendimentosCard({ clientId, clientName }) {
+// ─────────────────────────────────────────────────────────────────────────
+//  Atendimentos deste cliente.
+//
+//  Era `localStorage`: quem registrava na recepção era o único a ver.
+//  Agora vem do servidor, e mostra quem atendeu e quanto a pessoa esperou.
+// ─────────────────────────────────────────────────────────────────────────
+function AtendimentosCard({ clientId, clientName, destaque }) {
   const { showToast } = useUiStore()
-  const [lista, setLista] = useState(() => getAtendimentosCliente(clientId))
-  const reload = () => setLista(getAtendimentosCliente(clientId))
+  const [lista, setLista] = useState([])
+  const [carregando, setCarregando] = useState(true)
+  const [erro, setErro] = useState('')
+  const [ocupado, setOcupado] = useState(false)
 
-  const naFila = () => { addToFila({ clientId, clientName, tipo: 'presencial' }); registrar('atendimento', `colocou ${clientName || 'cliente'} na fila de atendimento`, { cliente: clientName }); showToast('Adicionado à fila de atendimento.', 'success'); reload() }
-  const registrar_ = (tipo) => { registrarAtendimento({ clientId, clientName, tipo }); registrar('atendimento', `registrou atendimento ${tipoAtend(tipo).label} de ${clientName || 'cliente'}`, { cliente: clientName }); showToast('Atendimento registrado.', 'success'); reload() }
+  const reload = async () => {
+    try { setLista(await getAtendimentosCliente(clientId)); setErro('') }
+    catch (e) { setErro(e?.message || 'Não foi possível ler os atendimentos.') }
+    finally { setCarregando(false) }
+  }
+  useEffect(() => { reload() }, [clientId])
+
+  const naFila = async () => {
+    setOcupado(true)
+    try {
+      await addToFila({ clientId, clientName, tipo: 'presencial' })
+      registrar('atendimento', `colocou ${clientName || 'cliente'} na fila de atendimento`, { cliente: clientName })
+      showToast('Adicionado à fila de atendimento.', 'success')
+      await reload()
+    } catch (e) { showToast(e?.message || 'NÃO foi possível adicionar à fila.', 'error') }
+    finally { setOcupado(false) }
+  }
+
+  const registrar_ = async (tipo) => {
+    setOcupado(true)
+    try {
+      await registrarAtendimento({ clientId, clientName, tipo })
+      registrar('atendimento', `registrou atendimento ${tipoAtend(tipo).label} de ${clientName || 'cliente'}`, { cliente: clientName })
+      showToast('Atendimento registrado.', 'success')
+      await reload()
+    } catch (e) { showToast(e?.message || 'NÃO foi possível registrar.', 'error') }
+    finally { setOcupado(false) }
+  }
 
   return (
     <Card className="p-5 space-y-3">
       <h3 className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wide">📞 Atendimentos</h3>
+
+      {/* Chegou aqui pelo botão "Atender" da fila: a observação que a pessoa
+          deixou na recepção aparece em destaque, que era o pedido. */}
+      {destaque && (
+        <div className="rounded-xl border border-orange-500/40 bg-orange-500/10 p-3 space-y-1">
+          <p className="text-xs font-semibold text-orange-300">
+            🟠 Atendimento em curso — {tipoAtend(destaque.tipo).icone} {tipoAtend(destaque.tipo).label}
+          </p>
+          {destaque.obs
+            ? <p className="text-sm text-[var(--text-primary)] leading-relaxed">“{destaque.obs}”</p>
+            : <p className="text-[11px] text-[var(--text-muted)]">Sem observação da recepção.</p>}
+          <p className="text-[10px] text-[var(--text-muted)]">
+            Esperou {destaque.espera} min
+            {destaque.assignedToName ? ` · encaminhado para ${destaque.assignedToName}` : ''}
+            {destaque.createdByName ? ` · cadastrado por ${destaque.createdByName}` : ''}
+          </p>
+        </div>
+      )}
+
       <div className="flex gap-2 flex-wrap">
-        <Button variant="primary" size="sm" onClick={naFila}>🟠 Adicionar à fila</Button>
-        <Button variant="secondary" size="sm" onClick={() => registrar_('online')}>💻 Online</Button>
-        <Button variant="secondary" size="sm" onClick={() => registrar_('whatsapp')}>💬 WhatsApp</Button>
+        <Button variant="primary" size="sm" onClick={naFila} disabled={ocupado}>🟠 Adicionar à fila</Button>
+        <Button variant="secondary" size="sm" onClick={() => registrar_('online')} disabled={ocupado}>💻 Online</Button>
+        <Button variant="secondary" size="sm" onClick={() => registrar_('whatsapp')} disabled={ocupado}>💬 WhatsApp</Button>
+        <Button variant="secondary" size="sm" onClick={() => registrar_('telefone')} disabled={ocupado}>📞 Telefone</Button>
       </div>
-      {lista.length === 0 ? (
+
+      {carregando && <p className="text-[11px] text-[var(--text-muted)]">Carregando…</p>}
+      {erro && <p className="text-[11px] text-red-400">⚠️ {erro}</p>}
+
+      {!carregando && !erro && lista.length === 0 ? (
         <p className="text-[11px] text-[var(--text-muted)]">Nenhum atendimento registrado ainda.</p>
       ) : (
-        <div className="space-y-1.5 max-h-52 overflow-y-auto">
+        <div className="space-y-1.5 max-h-60 overflow-y-auto">
           {lista.map(a => (
             <div key={a.id} className="flex items-center gap-2 text-xs p-2 rounded-lg bg-[var(--bg-hover)]">
               <span>{tipoAtend(a.tipo).icone}</span>
               <div className="flex-1 min-w-0">
-                <p className="text-[var(--text-secondary)]">{tipoAtend(a.tipo).label} {a.status === 'fila' ? <span className="text-orange-400">· na fila</span> : ''}</p>
+                <p className="text-[var(--text-secondary)]">
+                  {tipoAtend(a.tipo).label}
+                  {a.status === 'fila' ? <span className="text-orange-400"> · na fila</span> : ''}
+                </p>
                 <p className="text-[10px] text-[var(--text-muted)]">
-                  {new Date(a.criadoEm).toLocaleString('pt-BR')}
-                  {a.status === 'atendido' && a.atendidoPor ? ` · por ${a.atendidoPor} · espera ${esperaMin(a)} min` : ''}
+                  {new Date(a.createdAt).toLocaleString('pt-BR')}
+                  {a.status === 'atendido' && a.attendedByName ? ` · por ${a.attendedByName} · espera ${esperaMin(a)} min` : ''}
+                  {a.status === 'fila' && a.assignedToName ? ` · para ${a.assignedToName}` : ''}
                   {a.obs ? ` · ${a.obs}` : ''}
                 </p>
               </div>
@@ -1530,173 +1592,298 @@ function WorkspaceSection({ clientId, client, processes }) {
 }
 
 // ── Tarefas + Observações gerais (por cliente) ──────────────────────
-function TasksSection({ clientId, clientName, onTasksChange }) {
+// ─────────────────────────────────────────────────────────────────────────
+//  Observações do cliente — UMA lista só, com etiqueta de origem.
+//
+//  Havia dois murais que não se falavam: as observações escritas à mão
+//  (em `localStorage`, então cada pessoa via o seu) e as que a recepção
+//  deixava ao pôr o cliente na fila (que ficavam escondidas na caixa de
+//  Atendimentos). Agora é uma lista só, em ordem de data, dizendo de onde
+//  cada uma veio e quem escreveu.
+// ─────────────────────────────────────────────────────────────────────────
+function ObservacoesSection({ clientId, clientName }) {
   const { showToast } = useUiStore()
-  const currentUser = useAuthStore(s => s.user)?.name || 'Usuário'
-  const TKEY = `pj_ctasks_${clientId}`
-  const OKEY = `pj_cobs_${clientId}`
-  const FKEY = 'pj_funcionarios'
+  const [notas, setNotas] = useState([])
+  const [visitas, setVisitas] = useState([])
+  const [carregando, setCarregando] = useState(true)
+  const [erro, setErro] = useState('')
+  const [form, setForm] = useState({ assunto: '', texto: '' })
+  const [salvando, setSalvando] = useState(false)
 
-  const [tasks, setTasks] = useState(() => lsGet(TKEY, []))
-  const [obs, setObs]     = useState(() => lsGet(OKEY, []))
-  const [funcs, setFuncs] = useState(() => lsGet(FKEY, [currentUser]))
-  const [taskForm, setTaskForm] = useState({ titulo: '', descricao: '', para: currentUser, prazo: '' })
-  const [obsForm, setObsForm]   = useState({ assunto: '', texto: '' })
-  const [respondendo, setRespondendo] = useState(null)   // { id, texto }
-
-  const saveTasks = (n) => { setTasks(n); lsSet(TKEY, n); onTasksChange?.() }
-  const saveObs   = (n) => { setObs(n);   lsSet(OKEY, n) }
-  const rememberFunc = (name) => { if (name && !funcs.includes(name)) { const n = [...funcs, name]; setFuncs(n); lsSet(FKEY, n) } }
-
-  const addTask = () => {
-    if (!taskForm.titulo.trim()) { showToast('Informe o título da tarefa.', 'error'); return }
-    rememberFunc(taskForm.para.trim())
-    saveTasks([{ id: uid(), ...taskForm, de: currentUser, status: 'aberta', resposta: '', createdAt: new Date().toISOString() }, ...tasks])
-    setTaskForm({ titulo: '', descricao: '', para: currentUser, prazo: '' })
-    showToast('Tarefa criada.', 'success')
+  const reload = async () => {
+    try {
+      const [n, v] = await Promise.all([
+        api.clientNotes.list(clientId),
+        getAtendimentosCliente(clientId).catch(() => []),
+      ])
+      setNotas(Array.isArray(n) ? n : [])
+      setVisitas((Array.isArray(v) ? v : []).filter(a => a.obs))
+      setErro('')
+    } catch (e) { setErro(e?.message || 'Não foi possível ler as observações.') }
+    finally { setCarregando(false) }
   }
-  // Quem recebeu responde e conclui → volta para quem mandou (azul, aguardando visto)
-  const responderTask = (id, texto) => {
-    saveTasks(tasks.map(t => t.id === id ? { ...t, status: 'respondida', resposta: texto || '', respondidoPor: currentUser, respondidoEm: new Date().toISOString() } : t))
-    setRespondendo(null); showToast('Tarefa respondida — voltou para quem enviou.', 'success')
-  }
-  // Quem mandou dá o visto → conclui de vez (sai da lista dos dois)
-  const darVisto = (id) => saveTasks(tasks.map(t => t.id === id ? { ...t, status: 'concluida', vistoEm: new Date().toISOString() } : t))
-  const reabrirTask  = (id) => saveTasks(tasks.map(t => t.id === id ? { ...t, status: 'aberta', respondidoPor: null, respondidoEm: null, vistoEm: null } : t))
-  const delTask = (id) => saveTasks(tasks.filter(t => t.id !== id))
+  useEffect(() => { reload() }, [clientId])
 
-  const addObs = () => {
-    if (!obsForm.texto.trim()) { showToast('Escreva a observação.', 'error'); return }
-    saveObs([{ id: uid(), ...obsForm, autor: currentUser, createdAt: new Date().toISOString(), concluido: false }, ...obs])
-    setObsForm({ assunto: '', texto: '' })
-    showToast('Observação adicionada.', 'success')
-  }
-  const concluirObs = (id) => saveObs(obs.map(o => o.id === id ? { ...o, concluido: true, concluidoPor: currentUser, concluidoEm: new Date().toISOString() } : o))
-  const delObs = (id) => saveObs(obs.filter(o => o.id !== id))
+  // As duas origens viram uma lista só, ordenada por data.
+  const lista = useMemo(() => [
+    ...notas.map(n => ({
+      id: n.id, origem: 'nota', quando: n.createdAt,
+      assunto: n.assunto, texto: n.texto, autor: n.createdByName,
+    })),
+    ...visitas.map(a => ({
+      id: a.id, origem: 'recepcao', quando: a.createdAt,
+      assunto: tipoAtend(a.tipo).label, texto: a.obs,
+      autor: a.createdByName, atendidoPor: a.attendedByName, status: a.status,
+    })),
+  ].sort((x, y) => String(y.quando).localeCompare(String(x.quando))), [notas, visitas])
 
-  const abertas    = tasks.filter(t => t.status === 'aberta' || !t.status)
-  const respondidas = tasks.filter(t => t.status === 'respondida')
-  const concluidas = tasks.filter(t => t.status === 'concluida')
+  const adicionar = async () => {
+    if (!form.texto.trim()) { showToast('Escreva a observação.', 'error'); return }
+    setSalvando(true)
+    try {
+      await api.clientNotes.create({ clientId, assunto: form.assunto, texto: form.texto })
+      registrar('cliente', `escreveu uma observação sobre ${clientName || 'o cliente'}`, { cliente: clientName })
+      setForm({ assunto: '', texto: '' })
+      showToast('Observação adicionada.', 'success')
+      await reload()
+    } catch (e) { showToast(e?.message || 'NÃO foi possível salvar a observação.', 'error') }
+    finally { setSalvando(false) }
+  }
+
+  const apagar = async (o) => {
+    if (o.origem !== 'nota') { showToast('Esta observação veio da recepção — apague pelo atendimento.', 'error'); return }
+    if (!window.confirm('Apagar esta observação?')) return
+    try { await api.clientNotes.remove(o.id); await reload() }
+    catch (e) { showToast(e?.message || 'Não foi possível apagar.', 'error') }
+  }
 
   return (
-    <div className="space-y-4">
+    <Card className="p-5 space-y-3">
       <div>
-        <h2 className="text-base font-semibold text-[var(--text-primary)]">Tarefas & Observações</h2>
-        <p className="text-xs text-[var(--text-muted)]">Atribuições da equipe e mural de observações de {clientName || 'este cliente'}.</p>
+        <h3 className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wide">📌 Observações</h3>
+        <p className="text-[11px] text-[var(--text-muted)] mt-0.5">
+          O que a equipe escreve aqui e o que o cliente deixa na recepção, na mesma lista.
+        </p>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* ── TAREFAS ── */}
-        <div className="space-y-3">
-          <h3 className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wide">✅ Tarefas</h3>
-          <Card className="p-4 space-y-3">
-            <Input label="Título da tarefa" value={taskForm.titulo} onChange={e => setTaskForm(d => ({ ...d, titulo: e.target.value }))} placeholder="Ex: Protocolar petição inicial" />
-            <Textarea label="Descrição" rows={2} value={taskForm.descricao} onChange={e => setTaskForm(d => ({ ...d, descricao: e.target.value }))} placeholder="Detalhes da tarefa..." />
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <label className="text-xs font-medium text-[var(--text-secondary)] mb-1 block">Atribuir para</label>
-                <input list="funcs-list" value={taskForm.para} onChange={e => setTaskForm(d => ({ ...d, para: e.target.value }))}
-                  className="w-full px-3 py-2 rounded-lg bg-[var(--bg-input)] border border-[var(--border)] text-sm text-[var(--text-primary)] focus:border-brand-500 focus:outline-none" placeholder="Nome do funcionário" />
-                <datalist id="funcs-list">{funcs.map(f => <option key={f} value={f} />)}</datalist>
-              </div>
-              <div>
-                <label className="text-xs font-medium text-[var(--text-secondary)] mb-1 block">Prazo</label>
-                <input type="date" value={taskForm.prazo} onChange={e => setTaskForm(d => ({ ...d, prazo: e.target.value }))}
-                  className="w-full px-3 py-2 rounded-lg bg-[var(--bg-input)] border border-[var(--border)] text-sm text-[var(--text-primary)] focus:border-brand-500 focus:outline-none" />
-              </div>
-            </div>
-            <Button variant="primary" size="sm" className="w-full" onClick={addTask}>Criar tarefa</Button>
-          </Card>
-
-          {abertas.length === 0 && respondidas.length === 0 && concluidas.length === 0 && (
-            <div className="text-center py-8 border border-dashed border-[var(--border)] rounded-xl text-xs text-[var(--text-muted)]">Nenhuma tarefa ainda.</div>
-          )}
-          {/* Abertas — quem recebeu responde e conclui */}
-          {abertas.map(t => (
-            <div key={t.id} className="rounded-xl border border-[var(--border)] bg-[var(--bg-card)] p-4 group">
-              <div className="flex items-start justify-between gap-2">
-                <p className="text-sm font-medium text-[var(--text-primary)]">{t.titulo}</p>
-                <button onClick={() => delTask(t.id)} className="text-[var(--text-muted)] hover:text-red-400 text-xs opacity-0 group-hover:opacity-100">✕</button>
-              </div>
-              {t.descricao && <p className="text-xs text-[var(--text-secondary)] mt-1">{t.descricao}</p>}
-              <p className="text-[10px] text-[var(--text-muted)] mt-2">De <b className="text-[var(--text-secondary)]">{t.de}</b> → <b className="text-[var(--text-secondary)]">{t.para}</b> · criada {formatDate(t.createdAt)}{t.prazo ? ` · prazo ${formatDate(t.prazo)}` : ''}</p>
-              {respondendo?.id === t.id ? (
-                <div className="mt-2 space-y-2">
-                  <textarea autoFocus rows={2} value={respondendo.texto} onChange={e => setRespondendo(r => ({ ...r, texto: e.target.value }))}
-                    placeholder="O que foi feito? (resposta)" className="w-full px-2.5 py-1.5 rounded-lg bg-[var(--bg-input)] border border-[var(--border)] text-xs text-[var(--text-primary)] focus:border-brand-500 focus:outline-none" />
-                  <div className="flex gap-2">
-                    <button onClick={() => responderTask(t.id, respondendo.texto)} className="text-xs px-2.5 py-1 rounded-lg bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25">✓ Responder e concluir</button>
-                    <button onClick={() => setRespondendo(null)} className="text-xs text-[var(--text-muted)]">Cancelar</button>
-                  </div>
-                </div>
-              ) : (
-                <div className="flex justify-end mt-2">
-                  <button onClick={() => setRespondendo({ id: t.id, texto: '' })} className="text-xs px-2.5 py-1 rounded-lg bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25">Responder / Concluir</button>
-                </div>
-              )}
-            </div>
-          ))}
-          {/* Respondidas — voltaram para quem mandou (azul), aguardando o "visto" */}
-          {respondidas.map(t => (
-            <div key={t.id} className="rounded-xl border border-blue-500/40 bg-blue-500/5 p-4 group">
-              <div className="flex items-start justify-between gap-2">
-                <p className="text-sm font-medium text-[var(--text-primary)]">{t.titulo} <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-500/15 text-blue-300">🔵 Respondida</span></p>
-                <button onClick={() => delTask(t.id)} className="text-[var(--text-muted)] hover:text-red-400 text-xs opacity-0 group-hover:opacity-100">✕</button>
-              </div>
-              {t.descricao && <p className="text-xs text-[var(--text-secondary)] mt-1">{t.descricao}</p>}
-              {t.resposta && <p className="text-xs text-blue-200 mt-2 bg-blue-500/10 rounded-lg p-2"><b>Resposta de {t.respondidoPor}:</b> {t.resposta}</p>}
-              <p className="text-[10px] text-[var(--text-muted)] mt-2">De <b className="text-[var(--text-secondary)]">{t.de}</b> → <b className="text-[var(--text-secondary)]">{t.para}</b> · respondida {formatDate(t.respondidoEm)}</p>
-              <div className="flex justify-end mt-2">
-                <button onClick={() => darVisto(t.id)} className="text-xs px-2.5 py-1 rounded-lg bg-brand-500/20 text-accent-400 hover:bg-brand-500/30">👁 Dar visto e finalizar</button>
-              </div>
-            </div>
-          ))}
-          {/* Concluídas — histórico completo */}
-          {concluidas.map(t => (
-            <div key={t.id} className="rounded-xl border border-[var(--border)] bg-[var(--bg-hover)] p-4 opacity-80 group">
-              <div className="flex items-start justify-between gap-2">
-                <p className="text-sm font-medium text-[var(--text-primary)] line-through">{t.titulo}</p>
-                <button onClick={() => delTask(t.id)} className="text-[var(--text-muted)] hover:text-red-400 text-xs opacity-0 group-hover:opacity-100">✕</button>
-              </div>
-              {t.descricao && <p className="text-[11px] text-[var(--text-muted)] mt-1">{t.descricao}</p>}
-              {t.resposta && <p className="text-[11px] text-[var(--text-secondary)] mt-1"><b>Resposta:</b> {t.resposta}</p>}
-              <p className="text-[10px] text-[var(--text-muted)] mt-1.5">De <b>{t.de}</b> → <b>{t.para}</b> · criada {formatDate(t.createdAt)}{t.prazo ? ` · prazo ${formatDate(t.prazo)}` : ''}{t.respondidoEm ? ` · respondida ${formatDate(t.respondidoEm)}` : ''}{t.vistoEm ? ` · finalizada ${formatDate(t.vistoEm)}` : ''}</p>
-              <button onClick={() => reabrirTask(t.id)} className="text-[10px] text-[var(--text-muted)] hover:text-brand-500 mt-1">Reabrir</button>
-            </div>
-          ))}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+        <Input className="sm:col-span-1" label="Assunto" value={form.assunto}
+          onChange={e => setForm(d => ({ ...d, assunto: e.target.value }))}
+          placeholder="Ex: Reunião com cliente" />
+        <div className="sm:col-span-2">
+          <Textarea label="Observação" rows={2} value={form.texto}
+            onChange={e => setForm(d => ({ ...d, texto: e.target.value }))}
+            placeholder="Escreva aqui — todos da equipe veem." />
         </div>
+      </div>
+      <Button variant="primary" size="sm" onClick={adicionar} disabled={salvando}>
+        {salvando ? 'Salvando…' : 'Adicionar observação'}
+      </Button>
 
-        {/* ── OBSERVAÇÕES ── */}
-        <div className="space-y-3">
-          <h3 className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wide">📌 Observações gerais</h3>
-          <Card className="p-4 space-y-3">
-            <Input label="Assunto" value={obsForm.assunto} onChange={e => setObsForm(d => ({ ...d, assunto: e.target.value }))} placeholder="Sobre o que é? Ex: Reunião com cliente" />
-            <Textarea label="Observação" rows={3} value={obsForm.texto} onChange={e => setObsForm(d => ({ ...d, texto: e.target.value }))} placeholder="Escreva aqui — todos da equipe podem ver..." />
-            <Button variant="primary" size="sm" className="w-full" onClick={addObs}>Adicionar observação</Button>
-          </Card>
+      {carregando && <p className="text-[11px] text-[var(--text-muted)]">Carregando…</p>}
+      {erro && <p className="text-[11px] text-red-400">⚠️ {erro}</p>}
 
-          {obs.length === 0 && (
-            <div className="text-center py-8 border border-dashed border-[var(--border)] rounded-xl text-xs text-[var(--text-muted)]">Nenhuma observação ainda.</div>
-          )}
-          {obs.map(o => (
-            <div key={o.id} className="rounded-xl border border-[var(--border)] bg-[var(--bg-card)] p-4 group">
-              <div className="flex items-center gap-2 mb-1.5">
-                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-brand-500/15 text-accent-400">{formatDate(o.createdAt)}</span>
+      {!carregando && !erro && lista.length === 0 ? (
+        <div className="text-center py-8 border border-dashed border-[var(--border)] rounded-xl text-xs text-[var(--text-muted)]">
+          Nenhuma observação ainda.
+        </div>
+      ) : (
+        <div className="space-y-2 max-h-96 overflow-y-auto">
+          {lista.map(o => (
+            <div key={`${o.origem}_${o.id}`}
+              className={`rounded-xl border p-3 group ${o.origem === 'recepcao'
+                ? 'border-orange-500/35 bg-orange-500/5' : 'border-[var(--border)] bg-[var(--bg-card)]'}`}>
+              <div className="flex items-center gap-2 mb-1 flex-wrap">
+                <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${o.origem === 'recepcao'
+                  ? 'bg-orange-500/20 text-orange-300' : 'bg-brand-500/15 text-accent-400'}`}>
+                  {o.origem === 'recepcao' ? '🟠 Da recepção' : '✍️ Observação'}
+                </span>
+                <span className="text-[10px] text-[var(--text-muted)]">
+                  {new Date(o.quando).toLocaleString('pt-BR')}
+                </span>
                 {o.assunto && <span className="text-xs font-medium text-[var(--text-primary)]">{o.assunto}</span>}
-                <button onClick={() => delObs(o.id)} className="ml-auto text-[var(--text-muted)] hover:text-red-400 text-xs opacity-0 group-hover:opacity-100">✕</button>
+                {o.origem === 'nota' && (
+                  <button onClick={() => apagar(o)}
+                    className="ml-auto text-[var(--text-muted)] hover:text-red-400 text-xs opacity-0 group-hover:opacity-100">✕</button>
+                )}
               </div>
               <p className="text-sm text-[var(--text-secondary)] whitespace-pre-wrap">{o.texto}</p>
-              <p className="text-[10px] text-[var(--text-muted)] mt-2">— {o.autor}</p>
+              <p className="text-[10px] text-[var(--text-muted)] mt-1.5">
+                — {o.autor || '—'}
+                {o.origem === 'recepcao' && (o.status === 'atendido'
+                  ? ` · atendido por ${o.atendidoPor || '—'}`
+                  : ' · ainda na fila')}
+              </p>
             </div>
           ))}
         </div>
+      )}
+    </Card>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+//  Tarefas do cliente.
+//
+//  Havia DUAS listas de tarefa que não se falavam: esta, em
+//  `localStorage`, e a tabela `tasks` do servidor, que alimenta a aba
+//  Tarefas do sistema. Tarefa criada aqui nunca aparecia lá, e tarefa
+//  atribuída a outra pessoa não chegava nela — o que é o ponto inteiro de
+//  atribuir uma tarefa. Agora é uma lista só, a do servidor.
+// ─────────────────────────────────────────────────────────────────────────
+function TasksSection({ clientId, clientName, onTasksChange }) {
+  const { showToast } = useUiStore()
+  const meuId = useAuthStore(s => s.user?.id)
+  const [tarefas, setTarefas] = useState([])
+  const [equipe, setEquipe] = useState([])
+  const [carregando, setCarregando] = useState(true)
+  const [erro, setErro] = useState('')
+  const [salvando, setSalvando] = useState(false)
+  const [form, setForm] = useState({ title: '', description: '', assignedTo: '', dueDate: '', priority: 'normal' })
+
+  const reload = async () => {
+    try { setTarefas(await api.tasks.list({ clientId })); setErro('') }
+    catch (e) { setErro(e?.message || 'Não foi possível ler as tarefas.') }
+    finally { setCarregando(false); onTasksChange?.() }
+  }
+  useEffect(() => {
+    reload()
+    api.settings.users().then(r => {
+      const us = Array.isArray(r) ? r : (r?.data ?? [])
+      setEquipe(us)
+      setForm(d => ({ ...d, assignedTo: d.assignedTo || meuId || us[0]?.id || '' }))
+    }).catch(() => {})
+  }, [clientId])
+
+  const criar = async () => {
+    if (!form.title.trim()) { showToast('Informe o título da tarefa.', 'error'); return }
+    setSalvando(true)
+    try {
+      await api.tasks.create({ ...form, clientId })
+      const para = equipe.find(u => u.id === form.assignedTo)?.name
+      registrar('tarefa', `criou a tarefa "${form.title}"${para ? ` para ${para}` : ''}${clientName ? ` (${clientName})` : ''}`, { cliente: clientName })
+      setForm({ title: '', description: '', assignedTo: meuId || '', dueDate: '', priority: 'normal' })
+      showToast('Tarefa criada.', 'success')
+      await reload()
+    } catch (e) { showToast(e?.message || 'NÃO foi possível criar a tarefa.', 'error') }
+    finally { setSalvando(false) }
+  }
+
+  const mudarStatus = async (t, status) => {
+    try { await api.tasks.setStatus(t.id, status); await reload() }
+    catch (e) { showToast(e?.message || 'Não foi possível mudar o status.', 'error') }
+  }
+  const apagar = async (t) => {
+    if (!window.confirm(`Apagar a tarefa "${t.title}"?`)) return
+    try { await api.tasks.remove(t.id); await reload() }
+    catch (e) { showToast(e?.message || 'Não foi possível apagar.', 'error') }
+  }
+
+  const abertas = tarefas.filter(t => t.status !== 'done')
+  const feitas  = tarefas.filter(t => t.status === 'done')
+  const hoje = new Date().toISOString().slice(0, 10)
+
+  const Linha = ({ t, concluida }) => {
+    const atrasada = !concluida && t.dueDate && t.dueDate < hoje
+    return (
+      <div className={`rounded-xl border p-4 group ${concluida
+        ? 'border-[var(--border)] bg-[var(--bg-hover)] opacity-75'
+        : atrasada ? 'border-red-500/40 bg-red-500/5' : 'border-[var(--border)] bg-[var(--bg-card)]'}`}>
+        <div className="flex items-start justify-between gap-2">
+          <p className={`text-sm font-medium text-[var(--text-primary)] ${concluida ? 'line-through' : ''}`}>
+            {t.title}
+            {atrasada && <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded-full bg-red-500/20 text-red-300">atrasada</span>}
+          </p>
+          <button onClick={() => apagar(t)}
+            className="text-[var(--text-muted)] hover:text-red-400 text-xs opacity-0 group-hover:opacity-100 flex-shrink-0">✕</button>
+        </div>
+        {t.description && <p className="text-xs text-[var(--text-secondary)] mt-1 whitespace-pre-wrap">{t.description}</p>}
+
+        {/* Quem fez, para quem, prazo, sobre o quê — tudo numa linha só. */}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-2 text-[10px] text-[var(--text-muted)]">
+          <span>De <b className="text-[var(--text-secondary)]">{t.createdByName || '—'}</b></span>
+          <span>→ Para <b className="text-[var(--text-secondary)]">{t.assignedToName || 'ninguém'}</b></span>
+          <span>Criada {formatDate(t.createdAt)}</span>
+          {t.dueDate && <span className={atrasada ? 'text-red-300 font-semibold' : ''}>Prazo {formatDate(t.dueDate)}</span>}
+          {concluida && t.completedAt && <span>Concluída {formatDate(t.completedAt)}</span>}
+        </div>
+
+        <div className="flex justify-end mt-2">
+          {concluida
+            ? <button onClick={() => mudarStatus(t, 'todo')} className="text-[10px] text-[var(--text-muted)] hover:text-brand-500">Reabrir</button>
+            : <button onClick={() => mudarStatus(t, 'done')}
+                className="text-xs px-2.5 py-1 rounded-lg bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25">✓ Concluir</button>}
+        </div>
       </div>
-    </div>
+    )
+  }
+
+  return (
+    <Card className="p-5 space-y-4">
+      <div className="flex items-end justify-between gap-3 flex-wrap">
+        <div>
+          <h3 className="text-sm font-semibold text-[var(--text-primary)]">✅ Tarefas</h3>
+          <p className="text-[11px] text-[var(--text-muted)] mt-0.5">
+            {abertas.length} em aberto{feitas.length ? ` · ${feitas.length} concluída${feitas.length > 1 ? 's' : ''}` : ''}
+            {' · '}aparecem também na aba Tarefas do sistema, para quem recebeu.
+          </p>
+        </div>
+      </div>
+
+      {/* Criar */}
+      <div className="rounded-xl border border-[var(--border)] p-4 space-y-3">
+        <Input label="Sobre o que é a tarefa" value={form.title}
+          onChange={e => setForm(d => ({ ...d, title: e.target.value }))}
+          placeholder="Ex: Protocolar petição inicial" />
+        <Textarea label="Detalhes (opcional)" rows={2} value={form.description}
+          onChange={e => setForm(d => ({ ...d, description: e.target.value }))}
+          placeholder="O que precisa ser feito..." />
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <Select label="Para quem" value={form.assignedTo}
+            onChange={e => setForm(d => ({ ...d, assignedTo: e.target.value }))}>
+            <option value="">Ninguém em especial</option>
+            {equipe.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+          </Select>
+          <Input label="Prazo" type="date" value={form.dueDate}
+            onChange={e => setForm(d => ({ ...d, dueDate: e.target.value }))} />
+          <Select label="Prioridade" value={form.priority}
+            onChange={e => setForm(d => ({ ...d, priority: e.target.value }))}>
+            <option value="low">Baixa</option>
+            <option value="normal">Normal</option>
+            <option value="high">Alta</option>
+          </Select>
+        </div>
+        <Button variant="primary" size="sm" className="w-full" onClick={criar} disabled={salvando}>
+          {salvando ? 'Criando…' : 'Criar tarefa'}
+        </Button>
+      </div>
+
+      {carregando && <p className="text-[11px] text-[var(--text-muted)]">Carregando…</p>}
+      {erro && <p className="text-[11px] text-red-400">⚠️ {erro}</p>}
+
+      {!carregando && !erro && !tarefas.length && (
+        <div className="text-center py-8 border border-dashed border-[var(--border)] rounded-xl text-xs text-[var(--text-muted)]">
+          Nenhuma tarefa ainda para {clientName || 'este cliente'}.
+        </div>
+      )}
+
+      <div className="space-y-2">
+        {abertas.map(t => <Linha key={t.id} t={t} concluida={false} />)}
+        {feitas.map(t => <Linha key={t.id} t={t} concluida />)}
+      </div>
+    </Card>
   )
 }
 
 // ── Main ClientPage ────────────────────────────────────────────────
 export default function ClientPage() {
+  // Quem chega aqui pelo botão "Atender" da fila traz, no estado da
+  // navegação, o atendimento que acabou de ser chamado. É o que permite
+  // mostrar a observação que a pessoa deixou na recepção sem ter de
+  // procurar no histórico — e sem perguntar de novo o que ela veio fazer.
+  const location = useLocation()
+  const atendimentoEmCurso = location.state?.atendimento ?? null
+
   const { id } = useParams()
   const navigate = useNavigate()
   const { showToast } = useUiStore()
@@ -1717,10 +1904,14 @@ export default function ClientPage() {
   const [tab,       setTab]      = useState('cadastro')
   const [openTasks, setOpenTasks]= useState(0)
 
-  const refreshOpenTasks = () => {
+  // O contador da aba Tarefas lia a lista antiga do localStorage, que não
+  // existe mais. Agora conta as do servidor — as mesmas que a pessoa vê.
+  const refreshOpenTasks = async () => {
     if (!id) return
-    const t = lsGet(`pj_ctasks_${id}`, [])
-    setOpenTasks(t.filter(x => x.status !== 'concluida').length)
+    try {
+      const t = await api.tasks.list({ clientId: id })
+      setOpenTasks((Array.isArray(t) ? t : []).filter(x => x.status !== 'done').length)
+    } catch { /* o selo é enfeite: não vale derrubar a tela por ele */ }
   }
 
   useEffect(() => {
@@ -2107,18 +2298,35 @@ export default function ClientPage() {
                     </Card>
                 </div>
 
-                {/* Observações: embaixo e em largura cheia */}
+                {/* Anotação livre sobre o cliente: não é histórico, é o que
+                    vale sempre — como a pessoa gosta de ser chamada, horário
+                    que ela atende, quem acompanha. Salva com o cadastro. */}
                 <Card className="p-5 space-y-3">
-                      <h3 className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wide">Observações</h3>
-                      <Textarea value={data.notes} onChange={set('notes')} rows={5} placeholder="Anotações relevantes sobre o cliente, histórico de atendimento, particularidades do caso..." />
-                    </Card>
+                  <div>
+                    <h3 className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wide">📝 Anotações sobre o cliente</h3>
+                    <p className="text-[11px] text-[var(--text-muted)] mt-0.5">
+                      O que vale sempre. Para registrar algo datado, use as Observações mais abaixo.
+                    </p>
+                  </div>
+                  <Textarea value={data.notes} onChange={set('notes')} rows={4}
+                    placeholder="Ex.: prefere ser chamada de Dona Dair · atende só de manhã · o filho Marcelo acompanha" />
+                </Card>
 
-                {/* E abaixo delas as tarefas e os atendimentos deste cliente.
-                    As tarefas continuam tendo aba própria; aqui aparecem junto
-                    do cadastro, que é onde ela está olhando ao atender. */}
+                {/* Atendimentos e cálculos lado a lado, logo acima das
+                    observações — é o que se consulta de relance ao atender. */}
+                {!isNew && (
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 items-start">
+                    <AtendimentosCard clientId={id} clientName={data.name} destaque={atendimentoEmCurso} />
+                    <CalculosCard clientId={id} clientName={data.name} />
+                  </div>
+                )}
+
+                {/* Observações: uma lista só, à mão e da recepção juntas. */}
+                {!isNew && <ObservacoesSection clientId={id} clientName={data.name} />}
+
+                {/* Tarefas por último e em largura cheia — é o bloco que
+                    recebe mais espaço, porque é o que move o trabalho. */}
                 {!isNew && <TasksSection clientId={id} clientName={data.name} onTasksChange={refreshOpenTasks} />}
-                {!isNew && <AtendimentosCard clientId={id} clientName={data.name} />}
-                {!isNew && <CalculosCard clientId={id} clientName={data.name} />}
 
                 <div className="flex justify-end gap-3 pt-2">
                   <Button variant="secondary" onClick={() => navigate(-1)}>Cancelar</Button>

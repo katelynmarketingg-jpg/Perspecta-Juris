@@ -450,3 +450,57 @@ export const calculations = pgTable('calculations', {
   tenantIdx: index('calculations_tenant_idx').on(t.tenantId, t.createdAt),
   clientIdx: index('calculations_client_idx').on(t.clientId),
 }))
+
+// ── Atendimentos e fila ───────────────────────────────────────
+//
+//  A fila vivia em `localStorage`. Num escritório com recepção isso é
+//  inútil: quem cadastra na recepção é o único que enxerga a fila, e o
+//  advogado na sala nunca vê que tem gente esperando por ele. O campo
+//  "atender com" existia e não servia para nada, porque a pessoa
+//  escolhida não via o chamado.
+//
+//  Agora a fila é do escritório, e o histórico de atendimentos de cada
+//  cliente fica junto com ele.
+export const serviceVisits = pgTable('service_visits', {
+  id:         text('id').primaryKey(),
+  tenantId:   text('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),
+  // Cliente avulso (quem chegou sem cadastro) fica só com o nome.
+  clientId:   text('client_id').references(() => clients.id, { onDelete: 'set null' }),
+  clientName: text('client_name').notNull(),
+  // Para quem é o atendimento. O id liga ao acesso; o nome fica
+  // congelado para o histórico sobreviver à exclusão do acesso.
+  assignedToId:   text('assigned_to_id').references(() => users.id, { onDelete: 'set null' }),
+  assignedToName: text('assigned_to_name'),
+  tipo:       text('tipo').notNull().default('presencial'),
+  obs:        text('obs'),
+  status:     text('status').notNull().default('fila'),   // fila | atendido
+  createdAt:      text('created_at').notNull(),
+  createdById:    text('created_by_id').references(() => users.id, { onDelete: 'set null' }),
+  createdByName:  text('created_by_name'),
+  attendedAt:     text('attended_at'),
+  attendedById:   text('attended_by_id').references(() => users.id, { onDelete: 'set null' }),
+  attendedByName: text('attended_by_name'),
+  updatedAt:  text('updated_at').notNull(),
+}, t => ({
+  tenantIdx: index('visits_tenant_idx').on(t.tenantId, t.status, t.createdAt),
+  clientIdx: index('visits_client_idx').on(t.clientId),
+}))
+
+// ── Observações do cliente (mural da equipe) ──────────────────
+//
+//  Eram `localStorage`, por cliente e por navegador: cada pessoa via um
+//  mural diferente, e "todos da equipe podem ver" — que é o que a própria
+//  tela prometia — era mentira. Agora é do escritório.
+export const clientNotes = pgTable('client_notes', {
+  id:        text('id').primaryKey(),
+  tenantId:  text('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),
+  clientId:  text('client_id').notNull().references(() => clients.id, { onDelete: 'cascade' }),
+  assunto:   text('assunto'),
+  texto:     text('texto').notNull(),
+  createdById:   text('created_by_id').references(() => users.id, { onDelete: 'set null' }),
+  createdByName: text('created_by_name'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+}, t => ({
+  clientIdx: index('client_notes_client_idx').on(t.clientId, t.createdAt),
+}))

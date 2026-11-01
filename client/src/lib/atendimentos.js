@@ -1,16 +1,16 @@
 // ─────────────────────────────────────────────────────────────────────────
-//  Fila de atendimento + histórico de atendimentos (presencial/online/WhatsApp).
-//  Escritórios com recepção: cadastra o cliente e coloca na fila para um
-//  colaborador; ao "atender", registra o tempo de espera e quem atendeu.
-//  Por empresa (tenant).
+//  Fila de atendimento e histórico de atendimentos.
+//
+//  Isto aqui era `localStorage`. Num escritório com recepção, não servia:
+//  quem cadastrava era o único a enxergar a fila. A pessoa escolhida em
+//  "atender com" nunca via o chamado, porque ele estava no navegador da
+//  recepção. Agora é o servidor, e todo mundo vê a mesma fila.
+//
+//  As funções são ASSÍNCRONAS. As telas que usam esta biblioteca precisam
+//  esperar o servidor — e, quando a escrita falhar, dizer que falhou em
+//  vez de fingir que deu certo.
 // ─────────────────────────────────────────────────────────────────────────
-import { currentTenantId } from './tenant'
-
-const KEY = 'pj_atendimentos'
-const lsGet = (k, fb) => { try { return JSON.parse(localStorage.getItem(k) ?? 'null') ?? fb } catch { return fb } }
-const lsSet = (k, v) => localStorage.setItem(k, JSON.stringify(v))
-const uid = () => 'at_' + Math.random().toString(36).slice(2, 10)
-const authUser = () => lsGet('pj_auth', {})?.state?.user ?? {}
+import api from './api'
 
 export const TIPOS_ATEND = [
   { value: 'presencial', label: 'Presencial', icone: '🏢' },
@@ -20,66 +20,41 @@ export const TIPOS_ATEND = [
 ]
 export const tipoAtend = (t) => TIPOS_ATEND.find(x => x.value === t) ?? { label: t, icone: '•' }
 
-function all() {
-  const tid = currentTenantId()
-  return lsGet(KEY, []).filter(a => (a.tenantId ?? 'tenant_demo') === tid)
-}
-function saveAll(rows) {
-  // preserva registros de outros tenants
-  const tid = currentTenantId()
-  const outros = lsGet(KEY, []).filter(a => (a.tenantId ?? 'tenant_demo') !== tid)
-  lsSet(KEY, [...rows, ...outros])
-}
+/** Quem está esperando agora, por ordem de chegada. */
+export const getFila = () => api.atendimentos.list({ status: 'fila' })
 
-export function getFila() {
-  return all().filter(a => a.status === 'fila').sort((a, b) => a.criadoEm.localeCompare(b.criadoEm))
-}
-export function filaCount() { return getFila().length }
-
-export function addToFila({ clientId, clientName, colaborador, tipo = 'presencial', obs }) {
-  const rows = all()
-  rows.unshift({
-    id: uid(), tenantId: currentTenantId(), clientId: clientId ?? null, clientName: clientName ?? '',
-    colaborador: colaborador ?? '', tipo, obs: obs ?? '', status: 'fila',
-    criadoEm: new Date().toISOString(), atendidoPor: null, atendidoEm: null,
-    criadoPor: authUser().name ?? 'Recepção',
-  })
-  saveAll(rows)
+/**
+ * Quantos estão na fila — para o selo do menu.
+ * Devolve 0 quando o servidor não responde: um selo é enfeite, e não vale
+ * derrubar a tela inteira por causa dele.
+ */
+export async function filaCount() {
+  try { return (await getFila()).length } catch { return 0 }
 }
 
-export function atender(id, atendidoPor) {
-  saveAll(all().map(a => a.id === id
-    ? { ...a, status: 'atendido', atendidoPor: atendidoPor ?? authUser().name ?? '—', atendidoEm: new Date().toISOString() }
-    : a))
-}
+/** Coloca alguém na fila. `assignedToId` é o acesso que vai atender. */
+export const addToFila = ({ clientId, clientName, assignedToId, tipo = 'presencial', obs }) =>
+  api.atendimentos.create({ clientId: clientId ?? null, clientName, assignedToId: assignedToId ?? null, tipo, obs, status: 'fila' })
 
-export function removerAtendimento(id) { saveAll(all().filter(a => a.id !== id)) }
+/** Chama da fila. Quem clica é quem atendeu. */
+export const atender = (id) => api.atendimentos.atender(id)
 
-// Registra um atendimento já concluído (online/WhatsApp/telefone respondido)
-export function registrarAtendimento({ clientId, clientName, tipo = 'online', obs }) {
-  const now = new Date().toISOString()
-  const rows = all()
-  rows.unshift({
-    id: uid(), tenantId: currentTenantId(), clientId: clientId ?? null, clientName: clientName ?? '',
-    colaborador: '', tipo, obs: obs ?? '', status: 'atendido',
-    criadoEm: now, atendidoPor: authUser().name ?? '—', atendidoEm: now, criadoPor: authUser().name ?? '—',
-  })
-  saveAll(rows)
-}
+export const removerAtendimento = (id) => api.atendimentos.remove(id)
 
-export function getAtendimentosCliente(clientId) {
-  return all().filter(a => a.clientId === clientId).sort((a, b) => b.criadoEm.localeCompare(a.criadoEm))
-}
+/** Registra um atendimento já concluído (online, WhatsApp respondido). */
+export const registrarAtendimento = ({ clientId, clientName, tipo = 'online', obs }) =>
+  api.atendimentos.create({ clientId: clientId ?? null, clientName, tipo, obs, status: 'atendido' })
 
+/** Histórico de um cliente, do mais recente para o mais antigo. */
+export const getAtendimentosCliente = (clientId) => api.atendimentos.list({ clientId })
+
+/** Relatório dos concluídos, com filtro por período e por quem atendeu. */
+export const getRelatorioAtendimentos = ({ de, ate, atendidoPor } = {}) =>
+  api.atendimentos.list({ status: 'atendido', ...(de ? { de } : {}), ...(ate ? { ate } : {}), ...(atendidoPor ? { atendidoPor } : {}) })
+
+/** Minutos entre a chegada e o atendimento (ou até agora, se ainda espera). */
 export function esperaMin(a) {
-  const fim = a.atendidoEm ? new Date(a.atendidoEm) : new Date()
-  return Math.max(0, Math.round((fim - new Date(a.criadoEm)) / 60000))
-}
-
-// Relatório de atendimentos concluídos, com filtro por período (YYYY-MM-DD).
-export function getRelatorioAtendimentos({ de, ate } = {}) {
-  let rows = all().filter(a => a.status === 'atendido')
-  if (de)  rows = rows.filter(a => (a.atendidoEm ?? '') >= de)
-  if (ate) rows = rows.filter(a => (a.atendidoEm ?? '') <= ate + 'T23:59:59')
-  return rows.sort((a, b) => (b.atendidoEm ?? '').localeCompare(a.atendidoEm ?? ''))
+  if (!a?.createdAt) return 0
+  const fim = a.attendedAt ? new Date(a.attendedAt) : new Date()
+  return Math.max(0, Math.round((fim - new Date(a.createdAt)) / 60000))
 }

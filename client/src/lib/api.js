@@ -258,6 +258,7 @@ const api = {
     create:    (d)    => api.post('/api/tasks', d),
     update:    (id,d) => api.put(`/api/tasks/${id}`, d),
     setStatus: (id,s) => api.post(`/api/tasks/${id}/status`, { status: s }),
+    remove:    (id)   => api.delete(`/api/tasks/${id}`),
   },
 
   financial: {
@@ -295,6 +296,20 @@ const api = {
     create: (d)     => api.post('/api/calculations', d),
     update: (id, d) => api.put(`/api/calculations/${id}`, d),
     remove: (id)    => api.delete(`/api/calculations/${id}`),
+  },
+
+  atendimentos: {
+    list:    (p)     => api.get('/api/atendimentos?' + new URLSearchParams(p ?? {})),
+    create:  (d)     => api.post('/api/atendimentos', d),
+    atender: (id)    => api.put(`/api/atendimentos/${id}/atender`, {}),
+    update:  (id, d) => api.put(`/api/atendimentos/${id}`, d),
+    remove:  (id)    => api.delete(`/api/atendimentos/${id}`),
+  },
+
+  clientNotes: {
+    list:   (clientId) => api.get('/api/client-notes?' + new URLSearchParams({ clientId })),
+    create: (d)        => api.post('/api/client-notes', d),
+    remove: (id)       => api.delete(`/api/client-notes/${id}`),
   },
 
   documents: {
