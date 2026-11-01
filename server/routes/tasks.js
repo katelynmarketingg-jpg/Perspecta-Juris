@@ -1,17 +1,22 @@
 import { nanoid } from 'nanoid'
 import { eq, and, desc } from 'drizzle-orm'
 import { db } from '../db/index.js'
-import { tasks, users } from '../db/schema.js'
+import { tasks, users, clients } from '../db/schema.js'
 import { alias as pgAlias } from 'drizzle-orm/pg-core'
 
 // Quem criou e para quem é — a tela precisa dos NOMES, e a tabela guarda
 // só os ids. Dois aliases para juntar o mesmo `users` duas vezes.
 const responsavel = pgAlias(users, 'responsavel')
 const autor = pgAlias(users, 'autor')
+const concluiu = pgAlias(users, 'concluiu')
 
 // Campos que o cliente pode mandar. Tudo que não estiver aqui é ignorado.
 const CAMPOS = ['processId', 'clientId', 'title', 'description', 'priority',
-                'status', 'assignedTo', 'dueDate', 'tags']
+                'status', 'assignedTo', 'dueDate', 'tags',
+                // Estes três a tela já mandava e o banco não tinha onde
+                // guardar: "Feita por" saía vazio e "Dar ciência" não
+                // guardava nada.
+                'completedBy', 'completedAt', 'acknowledged', 'acknowledgedAt']
 function limpar(body) {
   const out = {}
   for (const c of CAMPOS) if (body?.[c] !== undefined) out[c] = body[c]
@@ -41,12 +46,21 @@ export default async function taskRoutes(app) {
         assignedTo: tasks.assignedTo, createdBy: tasks.createdBy,
         dueDate: tasks.dueDate, completedAt: tasks.completedAt, tags: tasks.tags,
         createdAt: tasks.createdAt, updatedAt: tasks.updatedAt,
+        completedBy: tasks.completedBy,
+        acknowledged: tasks.acknowledged,
+        acknowledgedAt: tasks.acknowledgedAt,
         assignedToName: responsavel.name,
         createdByName: autor.name,
+        completedByName: concluiu.name,
+        // De qual cliente é a tarefa. A aba Tarefas não mostrava, então
+        // "Protocolar petição inicial" não dizia de quem.
+        clientName: clients.name,
       })
       .from(tasks)
       .leftJoin(responsavel, eq(responsavel.id, tasks.assignedTo))
       .leftJoin(autor, eq(autor.id, tasks.createdBy))
+      .leftJoin(concluiu, eq(concluiu.id, tasks.completedBy))
+      .leftJoin(clients, eq(clients.id, tasks.clientId))
       .where(and(...conditions))
       .orderBy(tasks.dueDate, desc(tasks.createdAt))
     return linhas
@@ -95,7 +109,17 @@ export default async function taskRoutes(app) {
     if (!row) return reply.code(404).send({ message: 'Tarefa não encontrada.' })
     const now = new Date().toISOString()
     const updates = { status: req.body.status, updatedAt: now }
-    if (req.body.status === 'done') updates.completedAt = now
+    if (req.body.status === 'done') {
+      updates.completedAt = now
+      updates.completedBy = req.user.userId
+    } else {
+      // Reabrir limpa a conclusão e a ciência: senão a tarefa volta a
+      // aberta carregando "feita por Fulano" de uma conclusão antiga.
+      updates.completedAt = null
+      updates.completedBy = null
+      updates.acknowledged = false
+      updates.acknowledgedAt = null
+    }
     await db.update(tasks).set(updates).where(eq(tasks.id, req.params.id))
     return { success: true, status: req.body.status }
   })

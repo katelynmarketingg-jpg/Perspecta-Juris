@@ -71,6 +71,13 @@
       "when": 1793486715620,
       "tag": "0009_famous_piledriver",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1793541305824,
+      "tag": "0010_natural_rictor",
+      "breakpoints": true
     }
   ]
 }

@@ -40,24 +40,36 @@ const URG = {
 // ── Modal: nova tarefa ──────────────────────────────────────────────
 function NewTaskModal({ users, currentUser, onCreated, onClose }) {
   const { showToast } = useUiStore()
-  const [form, setForm] = useState({ title: '', description: '', dueDate: '', priority: 'normal', assignedTo: currentUser?.id ?? '' })
+  const [form, setForm] = useState({ title: '', description: '', dueDate: '', priority: 'normal', assignedTo: currentUser?.id ?? '', clientId: '' })
+  const [clientes, setClientes] = useState([])
+  const [buscaCli, setBuscaCli] = useState('')
+  const [salvando, setSalvando] = useState(false)
   const set = (k) => (e) => setForm(d => ({ ...d, [k]: e.target.value }))
+
+  // A aba Tarefas não deixava escolher o cliente, então a tarefa nascia
+  // solta: "Protocolar petição inicial" sem dizer de quem.
+  useEffect(() => {
+    api.clients.list({ limit: 500 })
+      .then(r => setClientes(Array.isArray(r) ? r : (r?.data ?? [])))
+      .catch(() => {})
+  }, [])
+  const achados = clientes
+    .filter(c => !buscaCli || (c.name || '').toLowerCase().includes(buscaCli.toLowerCase()))
+    .slice(0, 8)
+  const clienteEscolhido = clientes.find(c => c.id === form.clientId)
 
   const save = async () => {
     if (!form.title.trim()) { showToast('Informe o título.', 'error'); return }
-    const assignee = users.find(u => u.id === form.assignedTo)
-    const payload = {
-      ...form, status: 'todo',
-      assignedToName: assignee?.name ?? currentUser?.name ?? '',
-      createdBy: currentUser?.id ?? '', createdByName: currentUser?.name ?? 'Usuário',
-      acknowledged: false,
-    }
+    setSalvando(true)
     try {
-      const created = await api.tasks.create(payload)
+      // O servidor é quem grava o autor e os nomes — mandar aqui só criava
+      // duas versões da verdade.
+      const created = await api.tasks.create({ ...form, status: 'todo' })
       showToast('Tarefa criada.', 'success')
       onCreated(created)
       onClose()
-    } catch (e) { showToast(e.message || 'Erro ao criar.', 'error') }
+    } catch (e) { showToast(e.message || 'A tarefa NÃO foi criada.', 'error') }
+    finally { setSalvando(false) }
   }
 
   const inputCls = 'w-full px-3 py-2 rounded-lg bg-[var(--bg-input)] border border-[var(--border)] text-sm text-[var(--text-primary)] focus:border-brand-500 focus:outline-none'
@@ -85,10 +97,39 @@ function NewTaskModal({ users, currentUser, onCreated, onClose }) {
             <select value={form.assignedTo} onChange={set('assignedTo')} className={inputCls}>
               {users.map(u => <option key={u.id} value={u.id}>{u.name}{u.id === currentUser?.id ? ' (eu)' : ''}</option>)}
             </select></div>
+          <div>
+            <label className="text-xs font-medium text-[var(--text-secondary)] mb-1 block">Cliente (opcional)</label>
+            {clienteEscolhido ? (
+              <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[var(--bg-input)] border border-[var(--border)]">
+                <span className="text-sm text-[var(--text-primary)] flex-1 truncate">{clienteEscolhido.name}</span>
+                <button onClick={() => { setForm(d => ({ ...d, clientId: '' })); setBuscaCli('') }}
+                  className="text-[var(--text-muted)] hover:text-red-400 text-xs">✕</button>
+              </div>
+            ) : (
+              <>
+                <input value={buscaCli} onChange={e => setBuscaCli(e.target.value)}
+                  className={inputCls} placeholder="🔍 Buscar cliente..." />
+                {buscaCli && (
+                  <div className="mt-1 max-h-32 overflow-y-auto rounded-lg border border-[var(--border)]">
+                    {achados.map(c => (
+                      <button key={c.id} onClick={() => setForm(d => ({ ...d, clientId: c.id }))}
+                        className="w-full text-left px-3 py-2 text-sm text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]">{c.name}</button>
+                    ))}
+                    {!achados.length && <p className="px-3 py-2 text-xs text-[var(--text-muted)]">Nenhum cliente com esse nome.</p>}
+                  </div>
+                )}
+                <span className="text-[10px] text-[var(--text-muted)] mt-1 block">
+                  Vinculando, a tarefa aparece também na ficha do cliente.
+                </span>
+              </>
+            )}
+          </div>
         </div>
         <div className="px-5 py-3 border-t border-[var(--border)] flex justify-end gap-2">
           <button onClick={onClose} className="px-3 py-2 rounded-lg text-sm text-[var(--text-muted)] hover:text-[var(--text-primary)]">Cancelar</button>
-          <button onClick={save} className="btn-primary text-sm">Criar tarefa</button>
+          <button onClick={save} disabled={salvando} className="btn-primary text-sm disabled:opacity-50">
+            {salvando ? 'Criando…' : 'Criar tarefa'}
+          </button>
         </div>
       </div>
     </div>
@@ -108,12 +149,18 @@ function TaskDetail({ task, currentUser, onAck, onReopen, onClose }) {
         </div>
         <div className="p-5 space-y-3">
           <p className="text-base font-semibold text-[var(--text-primary)]">{task.title}</p>
+          {task.clientName && (
+            <p className="text-xs text-accent-400">👤 Cliente: <b>{task.clientName}</b></p>
+          )}
           {task.description && <p className="text-sm text-[var(--text-secondary)] whitespace-pre-wrap">{task.description}</p>}
+          {/* Os mesmos campos que a ficha do cliente mostra: quem criou,
+              para quem é, o prazo e sobre o que é. */}
           <div className="text-xs text-[var(--text-muted)] space-y-1 pt-2 border-t border-[var(--border)]">
-            <p>De <b className="text-[var(--text-secondary)]">{task.createdByName}</b> → para <b className="text-[var(--text-secondary)]">{task.assignedToName}</b></p>
+            <p>De <b className="text-[var(--text-secondary)]">{task.createdByName || '—'}</b> → para <b className="text-[var(--text-secondary)]">{task.assignedToName || 'ninguém'}</b></p>
+            <p>Criada em {fmtDate(task.createdAt)}</p>
             {task.dueDate && <p>Prazo: {fmtDate(task.dueDate)}</p>}
-            {resolvida && <p className="text-emerald-400">✔ Finalizada por {task.completedByName} · {fmtDate(task.completedAt)}</p>}
-            {task.acknowledged && <p className="text-blue-400">👁 Ciência dada por {task.createdByName}</p>}
+            {resolvida && <p className="text-emerald-400">✔ Finalizada{task.completedByName ? ` por ${task.completedByName}` : ''} · {fmtDate(task.completedAt)}</p>}
+            {task.acknowledged && <p className="text-blue-400">👁 Ciência dada{task.acknowledgedAt ? ` em ${fmtDate(task.acknowledgedAt)}` : ''}</p>}
           </div>
         </div>
         <div className="px-5 py-3 border-t border-[var(--border)] flex justify-end gap-2 flex-wrap">
@@ -158,14 +205,24 @@ export default function TasksPage() {
     }
   }
   const moveTask = (t, newStatus) => {
-    const extra = newStatus === 'done'
-      ? { status: 'done', completedBy: currentUser?.id, completedByName: currentUser?.name, completedAt: new Date().toISOString() }
-      : { status: newStatus, completedBy: null, completedAt: null }
-    patch(t.id, extra)
+    // Quem concluiu é quem clicou — isso o servidor sabe pela sessão, e é
+    // mais confiável do que o cliente mandar o próprio nome.
+    concluir(t.id, newStatus)
     if (newStatus === 'done' && t.status !== 'done') registrar('tarefa', `concluiu a tarefa "${t.title}"`, { clienteId: t.clientId })
   }
+  // Usa a rota de status, que é quem sabe gravar o autor da conclusão e
+  // limpar a ciência ao reabrir.
+  const concluir = async (id, status) => {
+    const antes = tasks
+    setTasks(prev => prev.map(t => t.id === id ? { ...t, status } : t))
+    try { await api.tasks.setStatus(id, status); await load() }
+    catch (err) {
+      setTasks(antes)
+      showToast(`A tarefa NÃO foi alterada: ${err?.message ?? 'falha de conexão'}.`, 'error')
+    }
+  }
   const ack    = (id) => patch(id, { acknowledged: true, acknowledgedAt: new Date().toISOString() })
-  const reopen = (id) => patch(id, { status: 'todo', acknowledged: false, completedBy: null, completedAt: null })
+  const reopen = (id) => concluir(id, 'todo')
 
   // filtro por escopo
   const escopo = tasks.filter(t => {
@@ -236,14 +293,21 @@ export default function TasksPage() {
                     <div key={t.id} onClick={() => setDetail(t)}
                       className={`rounded-xl border border-[var(--border)] border-l-2 ${URG[u].bar} bg-[var(--bg-card)] p-3.5 space-y-2 hover:border-brand-500/40 transition-colors cursor-pointer`}>
                       <div className="flex items-start justify-between gap-2">
-                        <p className={`text-sm font-medium leading-snug ${t.status === 'done' ? 'text-emerald-400' : 'text-[var(--text-primary)]'}`}>{t.title}</p>
+                        <div className="min-w-0">
+                          <p className={`text-sm font-medium leading-snug ${t.status === 'done' ? 'text-emerald-400' : 'text-[var(--text-primary)]'}`}>{t.title}</p>
+                          {/* De qual cliente é. Sem isto, "Protocolar petição
+                              inicial" não dizia de quem. */}
+                          {t.clientName && (
+                            <p className="text-[10px] text-accent-400 truncate mt-0.5">👤 {t.clientName}</p>
+                          )}
+                        </div>
                         {t.status !== 'done' && t.dueDate && (
                           <span className={`flex-shrink-0 text-[10px] px-1.5 py-0.5 rounded-full ${URG[u].chip}`}>{diasAte(t.dueDate) <= 0 ? 'hoje' : `${diasAte(t.dueDate)}d`}</span>
                         )}
                       </div>
                       {t.description && <p className="text-[11px] text-[var(--text-muted)] line-clamp-2">{t.description}</p>}
 
-                      {t.status === 'done' && <p className="text-[10px] text-emerald-400">✔ Feita por {t.completedByName}</p>}
+                      {t.status === 'done' && t.completedByName && <p className="text-[10px] text-emerald-400">✔ Feita por {t.completedByName}</p>}
                       {resolvidaParaMim && !t.acknowledged && (
                         <span className="inline-block text-[10px] px-1.5 py-0.5 rounded-full bg-blue-500/15 text-blue-400">🔵 Resolvida — dar ciência</span>
                       )}
@@ -252,7 +316,9 @@ export default function TasksPage() {
                       <div className="flex items-center justify-between gap-2 pt-1">
                         <div className="flex items-center gap-1.5 min-w-0">
                           {t.dueDate && <span className={`flex items-center gap-1 text-[10px] ${u === 'hoje' ? 'text-red-400' : u === 'semana' ? 'text-amber-400' : u === 'depois' ? 'text-orange-300' : 'text-[var(--text-muted)]'}`}><IconClock size={10} /> {fmtDate(t.dueDate)}</span>}
-                          <span className="text-[10px] text-[var(--text-muted)] truncate">{filtro === 'enviadas' ? `→ ${t.assignedToName}` : t.assignedToName}</span>
+                          <span className="text-[10px] text-[var(--text-muted)] truncate">
+                            {t.createdByName || '—'} → {t.assignedToName || 'ninguém'}
+                          </span>
                         </div>
                         <div className="flex gap-1 flex-shrink-0" onClick={e => e.stopPropagation()}>
                           {col.key === 'respondida' ? (

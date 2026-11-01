@@ -155,6 +155,55 @@ let idTarefa
   eq(semTitulo.status, 400, 'tarefa sem título é recusada')
 }
 
+console.log('\n── 5b. A tarefa diz de qual cliente é ────────────────')
+{
+  // Era o relato: tarefa criada na aba Tarefas não dizia de quem era.
+  // Agora as duas telas mostram os mesmos campos — a única diferença é
+  // que a tarefa aparece nos dois lugares.
+  const lista = await j(await fetch(`${BASE}/api/tasks`, { headers: H(tkAlice) }))
+  const t = lista.find(x => x.id === idTarefa)
+  eq(t.clientName, 'Dair Souza Oliveira', 'a listagem geral traz o nome do cliente')
+  for (const campo of ['createdByName', 'assignedToName', 'dueDate', 'title']) {
+    if (t[campo]) ok(`e também ${campo}`)
+    else bad(`faltou ${campo} na listagem geral`)
+  }
+
+  // Tarefa sem cliente continua valendo — nem toda tarefa é de alguém.
+  const solta = await j(await fetch(`${BASE}/api/tasks`, { method: 'POST', headers: H(tkAlice),
+    body: JSON.stringify({ title: 'Organizar o arquivo' }) }))
+  const todas = await j(await fetch(`${BASE}/api/tasks`, { headers: H(tkAlice) }))
+  eq(todas.find(x => x.id === solta.id).clientName, null, 'tarefa sem cliente fica sem nome, não quebra')
+}
+
+console.log('\n── 5c. Concluir e dar ciência gravam de verdade ──────')
+{
+  // A tela mostrava "Feita por Fulano" e um botão "Dar ciência" — mas as
+  // colunas não existiam na tabela. O nome saía vazio e o botão não
+  // guardava nada: toda tarefa concluída ficava para sempre na coluna
+  // "aguardando ciência".
+  const r = await fetch(`${BASE}/api/tasks/${idTarefa}/status`, { method: 'POST', headers: H(tkAlice),
+    body: JSON.stringify({ status: 'done' }) })
+  eq(r.status, 200, 'a advogada conclui a tarefa')
+  let t = (await j(await fetch(`${BASE}/api/tasks?clientId=cli_at_1`, { headers: H(tkRita) }))).find(x => x.id === idTarefa)
+  eq(t.completedByName, 'Alice Advogada', 'grava QUEM concluiu')
+  if (t.completedAt) ok('e quando'); else bad('não gravou a hora da conclusão')
+  eq(t.acknowledged, false, 'ainda sem ciência')
+
+  const ciencia = await fetch(`${BASE}/api/tasks/${idTarefa}`, { method: 'PUT', headers: H(tkRita),
+    body: JSON.stringify({ acknowledged: true, acknowledgedAt: new Date().toISOString() }) })
+  eq(ciencia.status, 200, 'quem criou dá ciência')
+  t = (await j(await fetch(`${BASE}/api/tasks?clientId=cli_at_1`, { headers: H(tkRita) }))).find(x => x.id === idTarefa)
+  eq(t.acknowledged, true, 'e a ciência fica gravada — antes sumia')
+
+  // Reabrir limpa a conclusão e a ciência, senão a tarefa volta a aberta
+  // carregando "feita por Fulano" de uma conclusão antiga.
+  await fetch(`${BASE}/api/tasks/${idTarefa}/status`, { method: 'POST', headers: H(tkRita),
+    body: JSON.stringify({ status: 'todo' }) })
+  t = (await j(await fetch(`${BASE}/api/tasks?clientId=cli_at_1`, { headers: H(tkRita) }))).find(x => x.id === idTarefa)
+  eq(t.acknowledged, false, 'reabrir limpa a ciência')
+  eq(t.completedByName, null, 'e quem concluiu')
+}
+
 console.log('\n── 6. Isolamento entre escritórios ───────────────────')
 {
   const fila = await j(await fetch(`${BASE}/api/atendimentos`, { headers: H(tkBruno) }))

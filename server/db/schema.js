@@ -215,7 +215,14 @@ export const tasks = pgTable('tasks', {
   assignedTo:  text('assigned_to').references(() => users.id),
   createdBy:   text('created_by').references(() => users.id),
   dueDate:     text('due_date'),
-  completedAt: text('completed_at'),
+  // Quem concluiu e quando quem mandou deu ciência. A tela já mostrava
+  // "Feita por Fulano" e "Dar ciência" — mas essas colunas não existiam,
+  // então o nome saía vazio e o botão não guardava nada: toda tarefa
+  // concluída ficava para sempre na coluna "aguardando ciência".
+  completedBy:    text('completed_by').references(() => users.id, { onDelete: 'set null' }),
+  completedAt:    text('completed_at'),
+  acknowledged:   boolean('acknowledged').notNull().default(false),
+  acknowledgedAt: text('acknowledged_at'),
   tags:        jsonb('tags').notNull().default([]),
   createdAt:   text('created_at').notNull(),
   updatedAt:   text('updated_at').notNull(),
